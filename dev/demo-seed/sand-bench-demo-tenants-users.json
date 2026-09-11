@@ -1,0 +1,202 @@
+{
+  "schemaVersion": "1.0",
+  "purpose": "DEVELOPMENT_AND_DEMO_ONLY",
+  "warning": "These fictional accounts and temporary plaintext passwords must never be enabled in production or pre-production. Import through the credential service so passwords are Argon2id-hashed, require immediate change, and are not retained in logs.",
+  "activationGuard": {
+    "requiredEnvironmentVariable": "ALLOW_DEMO_IDENTITIES=true",
+    "allowedEnvironmentClassifications": ["development", "demo"],
+    "forbiddenEnvironmentClassifications": ["uat", "preproduction", "production"],
+    "failApplicationStartupWhenForbidden": true
+  },
+  "tenants": [
+    {
+      "id": "tenant_demo_acme",
+      "name": "Acme Assurance Demo",
+      "slug": "acme-demo",
+      "status": "active",
+      "primaryRegion": "australiaeast",
+      "isolationTier": "shared_rls",
+      "defaultLocale": "en-AU",
+      "defaultTimezone": "Australia/Sydney",
+      "localAuthenticationEnabled": true,
+      "functionalAccessProfiles": [
+        {
+          "id": "fap_acme_tenant_admin",
+          "name": "Tenant Administrator",
+          "permissions": ["admin:tenant", "users:read", "users:write", "access-profiles:manage", "admin:clients", "admin:branding", "audit:read"]
+        },
+        {
+          "id": "fap_acme_rule_analyst",
+          "name": "Rule Analyst",
+          "permissions": ["catalogue:read", "artefacts:read", "artefacts:write", "rules:create", "runs:execute", "results:read"]
+        },
+        {
+          "id": "fap_acme_rule_reviewer",
+          "name": "Rule Reviewer",
+          "permissions": ["catalogue:read", "artefacts:read", "rules:review", "rules:approve", "results:read", "reports:generate"]
+        },
+        {
+          "id": "fap_acme_test_operator",
+          "name": "Test Operator",
+          "permissions": ["catalogue:read", "artefacts:read", "runs:execute", "runs:operate", "results:read", "reports:generate"]
+        },
+        {
+          "id": "fap_acme_auditor",
+          "name": "Auditor",
+          "permissions": ["catalogue:read", "artefacts:read", "results:read", "evidence:read", "audit:read"]
+        }
+      ],
+      "dataAccessProfiles": [
+        {
+          "id": "dap_acme_all_masked",
+          "name": "All Environments - Masked",
+          "environments": ["development", "test", "uat", "preproduction", "production"],
+          "businessUnits": ["*"],
+          "messageFamilies": ["*"],
+          "maximumClassification": "confidential",
+          "payloadVisibility": "masked",
+          "exportLevel": "masked"
+        },
+        {
+          "id": "dap_acme_nonprod_unmasked",
+          "name": "Non-production - Unmasked Synthetic Data",
+          "environments": ["development", "test", "uat"],
+          "businessUnits": ["*"],
+          "messageFamilies": ["*"],
+          "maximumClassification": "internal",
+          "payloadVisibility": "unmasked",
+          "exportLevel": "full",
+          "conditions": {
+            "syntheticDataOnly": true
+          }
+        },
+        {
+          "id": "dap_acme_audit_metadata",
+          "name": "Audit Metadata Only",
+          "environments": ["development", "test", "uat", "preproduction", "production"],
+          "businessUnits": ["*"],
+          "messageFamilies": ["*"],
+          "maximumClassification": "restricted",
+          "payloadVisibility": "metadata_only",
+          "exportLevel": "metadata_only"
+        }
+      ],
+      "users": [
+        {
+          "id": "user_demo_acme_admin",
+          "username": "admin.acme",
+          "email": "admin.acme@example.invalid",
+          "displayName": "Amelia Admin",
+          "temporaryPassword": "DemoOnly!Admin-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": true,
+          "functionalAccessProfileIds": ["fap_acme_tenant_admin"],
+          "dataAccessProfileIds": ["dap_acme_all_masked"]
+        },
+        {
+          "id": "user_demo_acme_analyst",
+          "username": "analyst.acme",
+          "email": "analyst.acme@example.invalid",
+          "displayName": "Riley Analyst",
+          "temporaryPassword": "DemoOnly!Analyst-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": false,
+          "functionalAccessProfileIds": ["fap_acme_rule_analyst"],
+          "dataAccessProfileIds": ["dap_acme_nonprod_unmasked"]
+        },
+        {
+          "id": "user_demo_acme_reviewer",
+          "username": "reviewer.acme",
+          "email": "reviewer.acme@example.invalid",
+          "displayName": "Morgan Reviewer",
+          "temporaryPassword": "DemoOnly!Reviewer-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": true,
+          "functionalAccessProfileIds": ["fap_acme_rule_reviewer"],
+          "dataAccessProfileIds": ["dap_acme_all_masked"]
+        },
+        {
+          "id": "user_demo_acme_operator",
+          "username": "operator.acme",
+          "email": "operator.acme@example.invalid",
+          "displayName": "Taylor Operator",
+          "temporaryPassword": "DemoOnly!Operator-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": true,
+          "functionalAccessProfileIds": ["fap_acme_test_operator"],
+          "dataAccessProfileIds": ["dap_acme_nonprod_unmasked"]
+        },
+        {
+          "id": "user_demo_acme_auditor",
+          "username": "auditor.acme",
+          "email": "auditor.acme@example.invalid",
+          "displayName": "Jordan Auditor",
+          "temporaryPassword": "DemoOnly!Auditor-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": true,
+          "functionalAccessProfileIds": ["fap_acme_auditor"],
+          "dataAccessProfileIds": ["dap_acme_audit_metadata"]
+        }
+      ]
+    },
+    {
+      "id": "tenant_demo_northstar",
+      "name": "Northstar Payments Demo",
+      "slug": "northstar-demo",
+      "status": "active",
+      "primaryRegion": "australiaeast",
+      "isolationTier": "shared_rls",
+      "defaultLocale": "en-AU",
+      "defaultTimezone": "Australia/Sydney",
+      "localAuthenticationEnabled": true,
+      "functionalAccessProfiles": [
+        {
+          "id": "fap_northstar_tenant_admin",
+          "name": "Tenant Administrator",
+          "permissions": ["admin:tenant", "users:read", "users:write", "access-profiles:manage", "admin:clients", "admin:branding", "audit:read"]
+        },
+        {
+          "id": "fap_northstar_test_designer",
+          "name": "Test Designer",
+          "permissions": ["catalogue:read", "artefacts:read", "artefacts:write", "datasets:manage", "cases:manage", "suites:manage", "scenarios:manage", "results:read"]
+        }
+      ],
+      "dataAccessProfiles": [
+        {
+          "id": "dap_northstar_nonprod_masked",
+          "name": "Northstar Non-production - Masked",
+          "environments": ["development", "test", "uat"],
+          "businessUnits": ["payments"],
+          "messageFamilies": ["pacs", "pain"],
+          "maximumClassification": "confidential",
+          "payloadVisibility": "masked",
+          "exportLevel": "masked"
+        }
+      ],
+      "users": [
+        {
+          "id": "user_demo_northstar_admin",
+          "username": "admin.northstar",
+          "email": "admin.northstar@example.invalid",
+          "displayName": "Casey Northstar Admin",
+          "temporaryPassword": "DemoOnly!Northstar-Admin-2026#",
+          "mustChangePassword": true,
+          "mfaRequired": true,
+          "functionalAccessProfileIds": ["fap_northstar_tenant_admin"],
+          "dataAccessProfileIds": ["dap_northstar_nonprod_masked"]
+        },
+        {
+          "id": "user_demo_northstar_designer",
+          "username": "designer.northstar",
+          "email": "designer.northstar@example.invalid",
+          "displayName": "Avery Test Designer",
+          "temporaryPassword": "DemoOnly!Designer-2026#Change",
+          "mustChangePassword": true,
+          "mfaRequired": false,
+          "functionalAccessProfileIds": ["fap_northstar_test_designer"],
+          "dataAccessProfileIds": ["dap_northstar_nonprod_masked"]
+        }
+      ]
+    }
+  ]
+}

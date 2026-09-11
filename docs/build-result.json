@@ -1,0 +1,6 @@
+{
+  "result": "passed",
+  "scope": "Container images built locally, including dependency lockfiles where manifests exist",
+  "repository": "gavriq-test-engine",
+  "verifiedOn": "2026-09-12"
+}

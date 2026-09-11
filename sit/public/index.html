@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sand Bench Test Engine</title>
+<style>
+:root{font:14px/1.5 system-ui,sans-serif;color:#222b31;background:#f5f7f8;--line:#d4dde0;--green:#116b54;--red:#b32c32}
+*{box-sizing:border-box;letter-spacing:0}body{margin:0}header{padding:16px 24px;background:#202d34;color:white;display:flex;align-items:center;gap:20px;flex-wrap:wrap}h1{font-size:20px;margin:0}h2{font-size:17px}nav{display:flex;gap:8px}button,select,input{font:inherit;min-height:36px;border:1px solid var(--line);border-radius:4px;padding:6px 10px;background:white;color:#223038}button{cursor:pointer}button:disabled{cursor:default;opacity:.45}nav button.active{background:#b8e3d1}a{color:#096b76}main{max-width:1400px;margin:auto;padding:20px 24px}section{margin:0 0 24px;padding:0 0 20px;border-bottom:1px solid var(--line)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}.toolbar input{flex:1;min-width:180px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}th{font-size:12px;color:#51636b}td{overflow-wrap:anywhere}td:first-child{min-width:200px}.muted{font-size:12px;color:#5c6b72}.status{font-weight:600}.passed{color:var(--green)}.failed{color:var(--red)}.skipped,.todo{color:#906215}.stats{display:flex;gap:30px;flex-wrap:wrap}.stats strong{display:block;font-size:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#e9eef0;padding:16px;max-height:480px;overflow:auto}#error{color:var(--red)}dialog{width:min(900px,94vw);max-height:90vh;border:1px solid var(--line);border-radius:6px;padding:20px}dialog::backdrop{background:#0008}.dialog-head{display:flex;justify-content:space-between;align-items:center;gap:15px}#targets{color:#cad9df;font-size:12px}#run-status{margin-left:auto}@media(max-width:600px){main{padding:14px}header{padding:14px}select,input{max-width:100%}.toolbar>*{flex:1 1 100%}td,th{padding:8px}.stats{gap:18px}nav{width:100%}nav button{flex:1}}
+@media(max-width:600px){.table-wrap:has(#cases-tbody) table,.table-wrap:has(#cases-tbody) tbody,.table-wrap:has(#cases-tbody) tr,.table-wrap:has(#cases-tbody) td{display:block;width:100%;min-width:0}.table-wrap:has(#cases-tbody) thead{display:none}#cases-tbody tr{padding:12px 0;border-bottom:1px solid var(--line)}#cases-tbody td{border:0;padding:4px 0}#cases-tbody td:nth-child(2)::before{content:'Use case: ';font-weight:600}#cases-tbody td:nth-child(3)::before{content:'Layer: ';font-weight:600}#cases-tbody td:nth-child(4)::before{content:'Result: ';font-weight:600}#cases-tbody td:nth-child(5)::before{content:'Select: ';font-weight:600}.case-open{text-align:left;max-width:100%}}
+</style>
+</head>
+<body>
+<header><h1>Sand Bench Test Engine</h1><nav aria-label="Main"><button data-nav="dashboard">Dashboard</button><button data-nav="cases">Test Cases</button><button data-nav="runs">Test Runs</button></nav><span id="run-status">idle</span><span id="targets"></span></header>
+<main><p id="error" role="alert"></p><div id="page-body"></div><details><summary>Execution log</summary><pre id="log"></pre></details></main>
+<dialog id="detail"><div class="dialog-head"><h2 id="detail-title"></h2><button id="close-detail" aria-label="Close detail">Close</button></div><div id="detail-body"></div></dialog>
+<script>
+const state={page:'dashboard',catalog:[],specifications:[],useCases:[],runs:[],status:{},filter:{q:'',useCase:new URLSearchParams(location.search).get('useCaseId')||'',kind:'all'},selected:new Set()};
+if(state.filter.useCase)state.page='cases';
+const el=id=>document.getElementById(id);
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function request(url,options){const r=await fetch(url,options);const body=await r.json();if(!r.ok)throw new Error(body.reason||body.error?.message||body.error||('Request failed: '+r.status));return body}
+const cases=()=>[...state.catalog.flatMap(f=>f.cases),...state.specifications];
+function outcome(row){return row.status||(row.passed?'passed':'failed')}
+function lastResult(id){return state.status.lastRun?.results?.find(r=>r.id===id)}
+function badge(row){const status=row?outcome(row):'not run';return '<span class="status '+esc(status)+'">'+esc(status)+'</span>'}
+function useCaseLink(row){return row.useCaseId?'<a href="/api/use-cases/'+encodeURIComponent(row.useCaseId)+'" target="_blank" rel="noopener">'+esc(row.useCaseId)+' - '+esc(row.useCaseName)+'</a>':'<span class="muted">Not mapped</span>'}
+function error(err){el('error').textContent=err.message||String(err)}
+async function runFilter(filter){
+ try{await request('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(filter)});await refresh()}catch(err){error(err)}
+}
+window.runFilter=runFilter;
+function filteredCases(){const f=state.filter,q=f.q.toLowerCase();return cases().filter(c=>(!f.useCase||c.useCaseId===f.useCase)&&(f.kind==='all'||(f.kind==='executable'?c.executable:c.executable===false))&&(!q||[c.name,c.useCaseId,c.useCaseName,c.file].join(' ').toLowerCase().includes(q)))}
+function render(){
+ document.querySelectorAll('[data-nav]').forEach(b=>b.classList.toggle('active',b.dataset.nav===state.page));
+ if(state.page==='cases')renderCases();else if(state.page==='runs')renderRuns();else renderDashboard();
+}
+function renderDashboard(){
+ const run=state.status.lastRun;
+ el('page-body').innerHTML='<section><h2>Regression coverage</h2><div class="stats"><div><strong>'+state.useCases.length+'</strong>Use cases</div><div><strong>'+state.catalog.flatMap(f=>f.cases).length+'</strong>Executable checks</div><div><strong>'+state.specifications.length+'</strong>Specification scenarios</div></div></section><section><h2>Latest run</h2>'+(run?'<div class="stats"><div><strong>'+run.total+'</strong>Total</div><div class="passed"><strong>'+run.passed+'</strong>Passed</div><div class="failed"><strong>'+run.failed+'</strong>Failed</div><div><strong>'+(run.skipped||0)+'</strong>Skipped / todo</div></div>':'<p>No recorded run.</p>')+'<p><button id="run-all" '+(state.status.running?'disabled':'')+'>Run all executable checks</button></p></section>';
+ el('run-all').onclick=()=>runFilter({});
+}
+function renderCases(){
+ const f=state.filter;
+ el('page-body').innerHTML='<section><h2>Test cases</h2><div class="toolbar"><select id="f-use-case" aria-label="Use case"><option value="">All use cases</option>'+state.useCases.map(uc=>'<option value="'+esc(uc.id)+'" '+(uc.id===f.useCase?'selected':'')+'>'+esc(uc.id+' - '+uc.name)+'</option>').join('')+'</select><select id="f-kind" aria-label="Execution readiness"><option value="all">All cases</option><option value="executable">Executable</option><option value="specification">Specification only</option></select><input id="f-q" type="search" aria-label="Search cases" placeholder="Search cases or use cases" value="'+esc(f.q)+'"><button id="run-selected">Run selected</button></div><div class="table-wrap"><table><thead><tr><th>Test case</th><th>Use case</th><th>Layer</th><th>Result</th><th>Select</th></tr></thead><tbody id="cases-tbody"></tbody></table></div></section>';
+ el('f-kind').value=f.kind;
+ el('f-use-case').onchange=e=>{f.useCase=e.target.value;rows()};
+ el('f-kind').onchange=e=>{f.kind=e.target.value;rows()};
+ el('f-q').oninput=e=>{f.q=e.target.value;rows()};
+ el('run-selected').onclick=()=>{const names=cases().filter(c=>c.executable&&state.selected.has(c.id)).map(c=>c.name);if(names.length)runFilter({caseNames:names})};
+ rows();
+}
+function rows(){
+ el('cases-tbody').innerHTML=filteredCases().map(c=>'<tr><td><button class="case-open" data-id="'+esc(c.id)+'">'+esc(c.name)+'</button><div class="muted">'+esc(c.id)+'</div></td><td>'+useCaseLink(c)+'</td><td>'+esc(c.layer||c.type)+'</td><td>'+(c.executable?badge(lastResult(c.id)):'<span class="muted">Specification only</span>')+'</td><td>'+(c.executable?'<input type="checkbox" aria-label="Select '+esc(c.name)+'" data-select="'+esc(c.id)+'" '+(state.selected.has(c.id)?'checked':'')+'>':'')+'</td></tr>').join('')||'<tr><td colspan="5">No matching cases.</td></tr>';
+ document.querySelectorAll('[data-select]').forEach(cb=>cb.onchange=()=>{if(cb.checked)state.selected.add(cb.dataset.select);else state.selected.delete(cb.dataset.select);selection()});
+ document.querySelectorAll('.case-open').forEach(b=>b.onclick=()=>showCase(b.dataset.id));selection();
+}
+function selection(){el('run-selected').disabled=!state.selected.size||state.status.running;el('run-selected').textContent='Run selected ('+state.selected.size+')'}
+function showCase(id){
+ const c=cases().find(row=>row.id===id);if(!c)return;
+ el('detail-title').textContent=c.name;
+ const steps=(c.steps||[]).map(s=>'<li>'+esc(typeof s==='string'?s:s.action+' -> '+s.expect)+'</li>').join('');
+ el('detail-body').innerHTML='<p>'+useCaseLink(c)+'</p><p>'+esc(c.coverageScope|| (c.executable?'Executable regression check':'Acceptance specification; implementation pending'))+'</p><p class="muted">'+esc(c.file)+'</p><ol>'+steps+'</ol>'+(c.executable?'<button id="run-case" '+(state.status.running?'disabled':'')+'>Run this case</button>':'');
+ if(c.executable)el('run-case').onclick=()=>{el('detail').close();runFilter({caseNames:[c.name]})};el('detail').showModal();
+}
+function renderRuns(){
+ el('page-body').innerHTML='<section><h2>Run history</h2><div class="table-wrap"><table><thead><tr><th>Started</th><th>Passed</th><th>Failed</th><th>Skipped / todo</th><th>Duration</th><th></th></tr></thead><tbody>'+state.runs.map((r,i)=>'<tr><td>'+esc(new Date(r.at).toLocaleString())+'</td><td>'+r.passed+'</td><td>'+r.failed+'</td><td>'+(r.skipped||0)+'</td><td>'+Math.round(r.durationMs/1000)+'s</td><td><button data-run="'+i+'">View results</button></td></tr>').join('')+'</tbody></table></div></section>';
+ document.querySelectorAll('[data-run]').forEach(b=>b.onclick=()=>showRun(state.runs[Number(b.dataset.run)]));
+}
+function showRun(run){
+ el('detail-title').textContent='Run '+new Date(run.at).toLocaleString();
+ el('detail-body').innerHTML='<div class="table-wrap"><table><thead><tr><th>Case</th><th>Use case</th><th>Result</th></tr></thead><tbody>'+(run.results||[]).map(r=>'<tr><td>'+esc(r.name||r.id)+'</td><td>'+useCaseLink(r)+'</td><td>'+badge(r)+'</td></tr>').join('')+'</tbody></table></div>';el('detail').showModal();
+}
+async function refresh(){
+ try{
+ const [status,catalog,specifications,useCases,runs]=await Promise.all(['/api/status','/api/cases','/api/specifications','/api/use-cases','/api/runs'].map(p=>request(p)));
+ state.status=status;state.catalog=catalog.data;state.specifications=specifications.data;state.useCases=useCases.data;state.runs=runs.data;
+ el('run-status').textContent=status.running?'running: '+(status.currentFile||'starting'):'idle';
+ el('log').textContent=(status.log||[]).join('\n');
+ if(state.page!=='cases'||!el('f-q'))render();else rows();
+ }catch(err){error(err)}
+}
+document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{state.page=b.dataset.nav;render()});
+el('close-detail').onclick=()=>el('detail').close();
+refresh();setInterval(refresh,4000);
+request('/api/targets').then(r=>el('targets').textContent=r.data.map(t=>t.name.split(' ')[0]+': '+(t.reachable?'up':'down')).join(' | ')).catch(error);
+</script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+{
+  "repository": "gavriq-test-engine",
+  "started": true,
+  "probes": [
+    {
+      "endpoint": "/health",
+      "passed": true
+    },
+    {
+      "endpoint": "/api/cases",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "scope": "Application startup, owned dependency startup, health and one read workflow. Broker round trips, external integrations, persistence and full acceptance tests not covered.",
+  "commands": [
+    {
+      "command": [
+        "up",
+        "-d",
+        "--no-build",
+        "--wait",
+        "--wait-timeout",
+        "90",
+        "sit-console"
+      ],
+      "exit": 0,
+      "output": " Volume gavriq-test-engine-smoke_sandbench-logs Creating \n Network gavriq-test-engine-smoke_default Creating \n Volume gavriq-test-engine-smoke_sandbench-logs Creating \n Volume gavriq-test-engine-smoke_sit-console-data Creating \n Volume gavriq-test-engine-smoke_sit-console-data Creating \n Volume gavriq-test-engine-smoke_sit-console-db-data Creating \n Volume gavriq-test-engine-smoke_sit-console-db-data Creating \n Network gavriq-test-engine-smoke_default Creating \n Volume gavriq-test-engine-smoke_sit-console-db-data Created \n Volume gavriq-test-engine-smoke_sit-console-db-data Created \n Volume gavriq-test-engine-smoke_sit-console-data Created \n Volume gavriq-test-engine-smoke_sit-console-data Created \n Volume gavriq-test-engine-smoke_sandbench-logs Created \n Volume gavriq-test-engine-smoke_sandbench-logs Created \n Network gavriq-test-engine-smoke_default Created \n Network gavriq-test-engine-smoke_default Created \n Container gavriq-test-engine-smoke-sit-console-db-1 Creating \n Container gavriq-test-engine-smoke-sit-console-db-1 Created \n Container gavriq-test-engine-smoke-sit-console-1 Creating \n Container gavriq-test-engine-smoke-sit-console-1 Created \n Container gavriq-test-engine-smoke-sit-console-db-1 Starting \n Container gavriq-test-engine-smoke-sit-console-db-1 Started \n Container gavriq-test-engine-smoke-sit-console-db-1 Waiting \n Container gavriq-test-engine-smoke-sit-console-db-1 Healthy \n Container gavriq-test-engine-smoke-sit-console-1 Starting \n Container gavriq-test-engine-smoke-sit-console-1 Started \n Container gavriq-test-engine-smoke-sit-console-db-1 Waiting \n Container gavriq-test-engine-smoke-sit-console-1 Waiting \n Container gavriq-test-engine-smoke-sit-console-db-1 Healthy \n Container gavriq-test-engine-smoke-sit-console-1 Healthy \n"
+    },
+    {
+      "command": [
+        "exec",
+        "-T",
+        "sit-console",
+        "node",
+        "--input-type=module",
+        "-e",
+        "const r=await fetch('http://127.0.0.1:8098/health');console.log(r.status);if(!r.ok)process.exit(1);console.log((await r.text()).slice(0,200));"
+      ],
+      "exit": 0,
+      "output": "200\n{\"status\":\"ok\",\"service\":\"sit-console\",\"product\":\"GARVIQ Test Engine\",\"decoupled\":true,\"port\":8098}\n"
+    },
+    {
+      "command": [
+        "exec",
+        "-T",
+        "sit-console",
+        "node",
+        "--input-type=module",
+        "-e",
+        "const r=await fetch('http://127.0.0.1:8098/api/cases');console.log(r.status);if(!r.ok)process.exit(1);console.log((await r.text()).slice(0,200));"
+      ],
+      "exit": 0,
+      "output": "200\n{\"data\":[{\"file\":\"sit/cases/00-health.sit.ts\",\"fileName\":\"00-health.sit.ts\",\"type\":\"health\",\"cases\":[{\"id\":\"00-health__main-application-is-healthy-and-reports-its-deployed-classif\",\"name\":\"main applic\n"
+    },
+    {
+      "command": [
+        "down",
+        "--timeout",
+        "10"
+      ],
+      "exit": 0,
+      "output": " Container gavriq-test-engine-smoke-sit-console-1 Stopping \n Container gavriq-test-engine-smoke-sit-console-1 Stopped \n Container gavriq-test-engine-smoke-sit-console-1 Removing \n Container gavriq-test-engine-smoke-sit-console-1 Removed \n Container gavriq-test-engine-smoke-sit-console-db-1 Stopping \n Container gavriq-test-engine-smoke-sit-console-db-1 Stopped \n Container gavriq-test-engine-smoke-sit-console-db-1 Removing \n Container gavriq-test-engine-smoke-sit-console-db-1 Removed \n Network gavriq-test-engine-smoke_default Removing \n Network gavriq-test-engine-smoke_default Removed \n"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "repository": "gavriq-test-engine",
+  "check": "container build and mount closure",
+  "problems": [],
+  "passed": true
+}
