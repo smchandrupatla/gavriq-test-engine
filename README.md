@@ -1,11 +1,13 @@
-# gavriq-test-engine
+# Gavriq Test Engine
+
 Post-deployment integration and browser test runner with execution history and use-case traceability.
 
+## Status
 
-## Project status
+Repository name approved. Application extraction and independent deployment validation are pending. This documentation scaffold does not yet contain a deployable application.
 
-This private repository has been created for application separation. Application source extraction, dependency packaging, database setup, and independent deployment validation are pending. It is not yet a deployable release.
+## Ownership
 
-## License
+Copyright (c) 2026 Gavriq Labs Global. All rights reserved.
 
-Copyright (c) 2026 Gavriq Labs Global. All rights reserved. Proprietary software; see [LICENSE](LICENSE). Third-party components retain their respective licenses.
+Private repository. Proprietary first-party software. See LICENSE. Third-party components remain subject to their respective licenses.
