@@ -1,0 +1,22 @@
+{
+  "service": "sit-console",
+  "port": 8098,
+  "scope": "Container readiness, HTTP health, landing page where available, and a representative application read contract. These are repository deployment tests, not the full inherited acceptance suite. Broker round trips, external integrations, and persistence are not covered.",
+  "checks": [
+    {
+      "name": "sit-console health",
+      "path": "/health"
+    },
+    {
+      "name": "sit-console read contract",
+      "path": "/api/cases",
+      "array": "data"
+    },
+    {
+      "name": "sit-console landing page",
+      "path": "/",
+      "kind": "html"
+    }
+  ],
+  "suites": []
+}
