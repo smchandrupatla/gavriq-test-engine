@@ -41,3 +41,7 @@ Copyright (c) 2026 Gavriq Labs Global. All rights reserved. Proprietary software
 ## Validation snapshot
 
 Passed: application startup, health endpoint, and one application read endpoint. See [verification](docs/verification.md) and [smoke evidence](docs/smoke-result.json).
+
+## Repository Docker scripts
+
+Use scripts/docker-deploy.ps1 (PowerShell) or sh scripts/docker-deploy.sh to build and deploy. Matching docker-health, docker-test, and docker-stop scripts are included. See [Docker deployment instructions](docs/docker-deployment.md) for configuration, isolated validation, and test coverage.
