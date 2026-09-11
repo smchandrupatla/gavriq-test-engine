@@ -1,0 +1,13 @@
+{
+  "channel": [
+    {
+      "name": "DEV.APP.SVRCONN",
+      "type": "clientConnection",
+      "clientConnection": {
+        "queueManager": "QM1",
+        "connection": [{ "host": "127.0.0.1", "port": 1414 }]
+      }
+    }
+  ],
+  "comment": "Placeholder CCDT for IBM MQ Developer. Client put/get wiring is later. Default objects: QM1, DEV.APP.SVRCONN, DEV.QUEUE.1."
+}

@@ -1,0 +1,6086 @@
+{
+  "executionStatus": "No product step definitions are supplied. These are specification examples, not passing test results.",
+  "total": 310,
+  "cases": [
+    {
+      "id": "UC-overview-EX-001",
+      "useCaseId": "UC-overview",
+      "useCaseName": "See first-run status",
+      "page": "overview",
+      "name": "Empty tenant",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-overview",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the tenant has no runs",
+        "Overview loads successfully",
+        "the run count is zero and the New test run link remains available"
+      ],
+      "source": "docs/use-cases/features/UC-overview.feature"
+    },
+    {
+      "id": "UC-overview-EX-002",
+      "useCaseId": "UC-overview",
+      "useCaseName": "See first-run status",
+      "page": "overview",
+      "name": "Live counts",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-overview",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "three stored runs belong to this tenant",
+        "the run summary is displayed",
+        "the summary uses those records rather than the preview fixture"
+      ],
+      "source": "docs/use-cases/features/UC-overview.feature"
+    },
+    {
+      "id": "UC-overview-EX-003",
+      "useCaseId": "UC-overview",
+      "useCaseName": "See first-run status",
+      "page": "overview",
+      "name": "Failed load",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-overview",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "bootstrap returns an error",
+        "Overview renders",
+        "an unavailable state appears instead of a fabricated successful zero count"
+      ],
+      "source": "docs/use-cases/features/UC-overview.feature"
+    },
+    {
+      "id": "UC-overview-EX-004",
+      "useCaseId": "UC-overview",
+      "useCaseName": "See first-run status",
+      "page": "overview",
+      "name": "Deep link",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-overview",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a summary has a configured destination",
+        "the operator activates it by keyboard",
+        "the matching workflow opens with focus available"
+      ],
+      "source": "docs/use-cases/features/UC-overview.feature"
+    },
+    {
+      "id": "UC-ruleBenchExisting-EX-001",
+      "useCaseId": "UC-ruleBenchExisting",
+      "useCaseName": "Browse the rule library",
+      "page": "ruleBenchExisting",
+      "name": "Empty library",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExisting",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "no rules exist",
+        "the library loads",
+        "no fabricated rule is listed"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExisting.feature"
+    },
+    {
+      "id": "UC-ruleBenchExisting-EX-002",
+      "useCaseId": "UC-ruleBenchExisting",
+      "useCaseName": "Browse the rule library",
+      "page": "ruleBenchExisting",
+      "name": "Rule identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExisting",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "two rules have the same display label",
+        "one rule is opened",
+        "its stable ID identifies the retrieved condition"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExisting.feature"
+    },
+    {
+      "id": "UC-ruleBenchExisting-EX-003",
+      "useCaseId": "UC-ruleBenchExisting",
+      "useCaseName": "Browse the rule library",
+      "page": "ruleBenchExisting",
+      "name": "No validation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExisting",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a rule has no validation result",
+        "its coverage is displayed",
+        "the absence is distinguished from a measured zero or perfect score"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExisting.feature"
+    },
+    {
+      "id": "UC-ruleBenchExisting-EX-004",
+      "useCaseId": "UC-ruleBenchExisting",
+      "useCaseName": "Browse the rule library",
+      "page": "ruleBenchExisting",
+      "name": "Read only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExisting",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the operator lacks write access",
+        "the rule is inspected",
+        "reading does not change its lifecycle"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExisting.feature"
+    },
+    {
+      "id": "UC-ruleBenchCreate-EX-001",
+      "useCaseId": "UC-ruleBenchCreate",
+      "useCaseName": "Create a detection rule",
+      "page": "ruleBenchCreate",
+      "name": "Threshold boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchCreate",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "amount_gte is configured at 100",
+        "99, 100 and 101 are evaluated",
+        "99 does not match while 100 and 101 match"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchCreate.feature"
+    },
+    {
+      "id": "UC-ruleBenchCreate-EX-002",
+      "useCaseId": "UC-ruleBenchCreate",
+      "useCaseName": "Create a detection rule",
+      "page": "ruleBenchCreate",
+      "name": "Missing kind",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchCreate",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "condition.kind is missing",
+        "Save rule is submitted",
+        "the request is rejected with no confirmed created rule"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchCreate.feature"
+    },
+    {
+      "id": "UC-ruleBenchCreate-EX-003",
+      "useCaseId": "UC-ruleBenchCreate",
+      "useCaseName": "Create a detection rule",
+      "page": "ruleBenchCreate",
+      "name": "Field equality",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchCreate",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "field_equals compares paymentMethod with TRANSFER",
+        "the field is absent",
+        "the missing value is not silently treated as TRANSFER"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchCreate.feature"
+    },
+    {
+      "id": "UC-ruleBenchCreate-EX-004",
+      "useCaseId": "UC-ruleBenchCreate",
+      "useCaseName": "Create a detection rule",
+      "page": "ruleBenchCreate",
+      "name": "Save uncertainty",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchCreate",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a valid save was submitted",
+        "the response is lost",
+        "the outcome is unconfirmed until the stored rule is checked"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchCreate.feature"
+    },
+    {
+      "id": "UC-ruleBenchExport-EX-001",
+      "useCaseId": "UC-ruleBenchExport",
+      "useCaseName": "Export rules for migration or backup",
+      "page": "ruleBenchExport",
+      "name": "Whole catalogue",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExport",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "three tenant rules exist",
+        "the current export endpoint is called",
+        "the package scope is identified as the tenant catalogue"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExport.feature"
+    },
+    {
+      "id": "UC-ruleBenchExport-EX-002",
+      "useCaseId": "UC-ruleBenchExport",
+      "useCaseName": "Export rules for migration or backup",
+      "page": "ruleBenchExport",
+      "name": "Wrong type",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExport",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the service returns an error document",
+        "download handling runs",
+        "no successful rule-pack download is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExport.feature"
+    },
+    {
+      "id": "UC-ruleBenchExport-EX-003",
+      "useCaseId": "UC-ruleBenchExport",
+      "useCaseName": "Export rules for migration or backup",
+      "page": "ruleBenchExport",
+      "name": "Empty export",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExport",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the library is empty",
+        "export is requested",
+        "the output does not contain prototype rules"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExport.feature"
+    },
+    {
+      "id": "UC-ruleBenchExport-EX-004",
+      "useCaseId": "UC-ruleBenchExport",
+      "useCaseName": "Export rules for migration or backup",
+      "page": "ruleBenchExport",
+      "name": "Lifecycle",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchExport",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a rule is In review",
+        "its definition is exported",
+        "the export does not promote the rule"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchExport.feature"
+    },
+    {
+      "id": "UC-msgViewSaved-EX-001",
+      "useCaseId": "UC-msgViewSaved",
+      "useCaseName": "Reuse a saved message definition",
+      "page": "msgViewSaved",
+      "name": "Saved identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgViewSaved",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "definition D1 exists",
+        "D1 is reopened",
+        "its stored type and version are used"
+      ],
+      "source": "docs/use-cases/features/UC-msgViewSaved.feature"
+    },
+    {
+      "id": "UC-msgViewSaved-EX-002",
+      "useCaseId": "UC-msgViewSaved",
+      "useCaseName": "Reuse a saved message definition",
+      "page": "msgViewSaved",
+      "name": "Empty library",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgViewSaved",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "no definitions exist",
+        "the list loads",
+        "no demonstration definitions appear"
+      ],
+      "source": "docs/use-cases/features/UC-msgViewSaved.feature"
+    },
+    {
+      "id": "UC-msgViewSaved-EX-003",
+      "useCaseId": "UC-msgViewSaved",
+      "useCaseName": "Reuse a saved message definition",
+      "page": "msgViewSaved",
+      "name": "Missing source",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgViewSaved",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "D1 references an unavailable schema",
+        "D1 is opened",
+        "the missing reference is disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-msgViewSaved.feature"
+    },
+    {
+      "id": "UC-msgViewSaved-EX-004",
+      "useCaseId": "UC-msgViewSaved",
+      "useCaseName": "Reuse a saved message definition",
+      "page": "msgViewSaved",
+      "name": "Draft distinction",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgViewSaved",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a record is a draft",
+        "the record is listed",
+        "it is not presented as a completed validated definition"
+      ],
+      "source": "docs/use-cases/features/UC-msgViewSaved.feature"
+    },
+    {
+      "id": "UC-msgDataFiles-EX-001",
+      "useCaseId": "UC-msgDataFiles",
+      "useCaseName": "Reuse a generated test data file",
+      "page": "msgDataFiles",
+      "name": "Saved batch",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgDataFiles",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "batch B has 20 stored messages",
+        "the list loads",
+        "B shows 20 stored messages"
+      ],
+      "source": "docs/use-cases/features/UC-msgDataFiles.feature"
+    },
+    {
+      "id": "UC-msgDataFiles-EX-002",
+      "useCaseId": "UC-msgDataFiles",
+      "useCaseName": "Reuse a generated test data file",
+      "page": "msgDataFiles",
+      "name": "No regeneration",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgDataFiles",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "B is selected",
+        "the operator opens it",
+        "the stored batch is used without silent randomisation"
+      ],
+      "source": "docs/use-cases/features/UC-msgDataFiles.feature"
+    },
+    {
+      "id": "UC-msgDataFiles-EX-003",
+      "useCaseId": "UC-msgDataFiles",
+      "useCaseName": "Reuse a generated test data file",
+      "page": "msgDataFiles",
+      "name": "Missing batch",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgDataFiles",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "B was removed",
+        "reuse is requested",
+        "the missing source is reported"
+      ],
+      "source": "docs/use-cases/features/UC-msgDataFiles.feature"
+    },
+    {
+      "id": "UC-msgDataFiles-EX-004",
+      "useCaseId": "UC-msgDataFiles",
+      "useCaseName": "Reuse a generated test data file",
+      "page": "msgDataFiles",
+      "name": "Isolation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgDataFiles",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "B belongs to another tenant",
+        "the current library loads",
+        "B is not exposed"
+      ],
+      "source": "docs/use-cases/features/UC-msgDataFiles.feature"
+    },
+    {
+      "id": "UC-msgExportTemplate-EX-001",
+      "useCaseId": "UC-msgExportTemplate",
+      "useCaseName": "Export a message template for reuse",
+      "page": "msgExportTemplate",
+      "name": "Headers",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgExportTemplate",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a type contains five fields",
+        "its CSV template is downloaded",
+        "the five actual field headers appear in order"
+      ],
+      "source": "docs/use-cases/features/UC-msgExportTemplate.feature"
+    },
+    {
+      "id": "UC-msgExportTemplate-EX-002",
+      "useCaseId": "UC-msgExportTemplate",
+      "useCaseName": "Export a message template for reuse",
+      "page": "msgExportTemplate",
+      "name": "Quoting",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgExportTemplate",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a header contains a comma",
+        "CSV is produced",
+        "it is quoted without creating an extra column"
+      ],
+      "source": "docs/use-cases/features/UC-msgExportTemplate.feature"
+    },
+    {
+      "id": "UC-msgExportTemplate-EX-003",
+      "useCaseId": "UC-msgExportTemplate",
+      "useCaseName": "Export a message template for reuse",
+      "page": "msgExportTemplate",
+      "name": "Unknown type",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgExportTemplate",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the selected code no longer exists",
+        "export is requested",
+        "an actionable error replaces the download"
+      ],
+      "source": "docs/use-cases/features/UC-msgExportTemplate.feature"
+    },
+    {
+      "id": "UC-msgExportTemplate-EX-004",
+      "useCaseId": "UC-msgExportTemplate",
+      "useCaseName": "Export a message template for reuse",
+      "page": "msgExportTemplate",
+      "name": "No mutation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgExportTemplate",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a type is registered",
+        "its template is downloaded",
+        "its definition remains unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-msgExportTemplate.feature"
+    },
+    {
+      "id": "UC-trActive-EX-001",
+      "useCaseId": "UC-trActive",
+      "useCaseName": "Watch runs currently in progress",
+      "page": "trActive",
+      "name": "Filter states",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trActive",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "one active and one completed run exist",
+        "Active runs loads",
+        "only the active run is classified as active"
+      ],
+      "source": "docs/use-cases/features/UC-trActive.feature"
+    },
+    {
+      "id": "UC-trActive-EX-002",
+      "useCaseId": "UC-trActive",
+      "useCaseName": "Watch runs currently in progress",
+      "page": "trActive",
+      "name": "Stream loss",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trActive",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "updates stop after a connection error",
+        "the detail remains open",
+        "the last known progress is identified as stale"
+      ],
+      "source": "docs/use-cases/features/UC-trActive.feature"
+    },
+    {
+      "id": "UC-trActive-EX-003",
+      "useCaseId": "UC-trActive",
+      "useCaseName": "Watch runs currently in progress",
+      "page": "trActive",
+      "name": "Terminal update",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trActive",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "an active run completes",
+        "the terminal update arrives",
+        "the run is no longer represented as running"
+      ],
+      "source": "docs/use-cases/features/UC-trActive.feature"
+    },
+    {
+      "id": "UC-trActive-EX-004",
+      "useCaseId": "UC-trActive",
+      "useCaseName": "Watch runs currently in progress",
+      "page": "trActive",
+      "name": "View parity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trActive",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the active set contains two IDs",
+        "tiles switch to table",
+        "the same two IDs remain represented"
+      ],
+      "source": "docs/use-cases/features/UC-trActive.feature"
+    },
+    {
+      "id": "UC-trAll-EX-001",
+      "useCaseId": "UC-trAll",
+      "useCaseName": "See every test run, any state",
+      "page": "trAll",
+      "name": "All states",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trAll",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "completed and failed runs exist",
+        "the list loads",
+        "both outcomes are represented"
+      ],
+      "source": "docs/use-cases/features/UC-trAll.feature"
+    },
+    {
+      "id": "UC-trAll-EX-002",
+      "useCaseId": "UC-trAll",
+      "useCaseName": "See every test run, any state",
+      "page": "trAll",
+      "name": "Pagination",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trAll",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "25 runs exist with page size 10",
+        "page one renders",
+        "ten visible rows are not described as the entire total"
+      ],
+      "source": "docs/use-cases/features/UC-trAll.feature"
+    },
+    {
+      "id": "UC-trAll-EX-003",
+      "useCaseId": "UC-trAll",
+      "useCaseName": "See every test run, any state",
+      "page": "trAll",
+      "name": "Empty",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trAll",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the store confirms zero runs",
+        "the list renders",
+        "an empty state appears"
+      ],
+      "source": "docs/use-cases/features/UC-trAll.feature"
+    },
+    {
+      "id": "UC-trAll-EX-004",
+      "useCaseId": "UC-trAll",
+      "useCaseName": "See every test run, any state",
+      "page": "trAll",
+      "name": "Unknown duration",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trAll",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "an end timestamp is missing",
+        "duration is shown",
+        "the duration is unknown rather than fabricated"
+      ],
+      "source": "docs/use-cases/features/UC-trAll.feature"
+    },
+    {
+      "id": "UC-trHistory-EX-001",
+      "useCaseId": "UC-trHistory",
+      "useCaseName": "Review completed run outcomes",
+      "page": "trHistory",
+      "name": "Terminal only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trHistory",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "one running and one completed record exist",
+        "history is filtered",
+        "the completed record qualifies and the running record does not"
+      ],
+      "source": "docs/use-cases/features/UC-trHistory.feature"
+    },
+    {
+      "id": "UC-trHistory-EX-002",
+      "useCaseId": "UC-trHistory",
+      "useCaseName": "Review completed run outcomes",
+      "page": "trHistory",
+      "name": "Failed terminal",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trHistory",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a run has failed",
+        "history renders",
+        "the failure remains visible"
+      ],
+      "source": "docs/use-cases/features/UC-trHistory.feature"
+    },
+    {
+      "id": "UC-trHistory-EX-003",
+      "useCaseId": "UC-trHistory",
+      "useCaseName": "Review completed run outcomes",
+      "page": "trHistory",
+      "name": "Duration",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trHistory",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "valid start and end timestamps are 60 seconds apart",
+        "duration is calculated",
+        "the measured duration is 60 seconds"
+      ],
+      "source": "docs/use-cases/features/UC-trHistory.feature"
+    },
+    {
+      "id": "UC-trHistory-EX-004",
+      "useCaseId": "UC-trHistory",
+      "useCaseName": "Review completed run outcomes",
+      "page": "trHistory",
+      "name": "No time",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trHistory",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the completion timestamp is absent",
+        "history renders the record",
+        "completion duration is not invented"
+      ],
+      "source": "docs/use-cases/features/UC-trHistory.feature"
+    },
+    {
+      "id": "UC-dsAll-EX-001",
+      "useCaseId": "UC-dsAll",
+      "useCaseName": "Browse saved datasets",
+      "page": "dsAll",
+      "name": "Zero rows",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsAll",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a dataset shell exists",
+        "the list loads",
+        "it is visible with zero assembled rows"
+      ],
+      "source": "docs/use-cases/features/UC-dsAll.feature"
+    },
+    {
+      "id": "UC-dsAll-EX-002",
+      "useCaseId": "UC-dsAll",
+      "useCaseName": "Browse saved datasets",
+      "page": "dsAll",
+      "name": "Stored count",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsAll",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "20 messages are assembled",
+        "the dataset is listed",
+        "its reported count reflects the stored collection"
+      ],
+      "source": "docs/use-cases/features/UC-dsAll.feature"
+    },
+    {
+      "id": "UC-dsAll-EX-003",
+      "useCaseId": "UC-dsAll",
+      "useCaseName": "Browse saved datasets",
+      "page": "dsAll",
+      "name": "Isolation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsAll",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "another tenant has a dataset",
+        "the current tenant lists datasets",
+        "the other dataset is excluded"
+      ],
+      "source": "docs/use-cases/features/UC-dsAll.feature"
+    },
+    {
+      "id": "UC-dsAll-EX-004",
+      "useCaseId": "UC-dsAll",
+      "useCaseName": "Browse saved datasets",
+      "page": "dsAll",
+      "name": "Reuse",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsAll",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "dataset D exists",
+        "D is assigned to a case",
+        "the stable dataset reference is used"
+      ],
+      "source": "docs/use-cases/features/UC-dsAll.feature"
+    },
+    {
+      "id": "UC-dsNew-EX-001",
+      "useCaseId": "UC-dsNew",
+      "useCaseName": "Create a new dataset",
+      "page": "dsNew",
+      "name": "Create shell",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsNew",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid name is supplied",
+        "dataset creation succeeds",
+        "a dataset identity exists without claiming assembly"
+      ],
+      "source": "docs/use-cases/features/UC-dsNew.feature"
+    },
+    {
+      "id": "UC-dsNew-EX-002",
+      "useCaseId": "UC-dsNew",
+      "useCaseName": "Create a new dataset",
+      "page": "dsNew",
+      "name": "Blank name",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsNew",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "name is blank",
+        "creation is submitted",
+        "validation rejects the name"
+      ],
+      "source": "docs/use-cases/features/UC-dsNew.feature"
+    },
+    {
+      "id": "UC-dsNew-EX-003",
+      "useCaseId": "UC-dsNew",
+      "useCaseName": "Create a new dataset",
+      "page": "dsNew",
+      "name": "Assembly",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsNew",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "two valid source items are selected",
+        "assembly succeeds",
+        "the returned messages and sequence can be inspected"
+      ],
+      "source": "docs/use-cases/features/UC-dsNew.feature"
+    },
+    {
+      "id": "UC-dsNew-EX-004",
+      "useCaseId": "UC-dsNew",
+      "useCaseName": "Create a new dataset",
+      "page": "dsNew",
+      "name": "Assembly failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-dsNew",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the shell exists but assembly fails",
+        "results render",
+        "the shell is not falsely described as a completed batch"
+      ],
+      "source": "docs/use-cases/features/UC-dsNew.feature"
+    },
+    {
+      "id": "UC-tcPool-EX-001",
+      "useCaseId": "UC-tcPool",
+      "useCaseName": "See every defined test case",
+      "page": "tcPool",
+      "name": "No dataset",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcPool",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a case has no datasetId",
+        "the pool loads",
+        "the case remains visible with the missing reference disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-tcPool.feature"
+    },
+    {
+      "id": "UC-tcPool-EX-002",
+      "useCaseId": "UC-tcPool",
+      "useCaseName": "See every defined test case",
+      "page": "tcPool",
+      "name": "No execution",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcPool",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a case has never run",
+        "its definition is inspected",
+        "it is not labelled as passed solely because it exists"
+      ],
+      "source": "docs/use-cases/features/UC-tcPool.feature"
+    },
+    {
+      "id": "UC-tcPool-EX-003",
+      "useCaseId": "UC-tcPool",
+      "useCaseName": "See every defined test case",
+      "page": "tcPool",
+      "name": "Stable identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcPool",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "two cases have similar names",
+        "one is opened",
+        "the request uses its ID"
+      ],
+      "source": "docs/use-cases/features/UC-tcPool.feature"
+    },
+    {
+      "id": "UC-tcPool-EX-004",
+      "useCaseId": "UC-tcPool",
+      "useCaseName": "See every defined test case",
+      "page": "tcPool",
+      "name": "Stale edit",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcPool",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the current ETag changed",
+        "an old If-Match updates the case",
+        "the stale write is rejected"
+      ],
+      "source": "docs/use-cases/features/UC-tcPool.feature"
+    },
+    {
+      "id": "UC-tsAll-EX-001",
+      "useCaseId": "UC-tsAll",
+      "useCaseName": "Manage every test suite",
+      "page": "tsAll",
+      "name": "Membership",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsAll",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a suite contains three distinct case IDs",
+        "it is inspected",
+        "the membership count is three"
+      ],
+      "source": "docs/use-cases/features/UC-tsAll.feature"
+    },
+    {
+      "id": "UC-tsAll-EX-002",
+      "useCaseId": "UC-tsAll",
+      "useCaseName": "Manage every test suite",
+      "page": "tsAll",
+      "name": "Accepted only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsAll",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the run endpoint returns 202 and a job ID",
+        "the response is displayed",
+        "it is described as accepted rather than passed"
+      ],
+      "source": "docs/use-cases/features/UC-tsAll.feature"
+    },
+    {
+      "id": "UC-tsAll-EX-003",
+      "useCaseId": "UC-tsAll",
+      "useCaseName": "Manage every test suite",
+      "page": "tsAll",
+      "name": "Delete grouping",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsAll",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a suite groups existing cases",
+        "the suite is deleted",
+        "the case definitions are not deleted by that grouping action"
+      ],
+      "source": "docs/use-cases/features/UC-tsAll.feature"
+    },
+    {
+      "id": "UC-tsAll-EX-004",
+      "useCaseId": "UC-tsAll",
+      "useCaseName": "Manage every test suite",
+      "page": "tsAll",
+      "name": "Empty suite",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsAll",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a suite has zero members",
+        "it is listed",
+        "it shows zero without a fabricated pass result"
+      ],
+      "source": "docs/use-cases/features/UC-tsAll.feature"
+    },
+    {
+      "id": "UC-tsNew-EX-001",
+      "useCaseId": "UC-tsNew",
+      "useCaseName": "Group test cases into a suite",
+      "page": "tsNew",
+      "name": "Three members",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsNew",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "three existing cases are selected",
+        "the suite is saved",
+        "reopening shows those case identities"
+      ],
+      "source": "docs/use-cases/features/UC-tsNew.feature"
+    },
+    {
+      "id": "UC-tsNew-EX-002",
+      "useCaseId": "UC-tsNew",
+      "useCaseName": "Group test cases into a suite",
+      "page": "tsNew",
+      "name": "Empty grouping",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsNew",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "no cases are selected",
+        "a named suite is saved",
+        "it is represented as zero members"
+      ],
+      "source": "docs/use-cases/features/UC-tsNew.feature"
+    },
+    {
+      "id": "UC-tsNew-EX-003",
+      "useCaseId": "UC-tsNew",
+      "useCaseName": "Group test cases into a suite",
+      "page": "tsNew",
+      "name": "Blank name",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsNew",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the name is blank",
+        "Save is submitted",
+        "creation fails validation"
+      ],
+      "source": "docs/use-cases/features/UC-tsNew.feature"
+    },
+    {
+      "id": "UC-tsNew-EX-004",
+      "useCaseId": "UC-tsNew",
+      "useCaseName": "Group test cases into a suite",
+      "page": "tsNew",
+      "name": "Reorder",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tsNew",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a suite contains A and B",
+        "the supported reorder operation stores B then A",
+        "the returned membership reflects that order"
+      ],
+      "source": "docs/use-cases/features/UC-tsNew.feature"
+    },
+    {
+      "id": "UC-schUpcoming-EX-001",
+      "useCaseId": "UC-schUpcoming",
+      "useCaseName": "See what's about to run",
+      "page": "schUpcoming",
+      "name": "Inside interval",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schUpcoming",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "an enabled schedule is due tomorrow",
+        "a seven-day upcoming view is evaluated",
+        "that schedule appears"
+      ],
+      "source": "docs/use-cases/features/UC-schUpcoming.feature"
+    },
+    {
+      "id": "UC-schUpcoming-EX-002",
+      "useCaseId": "UC-schUpcoming",
+      "useCaseName": "See what's about to run",
+      "page": "schUpcoming",
+      "name": "Outside interval",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schUpcoming",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a schedule is due in three weeks",
+        "a seven-day view is evaluated",
+        "it is excluded"
+      ],
+      "source": "docs/use-cases/features/UC-schUpcoming.feature"
+    },
+    {
+      "id": "UC-schUpcoming-EX-003",
+      "useCaseId": "UC-schUpcoming",
+      "useCaseName": "See what's about to run",
+      "page": "schUpcoming",
+      "name": "Paused",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schUpcoming",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a schedule is paused",
+        "upcoming execution is described",
+        "it is not promised to execute"
+      ],
+      "source": "docs/use-cases/features/UC-schUpcoming.feature"
+    },
+    {
+      "id": "UC-schUpcoming-EX-004",
+      "useCaseId": "UC-schUpcoming",
+      "useCaseName": "See what's about to run",
+      "page": "schUpcoming",
+      "name": "Clock context",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schUpcoming",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a next occurrence crosses a timezone boundary",
+        "it is displayed",
+        "the time basis is clear"
+      ],
+      "source": "docs/use-cases/features/UC-schUpcoming.feature"
+    },
+    {
+      "id": "UC-schAll-EX-001",
+      "useCaseId": "UC-schAll",
+      "useCaseName": "Manage every schedule",
+      "page": "schAll",
+      "name": "Distant occurrence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schAll",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a schedule is due next month",
+        "All schedules loads",
+        "it remains visible"
+      ],
+      "source": "docs/use-cases/features/UC-schAll.feature"
+    },
+    {
+      "id": "UC-schAll-EX-002",
+      "useCaseId": "UC-schAll",
+      "useCaseName": "Manage every schedule",
+      "page": "schAll",
+      "name": "Paused state",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schAll",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a persisted schedule is paused",
+        "it is displayed",
+        "its state is not labelled active"
+      ],
+      "source": "docs/use-cases/features/UC-schAll.feature"
+    },
+    {
+      "id": "UC-schAll-EX-003",
+      "useCaseId": "UC-schAll",
+      "useCaseName": "Manage every schedule",
+      "page": "schAll",
+      "name": "No run claim",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schAll",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a next time is calculated",
+        "the schedule is listed",
+        "no completed run is implied"
+      ],
+      "source": "docs/use-cases/features/UC-schAll.feature"
+    },
+    {
+      "id": "UC-schAll-EX-004",
+      "useCaseId": "UC-schAll",
+      "useCaseName": "Manage every schedule",
+      "page": "schAll",
+      "name": "Empty",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schAll",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the store confirms zero schedules",
+        "All schedules opens",
+        "the list contains no prototype entries"
+      ],
+      "source": "docs/use-cases/features/UC-schAll.feature"
+    },
+    {
+      "id": "UC-repAll-EX-001",
+      "useCaseId": "UC-repAll",
+      "useCaseName": "Browse every generated report",
+      "page": "repAll",
+      "name": "Stored report",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repAll",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "report R is tied to run A",
+        "R is opened",
+        "its run A context is preserved"
+      ],
+      "source": "docs/use-cases/features/UC-repAll.feature"
+    },
+    {
+      "id": "UC-repAll-EX-002",
+      "useCaseId": "UC-repAll",
+      "useCaseName": "Browse every generated report",
+      "page": "repAll",
+      "name": "No reports",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repAll",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the store confirms no reports",
+        "the list loads",
+        "no demonstration report appears"
+      ],
+      "source": "docs/use-cases/features/UC-repAll.feature"
+    },
+    {
+      "id": "UC-repAll-EX-003",
+      "useCaseId": "UC-repAll",
+      "useCaseName": "Browse every generated report",
+      "page": "repAll",
+      "name": "Placeholder",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repAll",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the UI shows a dummy document",
+        "it is inspected",
+        "it is not described as actual run evidence"
+      ],
+      "source": "docs/use-cases/features/UC-repAll.feature"
+    },
+    {
+      "id": "UC-repAll-EX-004",
+      "useCaseId": "UC-repAll",
+      "useCaseName": "Browse every generated report",
+      "page": "repAll",
+      "name": "Failed load",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repAll",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the report service fails",
+        "results render",
+        "availability is not falsely confirmed"
+      ],
+      "source": "docs/use-cases/features/UC-repAll.feature"
+    },
+    {
+      "id": "UC-repRuns-EX-001",
+      "useCaseId": "UC-repRuns",
+      "useCaseName": "See reports scoped to a specific run",
+      "page": "repRuns",
+      "name": "Exact run",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repRuns",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "runs A and B each have a report",
+        "reports for A are requested",
+        "only A reports are included"
+      ],
+      "source": "docs/use-cases/features/UC-repRuns.feature"
+    },
+    {
+      "id": "UC-repRuns-EX-002",
+      "useCaseId": "UC-repRuns",
+      "useCaseName": "See reports scoped to a specific run",
+      "page": "repRuns",
+      "name": "No match",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repRuns",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "run A has no report",
+        "its report view opens",
+        "the view states no matching report"
+      ],
+      "source": "docs/use-cases/features/UC-repRuns.feature"
+    },
+    {
+      "id": "UC-repRuns-EX-003",
+      "useCaseId": "UC-repRuns",
+      "useCaseName": "See reports scoped to a specific run",
+      "page": "repRuns",
+      "name": "Duplicate labels",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repRuns",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "two runs share a label",
+        "one run ID is selected",
+        "reports are joined by that identity"
+      ],
+      "source": "docs/use-cases/features/UC-repRuns.feature"
+    },
+    {
+      "id": "UC-repRuns-EX-004",
+      "useCaseId": "UC-repRuns",
+      "useCaseName": "See reports scoped to a specific run",
+      "page": "repRuns",
+      "name": "Missing context",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repRuns",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "no run is selected",
+        "the scoped view opens",
+        "the operator must establish context before a scoped claim"
+      ],
+      "source": "docs/use-cases/features/UC-repRuns.feature"
+    },
+    {
+      "id": "UC-repCoverage-EX-001",
+      "useCaseId": "UC-repCoverage",
+      "useCaseName": "Check rule and message coverage",
+      "page": "repCoverage",
+      "name": "Partial scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCoverage",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "six of ten rules were exercised",
+        "coverage is calculated by rule count",
+        "coverage is 60% with four untested rules"
+      ],
+      "source": "docs/use-cases/features/UC-repCoverage.feature"
+    },
+    {
+      "id": "UC-repCoverage-EX-002",
+      "useCaseId": "UC-repCoverage",
+      "useCaseName": "Check rule and message coverage",
+      "page": "repCoverage",
+      "name": "No rules",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCoverage",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the denominator is zero",
+        "coverage renders",
+        "it does not claim 100%"
+      ],
+      "source": "docs/use-cases/features/UC-repCoverage.feature"
+    },
+    {
+      "id": "UC-repCoverage-EX-003",
+      "useCaseId": "UC-repCoverage",
+      "useCaseName": "Check rule and message coverage",
+      "page": "repCoverage",
+      "name": "Failed tests",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCoverage",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "all ten rules were exercised and two failed",
+        "coverage is displayed",
+        "coverage and the 80% pass rate remain distinct"
+      ],
+      "source": "docs/use-cases/features/UC-repCoverage.feature"
+    },
+    {
+      "id": "UC-repCoverage-EX-004",
+      "useCaseId": "UC-repCoverage",
+      "useCaseName": "Check rule and message coverage",
+      "page": "repCoverage",
+      "name": "Stale evidence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCoverage",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a rule changed after testing",
+        "coverage is reviewed",
+        "the evidence revision is disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-repCoverage.feature"
+    },
+    {
+      "id": "UC-repCompliance-EX-001",
+      "useCaseId": "UC-repCompliance",
+      "useCaseName": "Check compliance framework status",
+      "page": "repCompliance",
+      "name": "Needs review",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCompliance",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a report outcome is Review",
+        "the list renders",
+        "it remains Review rather than Passed"
+      ],
+      "source": "docs/use-cases/features/UC-repCompliance.feature"
+    },
+    {
+      "id": "UC-repCompliance-EX-002",
+      "useCaseId": "UC-repCompliance",
+      "useCaseName": "Check compliance framework status",
+      "page": "repCompliance",
+      "name": "No evidence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCompliance",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "no report supports a framework",
+        "the framework is inspected",
+        "no compliance assurance is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-repCompliance.feature"
+    },
+    {
+      "id": "UC-repCompliance-EX-003",
+      "useCaseId": "UC-repCompliance",
+      "useCaseName": "Check compliance framework status",
+      "page": "repCompliance",
+      "name": "Test pass",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCompliance",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a test run passed",
+        "the report is labelled compliance",
+        "the result is scoped to the tested controls"
+      ],
+      "source": "docs/use-cases/features/UC-repCompliance.feature"
+    },
+    {
+      "id": "UC-repCompliance-EX-004",
+      "useCaseId": "UC-repCompliance",
+      "useCaseName": "Check compliance framework status",
+      "page": "repCompliance",
+      "name": "Evidence context",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repCompliance",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a report is tied to a historical run",
+        "it is opened",
+        "that run and evidence date remain visible"
+      ],
+      "source": "docs/use-cases/features/UC-repCompliance.feature"
+    },
+    {
+      "id": "UC-configuration-EX-001",
+      "useCaseId": "UC-configuration",
+      "useCaseName": "Change tenant settings",
+      "page": "configuration",
+      "name": "Hide use cases",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configuration",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "use-case visibility is enabled",
+        "the administrator saves enabled=false",
+        "the documentation controls follow the saved setting"
+      ],
+      "source": "docs/use-cases/features/UC-configuration.feature"
+    },
+    {
+      "id": "UC-configuration-EX-002",
+      "useCaseId": "UC-configuration",
+      "useCaseName": "Change tenant settings",
+      "page": "configuration",
+      "name": "Reload",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configuration",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a setting save succeeds",
+        "the setting is reopened",
+        "the effective value can be checked"
+      ],
+      "source": "docs/use-cases/features/UC-configuration.feature"
+    },
+    {
+      "id": "UC-configuration-EX-003",
+      "useCaseId": "UC-configuration",
+      "useCaseName": "Change tenant settings",
+      "page": "configuration",
+      "name": "Failed save",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configuration",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the settings request fails",
+        "the result is handled",
+        "no confirmed settings change is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-configuration.feature"
+    },
+    {
+      "id": "UC-configuration-EX-004",
+      "useCaseId": "UC-configuration",
+      "useCaseName": "Change tenant settings",
+      "page": "configuration",
+      "name": "Independent settings",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configuration",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "logging changes",
+        "the change is saved",
+        "no unrelated eventing change is implied"
+      ],
+      "source": "docs/use-cases/features/UC-configuration.feature"
+    },
+    {
+      "id": "UC-naming-EX-001",
+      "useCaseId": "UC-naming",
+      "useCaseName": "Set default naming patterns",
+      "page": "naming",
+      "name": "Known token",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-naming",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "family is pacs",
+        "a pattern containing {family} is previewed",
+        "the supported token expands to pacs"
+      ],
+      "source": "docs/use-cases/features/UC-naming.feature"
+    },
+    {
+      "id": "UC-naming-EX-002",
+      "useCaseId": "UC-naming",
+      "useCaseName": "Set default naming patterns",
+      "page": "naming",
+      "name": "Unknown token",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-naming",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the pattern contains {unknown}",
+        "preview runs",
+        "the unknown token is visible rather than silently dropped"
+      ],
+      "source": "docs/use-cases/features/UC-naming.feature"
+    },
+    {
+      "id": "UC-naming-EX-003",
+      "useCaseId": "UC-naming",
+      "useCaseName": "Set default naming patterns",
+      "page": "naming",
+      "name": "No reservation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-naming",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "two users preview the same pattern",
+        "both see a candidate name",
+        "neither preview claims to reserve that name"
+      ],
+      "source": "docs/use-cases/features/UC-naming.feature"
+    },
+    {
+      "id": "UC-naming-EX-004",
+      "useCaseId": "UC-naming",
+      "useCaseName": "Set default naming patterns",
+      "page": "naming",
+      "name": "No script",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-naming",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a pattern contains script-like text",
+        "preview runs",
+        "the text is not executed"
+      ],
+      "source": "docs/use-cases/features/UC-naming.feature"
+    },
+    {
+      "id": "UC-help-EX-001",
+      "useCaseId": "UC-help",
+      "useCaseName": "Find keyboard shortcuts and self-service help",
+      "page": "help",
+      "name": "Matching topic",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-help",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a schema topic exists",
+        "the operator searches its title",
+        "that topic is discoverable"
+      ],
+      "source": "docs/use-cases/features/UC-help.feature"
+    },
+    {
+      "id": "UC-help-EX-002",
+      "useCaseId": "UC-help",
+      "useCaseName": "Find keyboard shortcuts and self-service help",
+      "page": "help",
+      "name": "No match",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-help",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "no topic matches the query",
+        "search runs",
+        "an honest no-result state is shown"
+      ],
+      "source": "docs/use-cases/features/UC-help.feature"
+    },
+    {
+      "id": "UC-help-EX-003",
+      "useCaseId": "UC-help",
+      "useCaseName": "Find keyboard shortcuts and self-service help",
+      "page": "help",
+      "name": "Shortcut accuracy",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-help",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the console supports a save shortcut",
+        "the help shortcut list is read",
+        "the documented key and context match the binding"
+      ],
+      "source": "docs/use-cases/features/UC-help.feature"
+    },
+    {
+      "id": "UC-help-EX-004",
+      "useCaseId": "UC-help",
+      "useCaseName": "Find keyboard shortcuts and self-service help",
+      "page": "help",
+      "name": "Return",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-help",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "Help is open",
+        "the console link is activated",
+        "the console is reachable"
+      ],
+      "source": "docs/use-cases/features/UC-help.feature"
+    },
+    {
+      "id": "UC-about-EX-001",
+      "useCaseId": "UC-about",
+      "useCaseName": "Understand what Sand Bench is for",
+      "page": "about",
+      "name": "Scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-about",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "About loads",
+        "the operator reads it",
+        "the product is described consistently with its sandbox scope"
+      ],
+      "source": "docs/use-cases/features/UC-about.feature"
+    },
+    {
+      "id": "UC-about-EX-002",
+      "useCaseId": "UC-about",
+      "useCaseName": "Understand what Sand Bench is for",
+      "page": "about",
+      "name": "Return",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-about",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the console link is present",
+        "it is activated",
+        "the workspace is reachable"
+      ],
+      "source": "docs/use-cases/features/UC-about.feature"
+    },
+    {
+      "id": "UC-about-EX-003",
+      "useCaseId": "UC-about",
+      "useCaseName": "Understand what Sand Bench is for",
+      "page": "about",
+      "name": "No metrics",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-about",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "no measured production results exist",
+        "About is reviewed",
+        "no invented production metric appears"
+      ],
+      "source": "docs/use-cases/features/UC-about.feature"
+    },
+    {
+      "id": "UC-ruleBenchStage-EX-001",
+      "useCaseId": "UC-ruleBenchStage",
+      "useCaseName": "Stage rules for the test pipeline",
+      "page": "ruleBenchStage",
+      "name": "Stage identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchStage",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "rule R1 exists",
+        "the analyst stages R1",
+        "the response and refreshed row identify R1 and the returned state"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchStage.feature"
+    },
+    {
+      "id": "UC-ruleBenchStage-EX-002",
+      "useCaseId": "UC-ruleBenchStage",
+      "useCaseName": "Stage rules for the test pipeline",
+      "page": "ruleBenchStage",
+      "name": "Stale transition",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchStage",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the current ETag changed",
+        "an old If-Match is sent to transitions",
+        "the stale request is rejected"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchStage.feature"
+    },
+    {
+      "id": "UC-ruleBenchStage-EX-003",
+      "useCaseId": "UC-ruleBenchStage",
+      "useCaseName": "Stage rules for the test pipeline",
+      "page": "ruleBenchStage",
+      "name": "No promotion",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchStage",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a stage request succeeds",
+        "the analyst reviews its result",
+        "the screen does not claim that production promotion occurred"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchStage.feature"
+    },
+    {
+      "id": "UC-ruleBenchStage-EX-004",
+      "useCaseId": "UC-ruleBenchStage",
+      "useCaseName": "Stage rules for the test pipeline",
+      "page": "ruleBenchStage",
+      "name": "Failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchStage",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the stage service rejects the transition",
+        "the result is shown",
+        "the row is not optimistically labelled promoted"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchStage.feature"
+    },
+    {
+      "id": "UC-ruleBenchValidate-EX-001",
+      "useCaseId": "UC-ruleBenchValidate",
+      "useCaseName": "Validate rules against test cases",
+      "page": "ruleBenchValidate",
+      "name": "Perfect evidence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchValidate",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "ten cases have explicit expectations",
+        "all ten outcomes match",
+        "the displayed result identifies ten evaluated cases"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchValidate.feature"
+    },
+    {
+      "id": "UC-ruleBenchValidate-EX-002",
+      "useCaseId": "UC-ruleBenchValidate",
+      "useCaseName": "Validate rules against test cases",
+      "page": "ruleBenchValidate",
+      "name": "Negative test",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchValidate",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a malformed input is expected to be rejected",
+        "the rule correctly rejects it",
+        "the test outcome is interpreted against that expectation"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchValidate.feature"
+    },
+    {
+      "id": "UC-ruleBenchValidate-EX-003",
+      "useCaseId": "UC-ruleBenchValidate",
+      "useCaseName": "Validate rules against test cases",
+      "page": "ruleBenchValidate",
+      "name": "No evidence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchValidate",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "zero cases were evaluated",
+        "validation results render",
+        "zero cases is not labelled 100% passed"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchValidate.feature"
+    },
+    {
+      "id": "UC-ruleBenchValidate-EX-004",
+      "useCaseId": "UC-ruleBenchValidate",
+      "useCaseName": "Validate rules against test cases",
+      "page": "ruleBenchValidate",
+      "name": "Evaluation error",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleBenchValidate",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the validation service fails",
+        "the response is handled",
+        "the screen shows an error rather than a failed business assertion"
+      ],
+      "source": "docs/use-cases/features/UC-ruleBenchValidate.feature"
+    },
+    {
+      "id": "UC-messageDesigner-EX-001",
+      "useCaseId": "UC-messageDesigner",
+      "useCaseName": "Create a message definition",
+      "page": "messageDesigner",
+      "name": "Four steps",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesigner",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "designer types load",
+        "the wizard opens",
+        "family, message, fields and workspace are distinct steps"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesigner.feature"
+    },
+    {
+      "id": "UC-messageDesigner-EX-002",
+      "useCaseId": "UC-messageDesigner",
+      "useCaseName": "Create a message definition",
+      "page": "messageDesigner",
+      "name": "Handoff",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesigner",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the analyst selects a registered pacs schema",
+        "Use this is activated",
+        "the workspace receives that schema identity"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesigner.feature"
+    },
+    {
+      "id": "UC-messageDesigner-EX-003",
+      "useCaseId": "UC-messageDesigner",
+      "useCaseName": "Create a message definition",
+      "page": "messageDesigner",
+      "name": "No schemas",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesigner",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "no types are available",
+        "the wizard opens",
+        "import guidance appears without invented fields"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesigner.feature"
+    },
+    {
+      "id": "UC-messageDesigner-EX-004",
+      "useCaseId": "UC-messageDesigner",
+      "useCaseName": "Create a message definition",
+      "page": "messageDesigner",
+      "name": "Explicit save",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesigner",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "fields have been selected",
+        "the analyst only navigates between steps",
+        "no completed definition save is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesigner.feature"
+    },
+    {
+      "id": "UC-messageDesignerFamily-EX-001",
+      "useCaseId": "UC-messageDesignerFamily",
+      "useCaseName": "Choose a message family",
+      "page": "messageDesignerFamily",
+      "name": "Family scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFamily",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "only pain and pacs types exist",
+        "the family step loads",
+        "only those available families are offered"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFamily.feature"
+    },
+    {
+      "id": "UC-messageDesignerFamily-EX-002",
+      "useCaseId": "UC-messageDesignerFamily",
+      "useCaseName": "Choose a message family",
+      "page": "messageDesignerFamily",
+      "name": "No families",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFamily",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the response is empty",
+        "the step renders",
+        "the analyst receives import guidance"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFamily.feature"
+    },
+    {
+      "id": "UC-messageDesignerFamily-EX-003",
+      "useCaseId": "UC-messageDesignerFamily",
+      "useCaseName": "Choose a message family",
+      "page": "messageDesignerFamily",
+      "name": "Select family",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFamily",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "pacs is available",
+        "pacs is selected",
+        "the next step is scoped to pacs"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFamily.feature"
+    },
+    {
+      "id": "UC-messageDesignerFamily-EX-004",
+      "useCaseId": "UC-messageDesignerFamily",
+      "useCaseName": "Choose a message family",
+      "page": "messageDesignerFamily",
+      "name": "No write",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFamily",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a family tile is selected",
+        "the message step opens",
+        "no definition is saved by family selection"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFamily.feature"
+    },
+    {
+      "id": "UC-messageDesignerMessage-EX-001",
+      "useCaseId": "UC-messageDesignerMessage",
+      "useCaseName": "Choose a message",
+      "page": "messageDesignerMessage",
+      "name": "Family filter",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerMessage",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "pacs is selected",
+        "the messages render",
+        "pain messages are excluded"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerMessage.feature"
+    },
+    {
+      "id": "UC-messageDesignerMessage-EX-002",
+      "useCaseId": "UC-messageDesignerMessage",
+      "useCaseName": "Choose a message",
+      "page": "messageDesignerMessage",
+      "name": "Empty model",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerMessage",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a tile has zero parsed fields",
+        "it is opened",
+        "the lack of fields is disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerMessage.feature"
+    },
+    {
+      "id": "UC-messageDesignerMessage-EX-003",
+      "useCaseId": "UC-messageDesignerMessage",
+      "useCaseName": "Choose a message",
+      "page": "messageDesignerMessage",
+      "name": "Back",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerMessage",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a message is being reviewed",
+        "Back is selected",
+        "family selection is reachable"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerMessage.feature"
+    },
+    {
+      "id": "UC-messageDesignerMessage-EX-004",
+      "useCaseId": "UC-messageDesignerMessage",
+      "useCaseName": "Choose a message",
+      "page": "messageDesignerMessage",
+      "name": "Identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerMessage",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "two schemas have similar names",
+        "one is selected",
+        "the next step uses its stable identity"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerMessage.feature"
+    },
+    {
+      "id": "UC-messageDesignerFields-EX-001",
+      "useCaseId": "UC-messageDesignerFields",
+      "useCaseName": "Select fields",
+      "page": "messageDesignerFields",
+      "name": "Required field",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFields",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "OrderId is required",
+        "the analyst attempts to deselect it",
+        "OrderId remains included"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFields.feature"
+    },
+    {
+      "id": "UC-messageDesignerFields-EX-002",
+      "useCaseId": "UC-messageDesignerFields",
+      "useCaseName": "Select fields",
+      "page": "messageDesignerFields",
+      "name": "Optional field",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFields",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "Note is optional",
+        "Note is deselected",
+        "the workspace selection excludes Note"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFields.feature"
+    },
+    {
+      "id": "UC-messageDesignerFields-EX-003",
+      "useCaseId": "UC-messageDesignerFields",
+      "useCaseName": "Select fields",
+      "page": "messageDesignerFields",
+      "name": "Expansion",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFields",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a branch is collapsed",
+        "it is expanded",
+        "field inclusion does not change"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFields.feature"
+    },
+    {
+      "id": "UC-messageDesignerFields-EX-004",
+      "useCaseId": "UC-messageDesignerFields",
+      "useCaseName": "Select fields",
+      "page": "messageDesignerFields",
+      "name": "Empty model",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerFields",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the selected schema has no parsed fields",
+        "the picker opens",
+        "no invented selection is displayed"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerFields.feature"
+    },
+    {
+      "id": "UC-messageDesignerWorkspace-EX-001",
+      "useCaseId": "UC-messageDesignerWorkspace",
+      "useCaseName": "Generate test data from the definition",
+      "page": "messageDesignerWorkspace",
+      "name": "Preview only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerWorkspace",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a definition is selected",
+        "a preview is generated",
+        "no saved-message result is claimed until an explicit save"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerWorkspace.feature"
+    },
+    {
+      "id": "UC-messageDesignerWorkspace-EX-002",
+      "useCaseId": "UC-messageDesignerWorkspace",
+      "useCaseName": "Generate test data from the definition",
+      "page": "messageDesignerWorkspace",
+      "name": "Persisted count",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerWorkspace",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "500 messages were requested and 498 confirmed saved",
+        "the result is displayed",
+        "498 is the saved count and the shortfall is visible"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerWorkspace.feature"
+    },
+    {
+      "id": "UC-messageDesignerWorkspace-EX-003",
+      "useCaseId": "UC-messageDesignerWorkspace",
+      "useCaseName": "Generate test data from the definition",
+      "page": "messageDesignerWorkspace",
+      "name": "Adversarial values",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerWorkspace",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "bad-data generation is selected",
+        "the preview is created",
+        "intentional invalid values are labelled"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerWorkspace.feature"
+    },
+    {
+      "id": "UC-messageDesignerWorkspace-EX-004",
+      "useCaseId": "UC-messageDesignerWorkspace",
+      "useCaseName": "Generate test data from the definition",
+      "page": "messageDesignerWorkspace",
+      "name": "Separate delivery",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-messageDesignerWorkspace",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "messages were saved",
+        "no send action was requested",
+        "the screen does not claim delivery"
+      ],
+      "source": "docs/use-cases/features/UC-messageDesignerWorkspace.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-001",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Import a valid schema with matching Markdown",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a readable and valid schema is selected",
+        "readable accompanying Markdown covers the schema fields",
+        "no duplicate is detected",
+        "the analyst confirms the import",
+        "the selected content is saved in the Schema register",
+        "a successful import result is displayed"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-002",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "File selection does not save a record",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the analyst has opened Import schema",
+        "the analyst selects an input file",
+        "no Schema register record is created by file selection alone"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-003",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Import without accompanying Markdown",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a readable and valid schema is selected",
+        "no accompanying Markdown is selected",
+        "no duplicate is detected",
+        "the analyst confirms the import",
+        "the schema is saved without accompanying Markdown"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-004",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Warn about Markdown coverage mismatches",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the schema and accompanying Markdown are readable",
+        "the schema parses successfully",
+        "a schema leaf field is undocumented",
+        "coverage validation completes",
+        "the system displays a coverage warning",
+        "offers Proceed or Cancel upload"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-005",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Warn about Markdown coverage mismatches",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the schema and accompanying Markdown are readable",
+        "the schema parses successfully",
+        "an optional schema leaf field is undocumented",
+        "coverage validation completes",
+        "the system displays a coverage warning",
+        "offers Proceed or Cancel upload"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-006",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Warn about Markdown coverage mismatches",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the schema and accompanying Markdown are readable",
+        "the schema parses successfully",
+        "Markdown contains a field absent from schema",
+        "coverage validation completes",
+        "the system displays a coverage warning",
+        "offers Proceed or Cancel upload"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-007",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Proceed despite a coverage warning",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a coverage warning is displayed",
+        "the analyst selects Proceed",
+        "both the schema and accompanying Markdown remain selected",
+        "final confirmation is still required before saving"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-008",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Override a detected duplicate",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the system detects a duplicate under its duplicate rule",
+        "the analyst selects Proceed with override",
+        "confirms the import",
+        "the uploaded content replaces the existing schema record"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-009",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Cancel after a duplicate warning",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a duplicate warning is displayed",
+        "the analyst selects Cancel upload",
+        "the attempt ends",
+        "the selected files are cleared from memory",
+        "the existing schema record is unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-010",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Reject a malformed schema",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the selected schema is malformed",
+        "the system parses it",
+        "the upload is rejected",
+        "the parsing error is displayed"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-011",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Reject unreadable accompanying Markdown",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "accompanying Markdown is selected",
+        "the system cannot read it",
+        "the upload is rejected",
+        "the error is displayed"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-012",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Count leaf fields in repeating structures",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a schema contains grouping containers and leaf fields",
+        "some structures repeat",
+        "the system calculates field count",
+        "grouping containers are excluded",
+        "leaf fields in repeating structures are counted once"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-013",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Stop before saving",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "files are selected and saving has not been submitted",
+        "the analyst selects Stop",
+        "processing halts",
+        "the selected files remain in memory",
+        "no record is saved"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-014",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Cancel before saving",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "files are selected and saving has not been submitted",
+        "the analyst selects Cancel",
+        "the attempt ends",
+        "the selected files are cleared from memory",
+        "the original local files remain unchanged",
+        "no record is saved"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-015",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Uncertain save outcome",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the analyst has confirmed the import",
+        "the save outcome cannot be confirmed",
+        "the system reports an unconfirmed outcome",
+        "does not report success",
+        "does not retry automatically"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-016",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported XSD input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as XML schema definition and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-017",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported JSON Schema input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as JSON schema definition and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-018",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported OpenAPI input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as API schema source and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-019",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported CSV input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as flat field layout and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-020",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported PDF input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as flat field layout and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-021",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Supported format roles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid supported Markdown input and its required dependencies",
+        "the analyst selects it for import",
+        "the system interprets it as flat field layout and waits for confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-022",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce coverage only",
+        "the analyst chooses Proceed",
+        "the attempt has both files retained awaiting confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-023",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce coverage only",
+        "the analyst chooses Cancel upload",
+        "the attempt has ended with in-memory files cleared"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-024",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce duplicate only",
+        "the analyst chooses Proceed with override",
+        "the attempt has override selected awaiting confirmation"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-025",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce duplicate only",
+        "the analyst chooses Cancel upload",
+        "the attempt has ended without replacing the existing record"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-026",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce coverage and duplicate",
+        "the analyst chooses Proceed for coverage only",
+        "the attempt has duplicate decision still required"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-027",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Independent warning decisions",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-14",
+        "@specification"
+      ],
+      "steps": [
+        "valid readable schema and companion files produce coverage and duplicate",
+        "the analyst chooses Cancel upload",
+        "the attempt has ended without replacing the existing record"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-028",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Stop and Cancel across submission boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@AC-18",
+        "@AC-19",
+        "@specification"
+      ],
+      "steps": [
+        "the attempt is before submission",
+        "the analyst selects Stop",
+        "the system halts processing and retains selected files in memory"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-029",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Stop and Cancel across submission boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@AC-18",
+        "@AC-19",
+        "@specification"
+      ],
+      "steps": [
+        "the attempt is before submission",
+        "the analyst selects Cancel",
+        "the system ends the attempt and clears only in-memory selected files"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-030",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Stop and Cancel across submission boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@AC-18",
+        "@AC-19",
+        "@specification"
+      ],
+      "steps": [
+        "the attempt is after submission",
+        "the analyst selects Stop",
+        "the system retains files and reports the actual save outcome"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgImportSchema-EX-031",
+      "useCaseId": "UC-msgImportSchema",
+      "useCaseName": "Import a schema",
+      "page": "msgImportSchema",
+      "name": "Stop and Cancel across submission boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@AC-18",
+        "@AC-19",
+        "@specification"
+      ],
+      "steps": [
+        "the attempt is after submission",
+        "the analyst selects Cancel",
+        "the system clears memory without claiming a committed save was undone"
+      ],
+      "source": "docs/use-cases/features/UC-msgImportSchema.feature"
+    },
+    {
+      "id": "UC-msgSchemaRegister-EX-001",
+      "useCaseId": "UC-msgSchemaRegister",
+      "useCaseName": "See every imported and published scheme",
+      "page": "msgSchemaRegister",
+      "name": "Ready entry",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaRegister",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a usable entry is present",
+        "it is selected for reuse",
+        "the handoff uses its identity"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaRegister.feature"
+    },
+    {
+      "id": "UC-msgSchemaRegister-EX-002",
+      "useCaseId": "UC-msgSchemaRegister",
+      "useCaseName": "See every imported and published scheme",
+      "page": "msgSchemaRegister",
+      "name": "No parsed fields",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaRegister",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "an entry has zero parsed fields",
+        "its state renders",
+        "the limitation is disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaRegister.feature"
+    },
+    {
+      "id": "UC-msgSchemaRegister-EX-003",
+      "useCaseId": "UC-msgSchemaRegister",
+      "useCaseName": "See every imported and published scheme",
+      "page": "msgSchemaRegister",
+      "name": "Duplicate code",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaRegister",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "two versions share a code",
+        "register rows are combined",
+        "version loss is identified rather than silently claimed correct"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaRegister.feature"
+    },
+    {
+      "id": "UC-msgSchemaRegister-EX-004",
+      "useCaseId": "UC-msgSchemaRegister",
+      "useCaseName": "See every imported and published scheme",
+      "page": "msgSchemaRegister",
+      "name": "Empty register",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaRegister",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "both sources return no entries",
+        "the register opens",
+        "import or creation guidance is shown"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaRegister.feature"
+    },
+    {
+      "id": "UC-trNew-EX-001",
+      "useCaseId": "UC-trNew",
+      "useCaseName": "Start a test run",
+      "page": "trNew",
+      "name": "Required type",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trNew",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "messageTypeCode is missing",
+        "Start run is submitted",
+        "the request is rejected"
+      ],
+      "source": "docs/use-cases/features/UC-trNew.feature"
+    },
+    {
+      "id": "UC-trNew-EX-002",
+      "useCaseId": "UC-trNew",
+      "useCaseName": "Start a test run",
+      "page": "trNew",
+      "name": "Default file",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trNew",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a valid type is provided without channel",
+        "the run is submitted",
+        "the file-channel default is explicit"
+      ],
+      "source": "docs/use-cases/features/UC-trNew.feature"
+    },
+    {
+      "id": "UC-trNew-EX-003",
+      "useCaseId": "UC-trNew",
+      "useCaseName": "Start a test run",
+      "page": "trNew",
+      "name": "Finished response",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trNew",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the endpoint returns completed",
+        "the UI handles the result",
+        "it does not force a fabricated Running state"
+      ],
+      "source": "docs/use-cases/features/UC-trNew.feature"
+    },
+    {
+      "id": "UC-trNew-EX-004",
+      "useCaseId": "UC-trNew",
+      "useCaseName": "Start a test run",
+      "page": "trNew",
+      "name": "Persistence uncertainty",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-trNew",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "execution finishes but storage fails",
+        "a local fallback ID is returned",
+        "durable evidence is not claimed"
+      ],
+      "source": "docs/use-cases/features/UC-trNew.feature"
+    },
+    {
+      "id": "UC-tcNew-EX-001",
+      "useCaseId": "UC-tcNew",
+      "useCaseName": "Define a new test case",
+      "page": "tcNew",
+      "name": "Valid case",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcNew",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "name and objective identify a boundary test",
+        "the analyst saves",
+        "the stored case has its identity and supplied objective"
+      ],
+      "source": "docs/use-cases/features/UC-tcNew.feature"
+    },
+    {
+      "id": "UC-tcNew-EX-002",
+      "useCaseId": "UC-tcNew",
+      "useCaseName": "Define a new test case",
+      "page": "tcNew",
+      "name": "Blank name",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcNew",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the name is whitespace",
+        "the analyst saves",
+        "the request fails validation"
+      ],
+      "source": "docs/use-cases/features/UC-tcNew.feature"
+    },
+    {
+      "id": "UC-tcNew-EX-003",
+      "useCaseId": "UC-tcNew",
+      "useCaseName": "Define a new test case",
+      "page": "tcNew",
+      "name": "Optional dataset",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcNew",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "no dataset is selected",
+        "a named case is saved",
+        "creation can succeed without inventing a dataset"
+      ],
+      "source": "docs/use-cases/features/UC-tcNew.feature"
+    },
+    {
+      "id": "UC-tcNew-EX-004",
+      "useCaseId": "UC-tcNew",
+      "useCaseName": "Define a new test case",
+      "page": "tcNew",
+      "name": "No execution claim",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-tcNew",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a case is created",
+        "the result is shown",
+        "the result describes a definition rather than a passed execution"
+      ],
+      "source": "docs/use-cases/features/UC-tcNew.feature"
+    },
+    {
+      "id": "UC-schNew-EX-001",
+      "useCaseId": "UC-schNew",
+      "useCaseName": "Schedule a run to fire automatically",
+      "page": "schNew",
+      "name": "Required name",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schNew",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "name is missing",
+        "creation is submitted",
+        "validation rejects the request"
+      ],
+      "source": "docs/use-cases/features/UC-schNew.feature"
+    },
+    {
+      "id": "UC-schNew-EX-002",
+      "useCaseId": "UC-schNew",
+      "useCaseName": "Schedule a run to fire automatically",
+      "page": "schNew",
+      "name": "Required cadence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schNew",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "cadence is missing",
+        "creation is submitted",
+        "validation rejects the request"
+      ],
+      "source": "docs/use-cases/features/UC-schNew.feature"
+    },
+    {
+      "id": "UC-schNew-EX-003",
+      "useCaseId": "UC-schNew",
+      "useCaseName": "Schedule a run to fire automatically",
+      "page": "schNew",
+      "name": "Next occurrence",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schNew",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a supported cadence is accepted",
+        "creation succeeds",
+        "the returned next occurrence can be inspected"
+      ],
+      "source": "docs/use-cases/features/UC-schNew.feature"
+    },
+    {
+      "id": "UC-schNew-EX-004",
+      "useCaseId": "UC-schNew",
+      "useCaseName": "Schedule a run to fire automatically",
+      "page": "schNew",
+      "name": "Storage failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schNew",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "schedule persistence fails",
+        "the handler returns a local ID",
+        "durable scheduling is not claimed"
+      ],
+      "source": "docs/use-cases/features/UC-schNew.feature"
+    },
+    {
+      "id": "UC-repScheduled-EX-001",
+      "useCaseId": "UC-repScheduled",
+      "useCaseName": "Manage automatic report exports",
+      "page": "repScheduled",
+      "name": "Empty configuration",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repScheduled",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "no export is configured",
+        "the view opens",
+        "no automatic delivery is implied"
+      ],
+      "source": "docs/use-cases/features/UC-repScheduled.feature"
+    },
+    {
+      "id": "UC-repScheduled-EX-002",
+      "useCaseId": "UC-repScheduled",
+      "useCaseName": "Manage automatic report exports",
+      "page": "repScheduled",
+      "name": "Invalid target",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repScheduled",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a destination is invalid",
+        "export is attempted",
+        "failure is shown rather than success"
+      ],
+      "source": "docs/use-cases/features/UC-repScheduled.feature"
+    },
+    {
+      "id": "UC-repScheduled-EX-003",
+      "useCaseId": "UC-repScheduled",
+      "useCaseName": "Manage automatic report exports",
+      "page": "repScheduled",
+      "name": "Manual download",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repScheduled",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a report was downloaded manually",
+        "scheduled state is reviewed",
+        "the download is not recorded as a recurring delivery"
+      ],
+      "source": "docs/use-cases/features/UC-repScheduled.feature"
+    },
+    {
+      "id": "UC-repScheduled-EX-004",
+      "useCaseId": "UC-repScheduled",
+      "useCaseName": "Manage automatic report exports",
+      "page": "repScheduled",
+      "name": "Unimplemented action",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repScheduled",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "no scheduled-export write endpoint exists",
+        "New export is inspected",
+        "the capability is identified as unimplemented"
+      ],
+      "source": "docs/use-cases/features/UC-repScheduled.feature"
+    },
+    {
+      "id": "UC-externalSystems-EX-001",
+      "useCaseId": "UC-externalSystems",
+      "useCaseName": "Configure the five dummy external systems",
+      "page": "externalSystems",
+      "name": "Save only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-externalSystems",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a valid destination is entered",
+        "Update succeeds",
+        "configuration is saved without claiming a dummy was sent"
+      ],
+      "source": "docs/use-cases/features/UC-externalSystems.feature"
+    },
+    {
+      "id": "UC-externalSystems-EX-002",
+      "useCaseId": "UC-externalSystems",
+      "useCaseName": "Configure the five dummy external systems",
+      "page": "externalSystems",
+      "name": "Bad headers",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-externalSystems",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "header text is malformed JSON",
+        "the row is saved",
+        "the problem is surfaced instead of silently dropping headers"
+      ],
+      "source": "docs/use-cases/features/UC-externalSystems.feature"
+    },
+    {
+      "id": "UC-externalSystems-EX-003",
+      "useCaseId": "UC-externalSystems",
+      "useCaseName": "Configure the five dummy external systems",
+      "page": "externalSystems",
+      "name": "Unreachable",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-externalSystems",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the test receiver is stopped",
+        "Send dummy is requested",
+        "delivery failure is visible"
+      ],
+      "source": "docs/use-cases/features/UC-externalSystems.feature"
+    },
+    {
+      "id": "UC-externalSystems-EX-004",
+      "useCaseId": "UC-externalSystems",
+      "useCaseName": "Configure the five dummy external systems",
+      "page": "externalSystems",
+      "name": "Correlation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-externalSystems",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "two dummy messages were sent",
+        "one inbound response arrives",
+        "the response is associated with its actual request"
+      ],
+      "source": "docs/use-cases/features/UC-externalSystems.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-001",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Render the selected editor",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the analyst opens Create schema",
+        "the analyst selects XML",
+        "the system displays an XML tree",
+        "offers only applicable field properties"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-002",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Render the selected editor",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the analyst opens Create schema",
+        "the analyst selects JSON",
+        "the system displays a JSON tree",
+        "offers only applicable field properties"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-003",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Render the selected editor",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the analyst opens Create schema",
+        "the analyst selects flat file",
+        "the system displays an ordered table",
+        "offers only applicable field properties"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-004",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Load a definition as editable starting content",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a supported valid schema definition and its dependencies",
+        "the analyst chooses Upload definition",
+        "its structure and constraints populate the editor",
+        "no schema is published"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-005",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Edit a copy of a registered version",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a registered schema version is selected",
+        "the analyst changes a field in the working copy",
+        "the source version remains unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-006",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Expand without modifying the model",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a collapsed parent has child fields",
+        "the analyst selects its expansion control",
+        "the children become visible",
+        "the model revision is unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-007",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Show selected field properties",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a field has a configured type and cardinality",
+        "the analyst selects that field",
+        "the property panel shows those settings and its rules"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-008",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Keep presence separate from null",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a JSON property is required and allows null",
+        "sample instances are validated",
+        "a present null value satisfies those two settings",
+        "an omitted property fails the presence requirement"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-009",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional array with a nonempty present value",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "an optional JSON array permits one to three items",
+        "sample instances are validated",
+        "omission is allowed",
+        "a present empty array fails",
+        "four items fail"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-010",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Preserve digits-only identifiers",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a text field requires exactly five digits",
+        "the analyst tests the value \"00123\"",
+        "it passes and retains its leading zeros",
+        "\"12A45\" fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-011",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Add an enumeration entry",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the allowed values are \"CARD\" and \"CASH\"",
+        "the analyst adds \"TRANSFER\" with a description",
+        "the current draft contains the new allowed value",
+        "the published source version is unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-012",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Conditional presence rule",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "account is mandatory when method is \"TRANSFER\"",
+        "a sample contains that method without account",
+        "the rule fails with its configured message"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-013",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Disclose unsupported rule enforcement",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "a cross-field rule cannot run in the selected target profile",
+        "the analyst validates the schema",
+        "the system identifies the unsupported rule",
+        "does not claim it is enforced"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-014",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Reject overlapping fixed-width fields",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "two field position ranges overlap",
+        "the analyst generates the layout",
+        "generation is blocked with a location-specific finding"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-015",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Preserve unknown source semantics",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "an uploaded definition contains an uneditable construct",
+        "correct preservation cannot be guaranteed",
+        "the analyst generates an artefact",
+        "generation is blocked rather than silently dropping it"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-016",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Prevent publication of stale output",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "an artefact has been generated",
+        "the analyst changes a schema constraint",
+        "the artefact is marked stale",
+        "Publish requires validation and generation of the new revision"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-017",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Publish the current valid version",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "the current revision has valid generated output",
+        "the analyst selects Publish and saving succeeds",
+        "that version appears in Schema register as Ready"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-018",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Handle an uncertain publication result",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [],
+      "steps": [
+        "publication was submitted",
+        "its result cannot be confirmed",
+        "the system shows an unconfirmed outcome",
+        "does not automatically submit another publication"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-019",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Required nullable JSON property",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-10",
+        "@specification"
+      ],
+      "steps": [
+        "a required JSON string property allows null",
+        "the instance contains no property",
+        "presence and type validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-020",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Required nullable JSON property",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-10",
+        "@specification"
+      ],
+      "steps": [
+        "a required JSON string property allows null",
+        "the instance contains null",
+        "presence and type validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-021",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Required nullable JSON property",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-10",
+        "@specification"
+      ],
+      "steps": [
+        "a required JSON string property allows null",
+        "the instance contains an empty string",
+        "presence and type validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-022",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Required nullable JSON property",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-10",
+        "@specification"
+      ],
+      "steps": [
+        "a required JSON string property allows null",
+        "the instance contains text",
+        "presence and type validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-023",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Required nullable JSON property",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-10",
+        "@specification"
+      ],
+      "steps": [
+        "a required JSON string property allows null",
+        "the instance contains a number",
+        "presence and type validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-024",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains no property",
+        "array cardinality validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-025",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains zero items",
+        "array cardinality validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-026",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains one item",
+        "array cardinality validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-027",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains two items",
+        "array cardinality validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-028",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains three items",
+        "array cardinality validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-029",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains four items",
+        "array cardinality validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-030",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Optional bounded array",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-12",
+        "@specification"
+      ],
+      "steps": [
+        "an optional JSON array allows one to three items",
+        "the instance contains null",
+        "array cardinality validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-031",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is 00123",
+        "validation passes without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-032",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is 12345",
+        "validation passes without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-033",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is 1234",
+        "validation fails without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-034",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is 123456",
+        "validation fails without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-035",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is 12A45",
+        "validation fails without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-036",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Five digit identifier boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-16",
+        "@specification"
+      ],
+      "steps": [
+        "a string identifier requires exactly five ASCII digits",
+        "the value is -1234",
+        "validation fails without numeric coercion"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-037",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Numeric range boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@specification"
+      ],
+      "steps": [
+        "a decimal field is greater than zero and at most one hundred",
+        "the value is -0.01",
+        "range validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-038",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Numeric range boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@specification"
+      ],
+      "steps": [
+        "a decimal field is greater than zero and at most one hundred",
+        "the value is 0",
+        "range validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-039",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Numeric range boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@specification"
+      ],
+      "steps": [
+        "a decimal field is greater than zero and at most one hundred",
+        "the value is 0.01",
+        "range validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-040",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Numeric range boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@specification"
+      ],
+      "steps": [
+        "a decimal field is greater than zero and at most one hundred",
+        "the value is 100",
+        "range validation passes"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-msgCreateSchema-EX-041",
+      "useCaseId": "UC-msgCreateSchema",
+      "useCaseName": "Create a schema",
+      "page": "msgCreateSchema",
+      "name": "Numeric range boundaries",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@AC-17",
+        "@specification"
+      ],
+      "steps": [
+        "a decimal field is greater than zero and at most one hundred",
+        "the value is 100.01",
+        "range validation fails"
+      ],
+      "source": "docs/use-cases/features/UC-msgCreateSchema.feature"
+    },
+    {
+      "id": "UC-repSuites-EX-001",
+      "useCaseId": "UC-repSuites",
+      "useCaseName": "Download a control-pack evidence file for a suite",
+      "page": "repSuites",
+      "name": "Reconcile totals",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repSuites",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a pack contains two pass and one fail result",
+        "totals are reviewed",
+        "the totals represent those three outcomes"
+      ],
+      "source": "docs/use-cases/features/UC-repSuites.feature"
+    },
+    {
+      "id": "UC-repSuites-EX-002",
+      "useCaseId": "UC-repSuites",
+      "useCaseName": "Download a control-pack evidence file for a suite",
+      "page": "repSuites",
+      "name": "Unknown suite",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repSuites",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the suite ID is unknown",
+        "evidence is requested",
+        "an error replaces the download"
+      ],
+      "source": "docs/use-cases/features/UC-repSuites.feature"
+    },
+    {
+      "id": "UC-repSuites-EX-003",
+      "useCaseId": "UC-repSuites",
+      "useCaseName": "Download a control-pack evidence file for a suite",
+      "page": "repSuites",
+      "name": "No endpoint",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repSuites",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the evidence route is unavailable",
+        "download is requested",
+        "no evidence success is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-repSuites.feature"
+    },
+    {
+      "id": "UC-repSuites-EX-004",
+      "useCaseId": "UC-repSuites",
+      "useCaseName": "Download a control-pack evidence file for a suite",
+      "page": "repSuites",
+      "name": "Offline reading",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-repSuites",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a supported pack was downloaded",
+        "it is opened offline",
+        "its stored results remain readable without rerunning tests"
+      ],
+      "source": "docs/use-cases/features/UC-repSuites.feature"
+    },
+    {
+      "id": "UC-ruleCanvas-EX-001",
+      "useCaseId": "UC-ruleCanvas",
+      "useCaseName": "Visually sketch a rule's decision logic",
+      "page": "ruleCanvas",
+      "name": "Separate surface",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleCanvas",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a rule form is open",
+        "Open schematic Rule Canvas is selected",
+        "the companion opens independently"
+      ],
+      "source": "docs/use-cases/features/UC-ruleCanvas.feature"
+    },
+    {
+      "id": "UC-ruleCanvas-EX-002",
+      "useCaseId": "UC-ruleCanvas",
+      "useCaseName": "Visually sketch a rule's decision logic",
+      "page": "ruleCanvas",
+      "name": "Close",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleCanvas",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the companion is open",
+        "its tab is closed",
+        "no rule save is implied"
+      ],
+      "source": "docs/use-cases/features/UC-ruleCanvas.feature"
+    },
+    {
+      "id": "UC-ruleCanvas-EX-003",
+      "useCaseId": "UC-ruleCanvas",
+      "useCaseName": "Visually sketch a rule's decision logic",
+      "page": "ruleCanvas",
+      "name": "No compilation claim",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleCanvas",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "complex logic is drawn",
+        "the sketch is reviewed",
+        "it is not labelled executed without a supported compiler"
+      ],
+      "source": "docs/use-cases/features/UC-ruleCanvas.feature"
+    },
+    {
+      "id": "UC-ruleCanvas-EX-004",
+      "useCaseId": "UC-ruleCanvas",
+      "useCaseName": "Visually sketch a rule's decision logic",
+      "page": "ruleCanvas",
+      "name": "Return",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-ruleCanvas",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the original form has unsaved content",
+        "the analyst returns",
+        "the sketch has not silently submitted that form"
+      ],
+      "source": "docs/use-cases/features/UC-ruleCanvas.feature"
+    },
+    {
+      "id": "UC-eventFramework-EX-001",
+      "useCaseId": "UC-eventFramework",
+      "useCaseName": "Configure the domain event catalogue and origin headers",
+      "page": "eventFramework",
+      "name": "Mount condition",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-eventFramework",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the current page title is App configs",
+        "the overlay evaluates its title condition",
+        "the source condition permits mounting"
+      ],
+      "source": "docs/use-cases/features/UC-eventFramework.feature"
+    },
+    {
+      "id": "UC-eventFramework-EX-002",
+      "useCaseId": "UC-eventFramework",
+      "useCaseName": "Configure the domain event catalogue and origin headers",
+      "page": "eventFramework",
+      "name": "Header policy",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-eventFramework",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "MQ requires a configured header",
+        "the effective policy is reviewed",
+        "the requirement is distinct from API-origin settings"
+      ],
+      "source": "docs/use-cases/features/UC-eventFramework.feature"
+    },
+    {
+      "id": "UC-eventFramework-EX-003",
+      "useCaseId": "UC-eventFramework",
+      "useCaseName": "Configure the domain event catalogue and origin headers",
+      "page": "eventFramework",
+      "name": "Unknown event",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-eventFramework",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "an unknown event code is submitted",
+        "emit is requested",
+        "the code is rejected"
+      ],
+      "source": "docs/use-cases/features/UC-eventFramework.feature"
+    },
+    {
+      "id": "UC-eventFramework-EX-004",
+      "useCaseId": "UC-eventFramework",
+      "useCaseName": "Configure the domain event catalogue and origin headers",
+      "page": "eventFramework",
+      "name": "Save failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-eventFramework",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a framework update fails",
+        "the result appears",
+        "the prior effective configuration is not claimed changed"
+      ],
+      "source": "docs/use-cases/features/UC-eventFramework.feature"
+    },
+    {
+      "id": "UC-security-EX-001",
+      "useCaseId": "UC-security",
+      "useCaseName": "Control write encryption without breaking historical decrypt",
+      "page": "security",
+      "name": "Historical reveal",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-security",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "an ENCRYPTED record exists",
+        "write encryption is disabled and the record is revealed",
+        "authorised historical decryption still returns its original content"
+      ],
+      "source": "docs/use-cases/features/UC-security.feature"
+    },
+    {
+      "id": "UC-security-EX-002",
+      "useCaseId": "UC-security",
+      "useCaseName": "Control write encryption without breaking historical decrypt",
+      "page": "security",
+      "name": "Fail closed",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-security",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the required provider is unavailable",
+        "an encrypted write is attempted",
+        "it does not silently succeed as plaintext"
+      ],
+      "source": "docs/use-cases/features/UC-security.feature"
+    },
+    {
+      "id": "UC-security-EX-003",
+      "useCaseId": "UC-security",
+      "useCaseName": "Control write encryption without breaking historical decrypt",
+      "page": "security",
+      "name": "Pending state",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-security",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "write-disabled policy permits pending plaintext",
+        "a sensitive record is created",
+        "its state is explicitly pending encryption"
+      ],
+      "source": "docs/use-cases/features/UC-security.feature"
+    },
+    {
+      "id": "UC-security-EX-004",
+      "useCaseId": "UC-security",
+      "useCaseName": "Control write encryption without breaking historical decrypt",
+      "page": "security",
+      "name": "Rotation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-security",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a record uses an older key version",
+        "a new key version is created",
+        "historical decryption remains supported under the configured retention policy"
+      ],
+      "source": "docs/use-cases/features/UC-security.feature"
+    },
+    {
+      "id": "UC-schemeDefinitions-EX-001",
+      "useCaseId": "UC-schemeDefinitions",
+      "useCaseName": "Scheme definitions",
+      "page": "schemeDefinitions",
+      "name": "Handoff",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schemeDefinitions",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "pacs.008 is selected",
+        "Use this is activated",
+        "the wizard receives pacs.008 and its selected model"
+      ],
+      "source": "docs/use-cases/features/UC-schemeDefinitions.feature"
+    },
+    {
+      "id": "UC-schemeDefinitions-EX-002",
+      "useCaseId": "UC-schemeDefinitions",
+      "useCaseName": "Scheme definitions",
+      "page": "schemeDefinitions",
+      "name": "Source download",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schemeDefinitions",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "an original XSD is stored",
+        "Download XSD is selected",
+        "the stored source is returned"
+      ],
+      "source": "docs/use-cases/features/UC-schemeDefinitions.feature"
+    },
+    {
+      "id": "UC-schemeDefinitions-EX-003",
+      "useCaseId": "UC-schemeDefinitions",
+      "useCaseName": "Scheme definitions",
+      "page": "schemeDefinitions",
+      "name": "Missing document",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schemeDefinitions",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "no Markdown was stored",
+        "documentation is requested",
+        "absence is disclosed rather than invented"
+      ],
+      "source": "docs/use-cases/features/UC-schemeDefinitions.feature"
+    },
+    {
+      "id": "UC-schemeDefinitions-EX-004",
+      "useCaseId": "UC-schemeDefinitions",
+      "useCaseName": "Scheme definitions",
+      "page": "schemeDefinitions",
+      "name": "Read only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-schemeDefinitions",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a schema is inspected",
+        "the analyst returns to the list",
+        "its version and content are unchanged"
+      ],
+      "source": "docs/use-cases/features/UC-schemeDefinitions.feature"
+    },
+    {
+      "id": "UC-msgSchemaCanvas-EX-001",
+      "useCaseId": "UC-msgSchemaCanvas",
+      "useCaseName": "Schema canvas",
+      "page": "msgSchemaCanvas",
+      "name": "Property panel",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaCanvas",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a node has required=true",
+        "the node is selected",
+        "the panel shows that actual property"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaCanvas.feature"
+    },
+    {
+      "id": "UC-msgSchemaCanvas-EX-002",
+      "useCaseId": "UC-msgSchemaCanvas",
+      "useCaseName": "Schema canvas",
+      "page": "msgSchemaCanvas",
+      "name": "View change",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaCanvas",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a draft is visible",
+        "the analyst zooms",
+        "field constraints do not change"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaCanvas.feature"
+    },
+    {
+      "id": "UC-msgSchemaCanvas-EX-003",
+      "useCaseId": "UC-msgSchemaCanvas",
+      "useCaseName": "Schema canvas",
+      "page": "msgSchemaCanvas",
+      "name": "Root deletion",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaCanvas",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the root is selected",
+        "actions are inspected",
+        "the non-root delete control is not offered for the root"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaCanvas.feature"
+    },
+    {
+      "id": "UC-msgSchemaCanvas-EX-004",
+      "useCaseId": "UC-msgSchemaCanvas",
+      "useCaseName": "Schema canvas",
+      "page": "msgSchemaCanvas",
+      "name": "Save failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-msgSchemaCanvas",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the draft save fails",
+        "the result is displayed",
+        "the canvas does not claim a saved or published schema"
+      ],
+      "source": "docs/use-cases/features/UC-msgSchemaCanvas.feature"
+    },
+    {
+      "id": "UC-features-EX-001",
+      "useCaseId": "UC-features",
+      "useCaseName": "Features",
+      "page": "features",
+      "name": "Tenant scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-features",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "no user override is selected",
+        "a level-1 grant is saved",
+        "the saved target is the tenant default"
+      ],
+      "source": "docs/use-cases/features/UC-features.feature"
+    },
+    {
+      "id": "UC-features-EX-002",
+      "useCaseId": "UC-features",
+      "useCaseName": "Features",
+      "page": "features",
+      "name": "User scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-features",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "user U is explicitly selected",
+        "a grant is saved",
+        "the override is associated with U"
+      ],
+      "source": "docs/use-cases/features/UC-features.feature"
+    },
+    {
+      "id": "UC-features-EX-003",
+      "useCaseId": "UC-features",
+      "useCaseName": "Features",
+      "page": "features",
+      "name": "Restricted API",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-features",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the effective level is lower than a protected route requires",
+        "that route is called",
+        "the feature-level gate rejects it"
+      ],
+      "source": "docs/use-cases/features/UC-features.feature"
+    },
+    {
+      "id": "UC-features-EX-004",
+      "useCaseId": "UC-features",
+      "useCaseName": "Features",
+      "page": "features",
+      "name": "No RBAC substitute",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-features",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a feature is visible",
+        "the operator lacks its write permission",
+        "visibility is not treated as write authorisation"
+      ],
+      "source": "docs/use-cases/features/UC-features.feature"
+    },
+    {
+      "id": "UC-users-EX-001",
+      "useCaseId": "UC-users",
+      "useCaseName": "Users",
+      "page": "users",
+      "name": "List",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-users",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a tenant has two members",
+        "admin users are retrieved",
+        "the returned members are shown without invented rows"
+      ],
+      "source": "docs/use-cases/features/UC-users.feature"
+    },
+    {
+      "id": "UC-users-EX-002",
+      "useCaseId": "UC-users",
+      "useCaseName": "Users",
+      "page": "users",
+      "name": "Effective access",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-users",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "user U is selected",
+        "effective access is requested",
+        "the request targets U"
+      ],
+      "source": "docs/use-cases/features/UC-users.feature"
+    },
+    {
+      "id": "UC-users-EX-003",
+      "useCaseId": "UC-users",
+      "useCaseName": "Users",
+      "page": "users",
+      "name": "Read only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-users",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "access details are inspected",
+        "the view closes",
+        "no assignment changes"
+      ],
+      "source": "docs/use-cases/features/UC-users.feature"
+    },
+    {
+      "id": "UC-users-EX-004",
+      "useCaseId": "UC-users",
+      "useCaseName": "Users",
+      "page": "users",
+      "name": "Unavailable CRUD",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-users",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the old /api/v1/users path is unregistered",
+        "the specification is read",
+        "it does not claim that path is a verified capability"
+      ],
+      "source": "docs/use-cases/features/UC-users.feature"
+    },
+    {
+      "id": "UC-userCreate-EX-001",
+      "useCaseId": "UC-userCreate",
+      "useCaseName": "Create new user",
+      "page": "userCreate",
+      "name": "Existing identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-userCreate",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the person already has an account",
+        "membership creation is reviewed",
+        "account reuse is considered separately from duplicate-account creation"
+      ],
+      "source": "docs/use-cases/features/UC-userCreate.feature"
+    },
+    {
+      "id": "UC-userCreate-EX-002",
+      "useCaseId": "UC-userCreate",
+      "useCaseName": "Create new user",
+      "page": "userCreate",
+      "name": "Invalid role",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-userCreate",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a selected role is unavailable",
+        "creation is submitted",
+        "the intended role is not falsely reported assigned"
+      ],
+      "source": "docs/use-cases/features/UC-userCreate.feature"
+    },
+    {
+      "id": "UC-userCreate-EX-003",
+      "useCaseId": "UC-userCreate",
+      "useCaseName": "Create new user",
+      "page": "userCreate",
+      "name": "Cancelled",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-userCreate",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "creation has not been submitted",
+        "the administrator cancels",
+        "no membership creation is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-userCreate.feature"
+    },
+    {
+      "id": "UC-userCreate-EX-004",
+      "useCaseId": "UC-userCreate",
+      "useCaseName": "Create new user",
+      "page": "userCreate",
+      "name": "Uncertain result",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-userCreate",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "submission has no definitive result",
+        "status is displayed",
+        "the membership outcome remains unconfirmed"
+      ],
+      "source": "docs/use-cases/features/UC-userCreate.feature"
+    },
+    {
+      "id": "UC-roles-EX-001",
+      "useCaseId": "UC-roles",
+      "useCaseName": "User roles",
+      "page": "roles",
+      "name": "Profiles",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roles",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "functional profiles exist",
+        "the supported listing is opened",
+        "their actual permissions are shown"
+      ],
+      "source": "docs/use-cases/features/UC-roles.feature"
+    },
+    {
+      "id": "UC-roles-EX-002",
+      "useCaseId": "UC-roles",
+      "useCaseName": "User roles",
+      "page": "roles",
+      "name": "Data scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roles",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a data access profile exists",
+        "roles are reviewed",
+        "data scope is not confused with functional verbs"
+      ],
+      "source": "docs/use-cases/features/UC-roles.feature"
+    },
+    {
+      "id": "UC-roles-EX-003",
+      "useCaseId": "UC-roles",
+      "useCaseName": "User roles",
+      "page": "roles",
+      "name": "No CRUD",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roles",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "role deletion is unimplemented",
+        "the operation is considered",
+        "the gap is explicit"
+      ],
+      "source": "docs/use-cases/features/UC-roles.feature"
+    },
+    {
+      "id": "UC-roles-EX-004",
+      "useCaseId": "UC-roles",
+      "useCaseName": "User roles",
+      "page": "roles",
+      "name": "Assignments",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roles",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a profile is assigned",
+        "a change is proposed",
+        "affected assignments are identified before a lifecycle policy is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-roles.feature"
+    },
+    {
+      "id": "UC-roleCreate-EX-001",
+      "useCaseId": "UC-roleCreate",
+      "useCaseName": "Create user role",
+      "page": "roleCreate",
+      "name": "Permission vocabulary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roleCreate",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "an unknown permission is entered",
+        "the role is validated",
+        "the unsupported permission is identified"
+      ],
+      "source": "docs/use-cases/features/UC-roleCreate.feature"
+    },
+    {
+      "id": "UC-roleCreate-EX-002",
+      "useCaseId": "UC-roleCreate",
+      "useCaseName": "Create user role",
+      "page": "roleCreate",
+      "name": "Reuse",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roleCreate",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "an equivalent role already exists",
+        "a new role is proposed",
+        "the existing grouping can be reviewed before duplication"
+      ],
+      "source": "docs/use-cases/features/UC-roleCreate.feature"
+    },
+    {
+      "id": "UC-roleCreate-EX-003",
+      "useCaseId": "UC-roleCreate",
+      "useCaseName": "Create user role",
+      "page": "roleCreate",
+      "name": "Separate level",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roleCreate",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a role is associated with level 2",
+        "permissions are reviewed",
+        "level 2 is not interpreted as every write permission"
+      ],
+      "source": "docs/use-cases/features/UC-roleCreate.feature"
+    },
+    {
+      "id": "UC-roleCreate-EX-004",
+      "useCaseId": "UC-roleCreate",
+      "useCaseName": "Create user role",
+      "page": "roleCreate",
+      "name": "No implementation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-roleCreate",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "no create-role route is registered",
+        "creation is requested",
+        "the gap is disclosed rather than a false success"
+      ],
+      "source": "docs/use-cases/features/UC-roleCreate.feature"
+    },
+    {
+      "id": "UC-configurationEnvironmentDefaults-EX-001",
+      "useCaseId": "UC-configurationEnvironmentDefaults",
+      "useCaseName": "Environment defaults",
+      "page": "configurationEnvironmentDefaults",
+      "name": "Displayed default",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEnvironmentDefaults",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the screen is configured with Sandbox",
+        "it opens",
+        "the displayed value is identified as configuration rather than proof of isolation"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEnvironmentDefaults.feature"
+    },
+    {
+      "id": "UC-configurationEnvironmentDefaults-EX-002",
+      "useCaseId": "UC-configurationEnvironmentDefaults",
+      "useCaseName": "Environment defaults",
+      "page": "configurationEnvironmentDefaults",
+      "name": "No retroactive change",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEnvironmentDefaults",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a run already exists",
+        "the future default changes",
+        "the old run is not claimed retargeted"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEnvironmentDefaults.feature"
+    },
+    {
+      "id": "UC-configurationEnvironmentDefaults-EX-003",
+      "useCaseId": "UC-configurationEnvironmentDefaults",
+      "useCaseName": "Environment defaults",
+      "page": "configurationEnvironmentDefaults",
+      "name": "Unsupported save",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEnvironmentDefaults",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "no setting write is wired",
+        "the toggle is used",
+        "a persisted environment change is not claimed"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEnvironmentDefaults.feature"
+    },
+    {
+      "id": "UC-configurationNotifications-EX-001",
+      "useCaseId": "UC-configurationNotifications",
+      "useCaseName": "Notifications",
+      "page": "configurationNotifications",
+      "name": "Preference only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationNotifications",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a preference is saved",
+        "the result is displayed",
+        "no email delivery is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-configurationNotifications.feature"
+    },
+    {
+      "id": "UC-configurationNotifications-EX-002",
+      "useCaseId": "UC-configurationNotifications",
+      "useCaseName": "Notifications",
+      "page": "configurationNotifications",
+      "name": "Invalid recipient",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationNotifications",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a recipient is invalid",
+        "delivery is attempted",
+        "failure is disclosed"
+      ],
+      "source": "docs/use-cases/features/UC-configurationNotifications.feature"
+    },
+    {
+      "id": "UC-configurationNotifications-EX-003",
+      "useCaseId": "UC-configurationNotifications",
+      "useCaseName": "Notifications",
+      "page": "configurationNotifications",
+      "name": "Disabled category",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationNotifications",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "failure notifications are disabled",
+        "a run fails",
+        "the documented suppression policy applies only when implemented"
+      ],
+      "source": "docs/use-cases/features/UC-configurationNotifications.feature"
+    },
+    {
+      "id": "UC-configurationApiAccess-EX-001",
+      "useCaseId": "UC-configurationApiAccess",
+      "useCaseName": "API access",
+      "page": "configurationApiAccess",
+      "name": "No credential",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationApiAccess",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the API-access row is toggled",
+        "no credential service is invoked",
+        "no API key is claimed created"
+      ],
+      "source": "docs/use-cases/features/UC-configurationApiAccess.feature"
+    },
+    {
+      "id": "UC-configurationApiAccess-EX-002",
+      "useCaseId": "UC-configurationApiAccess",
+      "useCaseName": "API access",
+      "page": "configurationApiAccess",
+      "name": "Disabled",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationApiAccess",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "access is shown disabled",
+        "the page is inspected",
+        "the display alone is not proof all API routes reject requests"
+      ],
+      "source": "docs/use-cases/features/UC-configurationApiAccess.feature"
+    },
+    {
+      "id": "UC-configurationApiAccess-EX-003",
+      "useCaseId": "UC-configurationApiAccess",
+      "useCaseName": "API access",
+      "page": "configurationApiAccess",
+      "name": "Separation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationApiAccess",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the console session works",
+        "API access is reviewed",
+        "session access is not confused with a new programmatic credential"
+      ],
+      "source": "docs/use-cases/features/UC-configurationApiAccess.feature"
+    },
+    {
+      "id": "UC-configurationDataRetention-EX-001",
+      "useCaseId": "UC-configurationDataRetention",
+      "useCaseName": "Data retention",
+      "page": "configurationDataRetention",
+      "name": "Caption only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationDataRetention",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the page says 90 days",
+        "the policy is reviewed",
+        "the text is not represented as evidence of automated cleanup"
+      ],
+      "source": "docs/use-cases/features/UC-configurationDataRetention.feature"
+    },
+    {
+      "id": "UC-configurationDataRetention-EX-002",
+      "useCaseId": "UC-configurationDataRetention",
+      "useCaseName": "Data retention",
+      "page": "configurationDataRetention",
+      "name": "Cutoff boundary",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationDataRetention",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a future cleanup policy has a defined cutoff",
+        "a record lies exactly on that cutoff",
+        "inclusion follows the explicitly agreed boundary"
+      ],
+      "source": "docs/use-cases/features/UC-configurationDataRetention.feature"
+    },
+    {
+      "id": "UC-configurationDataRetention-EX-003",
+      "useCaseId": "UC-configurationDataRetention",
+      "useCaseName": "Data retention",
+      "page": "configurationDataRetention",
+      "name": "Held record",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationDataRetention",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "an agreed hold applies",
+        "cleanup is planned",
+        "the hold policy is considered rather than silently ignored"
+      ],
+      "source": "docs/use-cases/features/UC-configurationDataRetention.feature"
+    },
+    {
+      "id": "UC-configurationUserRoles-EX-001",
+      "useCaseId": "UC-configurationUserRoles",
+      "useCaseName": "User roles",
+      "page": "configurationUserRoles",
+      "name": "Informational row",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationUserRoles",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the row mentions Analyst, Reviewer and Admin",
+        "it is displayed",
+        "those labels are not claimed to be the full tenant assignment list"
+      ],
+      "source": "docs/use-cases/features/UC-configurationUserRoles.feature"
+    },
+    {
+      "id": "UC-configurationUserRoles-EX-002",
+      "useCaseId": "UC-configurationUserRoles",
+      "useCaseName": "User roles",
+      "page": "configurationUserRoles",
+      "name": "No creation",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationUserRoles",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the row is toggled",
+        "no provisioning route is called",
+        "no new role is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-configurationUserRoles.feature"
+    },
+    {
+      "id": "UC-configurationUserRoles-EX-003",
+      "useCaseId": "UC-configurationUserRoles",
+      "useCaseName": "User roles",
+      "page": "configurationUserRoles",
+      "name": "Separate identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationUserRoles",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the roles case also exists",
+        "this page opens its use case",
+        "the configuration subpage identity is preserved"
+      ],
+      "source": "docs/use-cases/features/UC-configurationUserRoles.feature"
+    },
+    {
+      "id": "UC-configurationEventing-EX-001",
+      "useCaseId": "UC-configurationEventing",
+      "useCaseName": "Eventing",
+      "page": "configurationEventing",
+      "name": "Save only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEventing",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "settings are edited",
+        "Save eventing is selected",
+        "the result does not claim a dummy was sent"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEventing.feature"
+    },
+    {
+      "id": "UC-configurationEventing-EX-002",
+      "useCaseId": "UC-configurationEventing",
+      "useCaseName": "Eventing",
+      "page": "configurationEventing",
+      "name": "Connectivity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEventing",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the receiver is unavailable",
+        "Test connection is selected",
+        "failure is reported"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEventing.feature"
+    },
+    {
+      "id": "UC-configurationEventing-EX-003",
+      "useCaseId": "UC-configurationEventing",
+      "useCaseName": "Eventing",
+      "page": "configurationEventing",
+      "name": "Dummy send",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEventing",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a test receiver is configured",
+        "Send dummy is explicitly selected",
+        "its send result is reported independently of configuration saving"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEventing.feature"
+    },
+    {
+      "id": "UC-configurationEventing-EX-004",
+      "useCaseId": "UC-configurationEventing",
+      "useCaseName": "Eventing",
+      "page": "configurationEventing",
+      "name": "Read only",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationEventing",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the page loads",
+        "no command is selected",
+        "no dummy message is sent"
+      ],
+      "source": "docs/use-cases/features/UC-configurationEventing.feature"
+    },
+    {
+      "id": "UC-configurationAppConfigs-EX-001",
+      "useCaseId": "UC-configurationAppConfigs",
+      "useCaseName": "App configs",
+      "page": "configurationAppConfigs",
+      "name": "Logging save",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationAppConfigs",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "a supported forwarding mode is selected",
+        "Save logging succeeds",
+        "the returned operation is reported as saved"
+      ],
+      "source": "docs/use-cases/features/UC-configurationAppConfigs.feature"
+    },
+    {
+      "id": "UC-configurationAppConfigs-EX-002",
+      "useCaseId": "UC-configurationAppConfigs",
+      "useCaseName": "App configs",
+      "page": "configurationAppConfigs",
+      "name": "Local timeout",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationAppConfigs",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "server timeout saving fails after local saving",
+        "status renders",
+        "local-only persistence is distinguished"
+      ],
+      "source": "docs/use-cases/features/UC-configurationAppConfigs.feature"
+    },
+    {
+      "id": "UC-configurationAppConfigs-EX-003",
+      "useCaseId": "UC-configurationAppConfigs",
+      "useCaseName": "App configs",
+      "page": "configurationAppConfigs",
+      "name": "Read-only headers",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationAppConfigs",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "origin headers render in a preformatted block",
+        "the panel is inspected",
+        "the display is not claimed to provide editing"
+      ],
+      "source": "docs/use-cases/features/UC-configurationAppConfigs.feature"
+    },
+    {
+      "id": "UC-configurationAppConfigs-EX-004",
+      "useCaseId": "UC-configurationAppConfigs",
+      "useCaseName": "App configs",
+      "page": "configurationAppConfigs",
+      "name": "Timeout uncertainty",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-configurationAppConfigs",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a write outlasts the UI timeout",
+        "the UI stops waiting",
+        "the server outcome is not asserted rolled back"
+      ],
+      "source": "docs/use-cases/features/UC-configurationAppConfigs.feature"
+    },
+    {
+      "id": "UC-useCaseTemplates-EX-001",
+      "useCaseId": "UC-useCaseTemplates",
+      "useCaseName": "Use-case templates",
+      "page": "useCaseTemplates",
+      "name": "Section order",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseTemplates",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "the template is downloaded",
+        "its headings are inspected",
+        "Goal through Gherkin follow the agreed top-level order"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseTemplates.feature"
+    },
+    {
+      "id": "UC-useCaseTemplates-EX-002",
+      "useCaseId": "UC-useCaseTemplates",
+      "useCaseName": "Use-case templates",
+      "page": "useCaseTemplates",
+      "name": "Metadata",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseTemplates",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the template is downloaded",
+        "metadata is inspected",
+        "ID, Screen, Level, Style, Actor and Extends fields exist"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseTemplates.feature"
+    },
+    {
+      "id": "UC-useCaseTemplates-EX-003",
+      "useCaseId": "UC-useCaseTemplates",
+      "useCaseName": "Use-case templates",
+      "page": "useCaseTemplates",
+      "name": "No sequencing",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseTemplates",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the Extends placeholders are read",
+        "the author fills the template",
+        "they describe relationships rather than first and last steps"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseTemplates.feature"
+    },
+    {
+      "id": "UC-useCaseTemplates-EX-004",
+      "useCaseId": "UC-useCaseTemplates",
+      "useCaseName": "Use-case templates",
+      "page": "useCaseTemplates",
+      "name": "No write",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseTemplates",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "a template is downloaded",
+        "the catalogue is inspected",
+        "no use-case record was created by downloading"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseTemplates.feature"
+    },
+    {
+      "id": "UC-featureIds-EX-001",
+      "useCaseId": "UC-featureIds",
+      "useCaseName": "Feature IDs",
+      "page": "featureIds",
+      "name": "Identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-featureIds",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "feature overview is returned",
+        "Feature IDs renders",
+        "FTR-overview is shown for that key"
+      ],
+      "source": "docs/use-cases/features/UC-featureIds.feature"
+    },
+    {
+      "id": "UC-featureIds-EX-002",
+      "useCaseId": "UC-featureIds",
+      "useCaseName": "Feature IDs",
+      "page": "featureIds",
+      "name": "Failed update",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-featureIds",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the row PATCH returns 404",
+        "a level change is attempted",
+        "no saved level change is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-featureIds.feature"
+    },
+    {
+      "id": "UC-featureIds-EX-003",
+      "useCaseId": "UC-featureIds",
+      "useCaseName": "Feature IDs",
+      "page": "featureIds",
+      "name": "Catalogue scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-featureIds",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "a documentation-only case exists",
+        "features are listed",
+        "it is not invented as a feature grant"
+      ],
+      "source": "docs/use-cases/features/UC-featureIds.feature"
+    },
+    {
+      "id": "UC-featureIds-EX-004",
+      "useCaseId": "UC-featureIds",
+      "useCaseName": "Feature IDs",
+      "page": "featureIds",
+      "name": "Default versus assigned",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-featureIds",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "an override is available",
+        "levels render",
+        "default and effective values are distinguishable"
+      ],
+      "source": "docs/use-cases/features/UC-featureIds.feature"
+    },
+    {
+      "id": "UC-useCaseReview-EX-001",
+      "useCaseId": "UC-useCaseReview",
+      "useCaseName": "Use-case review",
+      "page": "useCaseReview",
+      "name": "Deterministic mode",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseReview",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "review returns deterministic-contract-review",
+        "results display",
+        "the review is described with that mode"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseReview.feature"
+    },
+    {
+      "id": "UC-useCaseReview-EX-002",
+      "useCaseId": "UC-useCaseReview",
+      "useCaseName": "Use-case review",
+      "page": "useCaseReview",
+      "name": "Full denominator",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseReview",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "the catalogue has N cases",
+        "all-case review completes",
+        "its coverage accounts for all N cases"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseReview.feature"
+    },
+    {
+      "id": "UC-useCaseReview-EX-003",
+      "useCaseId": "UC-useCaseReview",
+      "useCaseName": "Use-case review",
+      "page": "useCaseReview",
+      "name": "Review failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseReview",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the request fails",
+        "the status is displayed",
+        "no all-passed result is fabricated"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseReview.feature"
+    },
+    {
+      "id": "UC-useCaseReview-EX-004",
+      "useCaseId": "UC-useCaseReview",
+      "useCaseName": "Use-case review",
+      "page": "useCaseReview",
+      "name": "Limited assurance",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseReview",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "no structural finding exists",
+        "the result is interpreted",
+        "it does not certify runtime behavior"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseReview.feature"
+    },
+    {
+      "id": "UC-applicationEvents-EX-001",
+      "useCaseId": "UC-applicationEvents",
+      "useCaseName": "Application Events",
+      "page": "applicationEvents",
+      "name": "Filter scope",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-applicationEvents",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "200 rows were loaded",
+        "a text filter is applied",
+        "only those loaded rows are searched"
+      ],
+      "source": "docs/use-cases/features/UC-applicationEvents.feature"
+    },
+    {
+      "id": "UC-applicationEvents-EX-002",
+      "useCaseId": "UC-applicationEvents",
+      "useCaseName": "Application Events",
+      "page": "applicationEvents",
+      "name": "Missing actor",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-applicationEvents",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "an event lacks actor context",
+        "the row renders",
+        "an unavailable marker appears rather than a fabricated user"
+      ],
+      "source": "docs/use-cases/features/UC-applicationEvents.feature"
+    },
+    {
+      "id": "UC-applicationEvents-EX-003",
+      "useCaseId": "UC-applicationEvents",
+      "useCaseName": "Application Events",
+      "page": "applicationEvents",
+      "name": "No match",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-applicationEvents",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "events exist but none match",
+        "the filter is applied",
+        "the empty result is described as no matches"
+      ],
+      "source": "docs/use-cases/features/UC-applicationEvents.feature"
+    },
+    {
+      "id": "UC-applicationEvents-EX-004",
+      "useCaseId": "UC-applicationEvents",
+      "useCaseName": "Application Events",
+      "page": "applicationEvents",
+      "name": "Failed load",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-applicationEvents",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the events request fails",
+        "the view renders",
+        "the failure is not represented as verified zero captured events"
+      ],
+      "source": "docs/use-cases/features/UC-applicationEvents.feature"
+    },
+    {
+      "id": "UC-useCaseEditor-EX-001",
+      "useCaseId": "UC-useCaseEditor",
+      "useCaseName": "Use case",
+      "page": "useCaseEditor",
+      "name": "Identity",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseEditor",
+        "@AC-01",
+        "@specification"
+      ],
+      "steps": [
+        "UC-tcNew is opened",
+        "the author edits its goal",
+        "the case ID remains UC-tcNew"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseEditor.feature"
+    },
+    {
+      "id": "UC-useCaseEditor-EX-002",
+      "useCaseId": "UC-useCaseEditor",
+      "useCaseName": "Use case",
+      "page": "useCaseEditor",
+      "name": "Complete download",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseEditor",
+        "@AC-02",
+        "@specification"
+      ],
+      "steps": [
+        "a case has detailed notes and a contract",
+        "Markdown is downloaded",
+        "notes and parseable contract JSON are included"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseEditor.feature"
+    },
+    {
+      "id": "UC-useCaseEditor-EX-003",
+      "useCaseId": "UC-useCaseEditor",
+      "useCaseName": "Use case",
+      "page": "useCaseEditor",
+      "name": "Missing key",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseEditor",
+        "@AC-03",
+        "@specification"
+      ],
+      "steps": [
+        "the requested page is unknown",
+        "the editor loads",
+        "a missing-case error replaces unrelated content"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseEditor.feature"
+    },
+    {
+      "id": "UC-useCaseEditor-EX-004",
+      "useCaseId": "UC-useCaseEditor",
+      "useCaseName": "Use case",
+      "page": "useCaseEditor",
+      "name": "Save failure",
+      "language": "en",
+      "status": "specified-not-executed",
+      "tags": [
+        "@UC-useCaseEditor",
+        "@AC-04",
+        "@specification"
+      ],
+      "steps": [
+        "the PUT fails",
+        "the editor handles it",
+        "no successful revision is claimed"
+      ],
+      "source": "docs/use-cases/features/UC-useCaseEditor.feature"
+    }
+  ]
+}

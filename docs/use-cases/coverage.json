@@ -1,0 +1,1619 @@
+{
+  "total": 63,
+  "featureCount": 44,
+  "aliases": {
+    "datasets": "dsAll",
+    "testCases": "tcPool",
+    "testSuites": "tsAll"
+  },
+  "requiredSourceKeys": [
+    "about",
+    "applicationEvents",
+    "configuration",
+    "configurationApiAccess",
+    "configurationAppConfigs",
+    "configurationDataRetention",
+    "configurationEnvironmentDefaults",
+    "configurationEventing",
+    "configurationNotifications",
+    "configurationUserRoles",
+    "datasets",
+    "dsAll",
+    "dsNew",
+    "eventFramework",
+    "externalSystems",
+    "featureIds",
+    "help",
+    "messageDesigner",
+    "messageDesignerFamily",
+    "messageDesignerFields",
+    "messageDesignerMessage",
+    "messageDesignerWorkspace",
+    "msgCreateSchema",
+    "msgDataFiles",
+    "msgExportTemplate",
+    "msgImportSchema",
+    "msgSchemaCanvas",
+    "msgSchemaRegister",
+    "msgViewSaved",
+    "naming",
+    "overview",
+    "repAll",
+    "repCompliance",
+    "repCoverage",
+    "repRuns",
+    "repScheduled",
+    "repSuites",
+    "ruleBenchCreate",
+    "ruleBenchExisting",
+    "ruleBenchExport",
+    "ruleBenchStage",
+    "ruleBenchValidate",
+    "ruleCanvas",
+    "schAll",
+    "schNew",
+    "schUpcoming",
+    "schemeDefinitions",
+    "security",
+    "tcNew",
+    "tcPool",
+    "testCases",
+    "testSuites",
+    "trActive",
+    "trAll",
+    "trHistory",
+    "trNew",
+    "tsAll",
+    "tsNew",
+    "useCaseReview",
+    "useCaseTemplates"
+  ],
+  "cases": {
+    "overview": {
+      "id": "UC-overview",
+      "binding": "custom navigation: overview",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/console/bootstrap",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 49
+          }
+        },
+        {
+          "api": "GET /api/v1/ux/first-run",
+          "registration": {
+            "file": "apps/api/src/modules/registerUx.ts",
+            "line": 6
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-02.js",
+        "apps/api/src/modules/liveConsole.ts"
+      ]
+    },
+    "ruleBenchExisting": {
+      "id": "UC-ruleBenchExisting",
+      "binding": "CONFIG.pages.ruleBenchExisting",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/rules",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 104
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "ruleBenchCreate": {
+      "id": "UC-ruleBenchCreate",
+      "binding": "CONFIG.pages.ruleBenchCreate",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/rules",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 111
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/api/src/modules/detectionRules.ts"
+      ]
+    },
+    "ruleBenchExport": {
+      "id": "UC-ruleBenchExport",
+      "binding": "CONFIG.pages.ruleBenchExport",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/rules/export",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 117
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/api/src/modules/detectionRules.ts"
+      ]
+    },
+    "msgViewSaved": {
+      "id": "UC-msgViewSaved",
+      "binding": "CONFIG.pages.msgViewSaved",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/message-types",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 352
+          }
+        },
+        {
+          "api": "GET /api/v1/definitions",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 99
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSpecGaps.ts",
+        "apps/web/public/js/preview-parts/part-05.js"
+      ]
+    },
+    "msgDataFiles": {
+      "id": "UC-msgDataFiles",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/data-files",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 105
+          }
+        },
+        {
+          "api": "GET /api/v1/generated-messages",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 78
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSpecGaps.ts",
+        "apps/api/src/modules/liveOps.ts"
+      ]
+    },
+    "msgExportTemplate": {
+      "id": "UC-msgExportTemplate",
+      "binding": "CONFIG.pages.msgExportTemplate",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/message-types/:code/template.csv",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 50
+          }
+        },
+        {
+          "api": "POST /api/v1/templates/generate",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 60
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts"
+      ]
+    },
+    "trActive": {
+      "id": "UC-trActive",
+      "binding": "CONFIG.pages.trActive",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/runs",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 150
+          }
+        },
+        {
+          "api": "GET /api/v1/runs/:id",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 115
+          }
+        },
+        {
+          "api": "GET /api/v1/runs/:id/stream",
+          "registration": {
+            "file": "apps/api/src/modules/registerRunStream.ts",
+            "line": 16
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerRunStream.ts",
+        "apps/web/public/js/preview-parts/part-06.js",
+        "apps/api/src/modules/liveOps.ts"
+      ]
+    },
+    "trAll": {
+      "id": "UC-trAll",
+      "binding": "CONFIG.pages.trAll",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/runs",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 150
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "trHistory": {
+      "id": "UC-trHistory",
+      "binding": "CONFIG.pages.trHistory",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/runs",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 150
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-01.js"
+      ]
+    },
+    "dsAll": {
+      "id": "UC-dsAll",
+      "binding": "CONFIG.pages.datasets",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/datasets",
+          "registration": {
+            "file": "apps/api/src/modules/registerCollections.ts",
+            "line": 26
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerCollections.ts",
+        "apps/api/src/modules/collections.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "dsNew": {
+      "id": "UC-dsNew",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/datasets",
+          "registration": {
+            "file": "apps/api/src/modules/registerCollections.ts",
+            "line": 32
+          }
+        },
+        {
+          "api": "POST /api/v1/datasets/:id/assemble",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecPersist.ts",
+            "line": 61
+          }
+        },
+        {
+          "api": "POST /api/v1/datasets/:id/items",
+          "registration": {
+            "file": "apps/api/src/modules/registerDatasetItems.ts",
+            "line": 18
+          }
+        },
+        {
+          "api": "POST /api/v1/datasets/bulk/merge",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecMissing.ts",
+            "line": 64
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerCollections.ts",
+        "apps/api/src/modules/registerDatasetItems.ts",
+        "apps/api/src/modules/registerSpecPersist.ts",
+        "apps/api/src/modules/registerSpecMissing.ts"
+      ]
+    },
+    "tcPool": {
+      "id": "UC-tcPool",
+      "binding": "CONFIG.pages.testCases",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/test-cases",
+          "registration": {
+            "file": "apps/api/src/modules/registerTestCases.ts",
+            "line": 19
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerTestCases.ts",
+        "apps/api/src/modules/collections.ts"
+      ]
+    },
+    "tsAll": {
+      "id": "UC-tsAll",
+      "binding": "CONFIG.pages.testSuites",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/test-suites",
+          "registration": {
+            "file": "apps/api/src/modules/registerTestSuites.ts",
+            "line": 19
+          }
+        },
+        {
+          "api": "POST /api/v1/test-suites/:id/run",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecPersist.ts",
+            "line": 92
+          }
+        },
+        {
+          "api": "DELETE /api/v1/test-suites/:id",
+          "registration": {
+            "file": "apps/api/src/modules/registerTestSuites.ts",
+            "line": 56
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerTestSuites.ts",
+        "apps/api/src/modules/registerSpecPersist.ts",
+        "apps/api/src/modules/collections.ts"
+      ]
+    },
+    "tsNew": {
+      "id": "UC-tsNew",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/test-suites",
+          "registration": {
+            "file": "apps/api/src/modules/registerTestSuites.ts",
+            "line": 25
+          }
+        },
+        {
+          "api": "PUT /api/v1/test-suites/:id/cases",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecPersist.ts",
+            "line": 78
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerTestSuites.ts",
+        "apps/api/src/modules/registerSpecPersist.ts",
+        "apps/api/src/modules/collections.ts"
+      ]
+    },
+    "schUpcoming": {
+      "id": "UC-schUpcoming",
+      "binding": "CONFIG.pages.schUpcoming",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/schedules",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 180
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/api/src/modules/schedules.ts"
+      ]
+    },
+    "schAll": {
+      "id": "UC-schAll",
+      "binding": "CONFIG.pages.schAll",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/schedules",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 180
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "repAll": {
+      "id": "UC-repAll",
+      "binding": "CONFIG.pages.repAll",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/reports",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 199
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "repRuns": {
+      "id": "UC-repRuns",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/reports",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 199
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "repCoverage": {
+      "id": "UC-repCoverage",
+      "binding": "CONFIG.pages.repCoverage",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/reports",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 199
+          }
+        },
+        {
+          "api": "GET /api/v1/rules",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 104
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "repCompliance": {
+      "id": "UC-repCompliance",
+      "binding": "CONFIG.pages.repCompliance",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/reports",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 199
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "configuration": {
+      "id": "UC-configuration",
+      "binding": "CONFIG.pages.configuration",
+      "feature": true,
+      "apis": [
+        {
+          "api": "PATCH /api/v1/settings/use-cases",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 381
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerUseCases.ts",
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "naming": {
+      "id": "UC-naming",
+      "binding": "CONFIG.pages.naming",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/naming",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 52
+          }
+        },
+        {
+          "api": "GET /api/v1/naming-conventions",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 327
+          }
+        },
+        {
+          "api": "POST /api/v1/naming/preview",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 57
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSpecGaps.ts",
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "help": {
+      "id": "UC-help",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/help.html",
+        "apps/web/public/help/topics.js",
+        "apps/web/public/js/ux-pack.js"
+      ]
+    },
+    "about": {
+      "id": "UC-about",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/about.html",
+        "apps/web/public/not-production.html"
+      ]
+    },
+    "ruleBenchStage": {
+      "id": "UC-ruleBenchStage",
+      "binding": "CONFIG.pages.ruleBenchStage",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/rules/:id/stage",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 96
+          }
+        },
+        {
+          "api": "POST /api/v1/rules/:id/transitions",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 147
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSpecGaps.ts",
+        "apps/api/src/modules/liveConsole.ts"
+      ]
+    },
+    "ruleBenchValidate": {
+      "id": "UC-ruleBenchValidate",
+      "binding": "CONFIG.pages.ruleBenchValidate",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/rules/:id/validate",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 165
+          }
+        },
+        {
+          "api": "GET /api/v1/rules",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 104
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/api/src/modules/detectionRules.ts"
+      ]
+    },
+    "messageDesigner": {
+      "id": "UC-messageDesigner",
+      "binding": "custom navigation: messageDesigner",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/designer-types",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 281
+          }
+        },
+        {
+          "api": "POST /api/v1/message-types",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 390
+          }
+        },
+        {
+          "api": "POST /api/v1/definitions",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecPersist.ts",
+            "line": 48
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-04.js",
+        "apps/web/public/js/preview-parts/part-05.js",
+        "apps/api/src/modules/registerSpecPersist.ts"
+      ]
+    },
+    "messageDesignerFamily": {
+      "id": "UC-messageDesignerFamily",
+      "binding": "wizard step / custom component",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/designer-types",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 281
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-04.js"
+      ]
+    },
+    "messageDesignerMessage": {
+      "id": "UC-messageDesignerMessage",
+      "binding": "wizard step / custom component",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/designer-types",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 281
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-04.js"
+      ]
+    },
+    "messageDesignerFields": {
+      "id": "UC-messageDesignerFields",
+      "binding": "wizard step / custom component",
+      "feature": true,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-04.js"
+      ]
+    },
+    "messageDesignerWorkspace": {
+      "id": "UC-messageDesignerWorkspace",
+      "binding": "wizard step / custom component",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/message-types",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 390
+          }
+        },
+        {
+          "api": "POST /api/v1/definitions",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecPersist.ts",
+            "line": 48
+          }
+        },
+        {
+          "api": "POST /api/v1/definitions/preview",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 490
+          }
+        },
+        {
+          "api": "POST /api/v1/definitions/randomize",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecMissing.ts",
+            "line": 34
+          }
+        },
+        {
+          "api": "POST /api/v1/generated-messages",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 502
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-05.js",
+        "apps/api/src/app.ts",
+        "apps/api/src/modules/registerSpecPersist.ts"
+      ]
+    },
+    "msgImportSchema": {
+      "id": "UC-msgImportSchema",
+      "binding": "CONFIG.pages.msgImportSchema",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/catalog/iso/parse",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 65
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/iso/import",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 74
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/iso/uploads",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 89
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/iso/uploads/:id",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 238
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/iso/validate-markdown",
+          "registration": {
+            "file": "apps/api/src/modules/registerSignatures.ts",
+            "line": 37
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSchemaRoutes.ts",
+        "apps/api/src/modules/registerIsoCatalog.ts"
+      ]
+    },
+    "msgSchemaRegister": {
+      "id": "UC-msgSchemaRegister",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/iso/uploads",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 233
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/designer-types",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 281
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/live-bind-parts/part-08.js",
+        "apps/api/src/modules/registerIsoCatalog.ts"
+      ]
+    },
+    "trNew": {
+      "id": "UC-trNew",
+      "binding": "CONFIG.pages.trNew",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/runs",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 84
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/api/src/modules/orchestration.ts"
+      ]
+    },
+    "tcNew": {
+      "id": "UC-tcNew",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/test-cases",
+          "registration": {
+            "file": "apps/api/src/modules/registerTestCases.ts",
+            "line": 25
+          }
+        },
+        {
+          "api": "POST /api/v1/test-cases/describe",
+          "registration": {
+            "file": "apps/api/src/modules/registerSpecGaps.ts",
+            "line": 73
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerTestCases.ts",
+        "apps/api/src/modules/collections.ts",
+        "apps/api/src/modules/registerSpecGaps.ts"
+      ]
+    },
+    "schNew": {
+      "id": "UC-schNew",
+      "binding": "CONFIG.pages.schNew",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/schedules",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 159
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/api/src/modules/schedules.ts"
+      ]
+    },
+    "repScheduled": {
+      "id": "UC-repScheduled",
+      "binding": "CONFIG.pages.repScheduled",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/reports",
+          "registration": {
+            "file": "apps/api/src/modules/liveOps.ts",
+            "line": 199
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveOps.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "externalSystems": {
+      "id": "UC-externalSystems",
+      "binding": "custom navigation: externalSystems",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/external-systems",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 279
+          }
+        },
+        {
+          "api": "PUT /api/v1/external-systems/:id",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 286
+          }
+        },
+        {
+          "api": "DELETE /api/v1/external-systems/:id",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 295
+          }
+        },
+        {
+          "api": "POST /api/v1/external-systems/:id/dummy",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 302
+          }
+        },
+        {
+          "api": "GET /api/v1/integration",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 249
+          }
+        },
+        {
+          "api": "PATCH /api/v1/settings/integration",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 254
+          }
+        },
+        {
+          "api": "GET /api/v1/inbound/events",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 226
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/liveConsole.ts",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "msgCreateSchema": {
+      "id": "UC-msgCreateSchema",
+      "binding": "CONFIG.pages.msgCreateSchema",
+      "feature": true,
+      "apis": [
+        {
+          "api": "POST /api/v1/catalog/schemas/build",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 100
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/drafts",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 85
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/schemas/drafts/:id",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 69
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/drafts/:id/tests",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 89
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/drafts/:id/publish",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 92
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/schemas/drafts/:id/pack",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 96
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/validate",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 77
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/schemas/baselines",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 52
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerSchemaRoutes.ts",
+        "apps/api/src/modules/registerIsoCatalog.ts"
+      ]
+    },
+    "repSuites": {
+      "id": "UC-repSuites",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/live-bind-parts/part-03.js",
+        "apps/api/src/modules/registerSpecPersist.ts"
+      ]
+    },
+    "ruleCanvas": {
+      "id": "UC-ruleCanvas",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/rule-canvas-bind.js",
+        "apps/web/public/rule-canvas/canvas.js"
+      ]
+    },
+    "eventFramework": {
+      "id": "UC-eventFramework",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/events/framework",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 46
+          }
+        },
+        {
+          "api": "PATCH /api/v1/events/framework",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 52
+          }
+        },
+        {
+          "api": "GET /api/v1/events/headers",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 108
+          }
+        },
+        {
+          "api": "PATCH /api/v1/events/headers",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 120
+          }
+        },
+        {
+          "api": "GET /api/v1/events/catalog",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 18
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/live-bind-parts/part-12.js",
+        "apps/api/src/modules/registerEventRoutes.ts",
+        "apps/web/public/js/preview-parts/part-00.js"
+      ]
+    },
+    "security": {
+      "id": "UC-security",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": true,
+      "apis": [
+        {
+          "api": "GET /api/v1/security/health",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 41
+          }
+        },
+        {
+          "api": "PATCH /api/v1/security/encryption",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 49
+          }
+        },
+        {
+          "api": "POST /api/v1/security/records",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 83
+          }
+        },
+        {
+          "api": "GET /api/v1/security/records/:id",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 103
+          }
+        },
+        {
+          "api": "POST /api/v1/security/remediate",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 119
+          }
+        },
+        {
+          "api": "POST /api/v1/security/rotate",
+          "registration": {
+            "file": "apps/api/src/security/registerSecurity.ts",
+            "line": 128
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/security/registerSecurity.ts",
+        "apps/web/public/js/security-bind.js"
+      ]
+    },
+    "schemeDefinitions": {
+      "id": "UC-schemeDefinitions",
+      "binding": "custom navigation: schemeDefinitions",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/designer-types",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 281
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/iso/uploads/:id/files/:kind",
+          "registration": {
+            "file": "apps/api/src/modules/registerIsoCatalog.ts",
+            "line": 266
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-04.js",
+        "apps/api/src/modules/registerIsoCatalog.ts"
+      ]
+    },
+    "msgSchemaCanvas": {
+      "id": "UC-msgSchemaCanvas",
+      "binding": "CONFIG.pages.msgSchemaCanvas",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/catalog/schemas/drafts",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 63
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/schemas/drafts/:id",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 69
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/drafts",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 85
+          }
+        },
+        {
+          "api": "GET /api/v1/catalog/schemas/drafts/:id/rules",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 113
+          }
+        },
+        {
+          "api": "POST /api/v1/catalog/schemas/drafts/:id/rules",
+          "registration": {
+            "file": "apps/api/src/modules/registerSchemaRoutes.ts",
+            "line": 117
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/schema-canvas-bind.js",
+        "apps/api/src/modules/registerSchemaRoutes.ts",
+        "apps/api/src/modules/schemaEnrichmentRules.ts"
+      ]
+    },
+    "features": {
+      "id": "UC-features",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/features",
+          "registration": {
+            "file": "apps/api/src/modules/registerFeatureAccess.ts",
+            "line": 65
+          }
+        },
+        {
+          "api": "GET /api/v1/session/features",
+          "registration": {
+            "file": "apps/api/src/modules/registerFeatureAccess.ts",
+            "line": 71
+          }
+        },
+        {
+          "api": "PATCH /api/v1/settings/feature-access",
+          "registration": {
+            "file": "apps/api/src/modules/registerFeatureAccess.ts",
+            "line": 97
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/modules/registerFeatureAccess.ts",
+        "apps/api/src/modules/featureAccess.ts"
+      ]
+    },
+    "users": {
+      "id": "UC-users",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/admin/users",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 220
+          }
+        },
+        {
+          "api": "GET /api/v1/admin/users/:userId/effective-access",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 241
+          }
+        },
+        {
+          "api": "POST /api/v1/admin/users/:userId/transitions",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 257
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/app.ts",
+        "apps/web/public/admin.html",
+        "apps/web/public/js/admin.js"
+      ]
+    },
+    "userCreate": {
+      "id": "UC-userCreate",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/api/src/app.ts",
+        "apps/api/src/modules/registerAuthenticator.ts"
+      ]
+    },
+    "roles": {
+      "id": "UC-roles",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/admin/functional-access-profiles",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 281
+          }
+        },
+        {
+          "api": "GET /api/v1/admin/data-access-profiles",
+          "registration": {
+            "file": "apps/api/src/app.ts",
+            "line": 292
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/api/src/app.ts"
+      ]
+    },
+    "roleCreate": {
+      "id": "UC-roleCreate",
+      "binding": "overlay, standalone or unlinked; see case evidence",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/api/src/app.ts",
+        "apps/api/src/modules/featureAccess.ts"
+      ]
+    },
+    "configurationEnvironmentDefaults": {
+      "id": "UC-configurationEnvironmentDefaults",
+      "binding": "CONFIG.pages.configurationEnvironmentDefaults",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "configurationNotifications": {
+      "id": "UC-configurationNotifications",
+      "binding": "CONFIG.pages.configurationNotifications",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "configurationApiAccess": {
+      "id": "UC-configurationApiAccess",
+      "binding": "CONFIG.pages.configurationApiAccess",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/api/src/app.ts"
+      ]
+    },
+    "configurationDataRetention": {
+      "id": "UC-configurationDataRetention",
+      "binding": "CONFIG.pages.configurationDataRetention",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "configurationUserRoles": {
+      "id": "UC-configurationUserRoles",
+      "binding": "CONFIG.pages.configurationUserRoles",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-00.js",
+        "apps/api/src/app.ts"
+      ]
+    },
+    "configurationEventing": {
+      "id": "UC-configurationEventing",
+      "binding": "CONFIG.pages.configurationEventing",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/settings/eventing",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 182
+          }
+        },
+        {
+          "api": "PUT /api/v1/settings/eventing",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 189
+          }
+        },
+        {
+          "api": "POST /api/v1/settings/eventing/test",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 208
+          }
+        },
+        {
+          "api": "POST /api/v1/settings/eventing/dummy",
+          "registration": {
+            "file": "apps/api/src/modules/liveConsole.ts",
+            "line": 217
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/live-bind-parts/part-04.js",
+        "apps/api/src/modules/liveConsole.ts"
+      ]
+    },
+    "configurationAppConfigs": {
+      "id": "UC-configurationAppConfigs",
+      "binding": "CONFIG.pages.configurationAppConfigs",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/settings/logging",
+          "registration": {
+            "file": "apps/api/src/modules/loggingConfig.ts",
+            "line": 41
+          }
+        },
+        {
+          "api": "PUT /api/v1/settings/logging",
+          "registration": {
+            "file": "apps/api/src/modules/loggingConfig.ts",
+            "line": 54
+          }
+        },
+        {
+          "api": "GET /api/v1/events/catalog",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 18
+          }
+        },
+        {
+          "api": "GET /api/v1/events/headers",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 108
+          }
+        },
+        {
+          "api": "GET /api/v1/events/export",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 69
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/live-bind-parts/part-12.js",
+        "apps/api/src/modules/loggingConfig.ts",
+        "apps/api/src/modules/registerEventRoutes.ts"
+      ]
+    },
+    "useCaseTemplates": {
+      "id": "UC-useCaseTemplates",
+      "binding": "CONFIG.pages.useCaseTemplates",
+      "feature": false,
+      "apis": [],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-06.js"
+      ]
+    },
+    "featureIds": {
+      "id": "UC-featureIds",
+      "binding": "CONFIG.pages.featureIds",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/features",
+          "registration": {
+            "file": "apps/api/src/modules/registerFeatureAccess.ts",
+            "line": 65
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-06.js",
+        "apps/api/src/modules/registerFeatureAccess.ts"
+      ]
+    },
+    "useCaseReview": {
+      "id": "UC-useCaseReview",
+      "binding": "CONFIG.pages.useCaseReview",
+      "feature": false,
+      "apis": [
+        {
+          "api": "POST /api/v1/use-cases/review",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 265
+          }
+        },
+        {
+          "api": "POST /api/v1/use-cases/review/:page",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 265
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-06.js",
+        "apps/api/src/modules/registerUseCases.ts"
+      ]
+    },
+    "applicationEvents": {
+      "id": "UC-applicationEvents",
+      "binding": "CONFIG.pages.applicationEvents",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/events",
+          "registration": {
+            "file": "apps/api/src/modules/registerEventRoutes.ts",
+            "line": 23
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/js/preview-parts/part-06.js",
+        "apps/api/src/modules/registerEventRoutes.ts"
+      ]
+    },
+    "useCaseEditor": {
+      "id": "UC-useCaseEditor",
+      "binding": "/use-case.html",
+      "feature": false,
+      "apis": [
+        {
+          "api": "GET /api/v1/use-cases/:page",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 324
+          }
+        },
+        {
+          "api": "PUT /api/v1/use-cases/:page",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 355
+          }
+        },
+        {
+          "api": "GET /api/v1/use-cases/:page/revisions",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 341
+          }
+        },
+        {
+          "api": "GET /api/v1/use-cases/:page.md",
+          "registration": {
+            "file": "apps/api/src/modules/registerUseCases.ts",
+            "line": 304
+          }
+        }
+      ],
+      "sourceFiles": [
+        "apps/web/public/use-case.html",
+        "apps/api/src/modules/registerUseCases.ts"
+      ]
+    }
+  }
+}
