@@ -85,7 +85,7 @@ export function main(args = process.argv.slice(2)) {
   const base = ['compose', '--project-directory', root, '--env-file', envFile, '-p', project, '-f', composeFile];
   const evidence = { repository: config.name, action: options.action, project, isolated: options.isolated, at: new Date().toISOString(), passed: false, commands: [], scope: checks.scope };
   const run = (extra, { input, timeout = 1200000, quiet = false } = {}) => {
-    const result = spawnSync('docker', [...base, ...extra], { cwd: root, input, encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+    const result = spawnSync('docker', [...base, ...extra], { cwd: root, input, encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', quiet ? 'pipe' : 'inherit', quiet ? 'pipe' : 'inherit'] });
     evidence.commands.push({ command: extra.filter(arg => arg !== input), exitCode: result.status, error: result.error?.message });
     if (!quiet) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr); }
     if (result.error || result.status !== 0) throw new Error(`Docker ${extra[0]} failed (${result.status ?? result.error?.code})`);
