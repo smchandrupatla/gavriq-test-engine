@@ -1,0 +1,8 @@
+{
+  "repository": "gavriq-test-engine",
+  "checkedAt": "2026-09-11T22:34:50.568Z",
+  "passed": true,
+  "scope": "Isolated Docker startup, health, and configured HTTP contracts; existing local images; not full acceptance testing; results describe the extracted local images, not subsequent upstream application changes",
+  "details": "Isolated startup, container health, and configured HTTP contracts passed.",
+  "sourceRevisionBeforeScriptFinalization": "dd76a4ffec19e5121e8e0b5191835bb5b3c64385"
+}
