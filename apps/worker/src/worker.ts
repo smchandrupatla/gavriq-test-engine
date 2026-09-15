@@ -1,12 +1,13 @@
 #!/usr/bin/env tsx
 /**
  * GAVRIQ Test Engine — Execution Worker
- * Dispatches to Selenium, Playwright, or HTTP runners by execution_method.
+ * Dispatches to Selenium, Playwright, HTTP, or Performance runners.
  */
 import { randomUUID } from 'node:crypto';
 import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
+import { runPerformance } from './runners/performance.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
@@ -31,7 +32,7 @@ async function register() {
       id: WORKER_ID,
       name: `Multi-runner Worker ${WORKER_ID}`,
       capabilities: [
-        'selenium', 'playwright', 'http', 'rest', 'api',
+        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load',
         'out_of_container', 'in_container', 'ui', 'smoke',
       ],
       labels: { kind: 'multi', runtime: 'node' },
@@ -112,7 +113,29 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
     };
   }
 
-  // Default: selenium
+  if (method === 'performance' || method === 'load' || method === 'k6') {
+    const rules = tc?.validation_rules || {};
+    const r = await runPerformance({
+      baseUrl,
+      script: tc?.script,
+      path: rules.path || '/health',
+      method: rules.method || 'GET',
+      concurrency: rules.concurrency || 5,
+      requests: rules.requests || 20,
+      timeoutSeconds: tc?.timeout_seconds || 15,
+      sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
+    });
+    return {
+      status: r.status,
+      verdict: r.status === 'passed' ? 'pass' : 'fail',
+      duration_ms: r.duration_ms,
+      message: r.message,
+      classification: r.classification || null,
+      metrics: r.metrics,
+      evidence: [],
+    };
+  }
+
   const r = await runSelenium(common);
   return {
     status: r.status,
