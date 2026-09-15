@@ -18,6 +18,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
+import { metaRoutes } from './routes/meta.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -51,7 +52,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.6.0',
+    version: '0.2.1',
     prompts: '1-10',
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
@@ -73,7 +74,7 @@ async function main() {
       const pathName = req.url.split('?')[0];
       const method = req.method;
 
-      if (pathName === '/health' || pathName === '/ready' || pathName === '/') return;
+      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
@@ -93,6 +94,7 @@ async function main() {
     });
   }
 
+  await app.register(metaRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
   await app.register(environmentRoutes);
