@@ -1,47 +1,103 @@
-# gavriq-test-engine
+# GAVRIQ Test Engine
 
-Post-deployment integration and browser test runner with execution history and use-case traceability.
+Enterprise Test Engineering & Validation platform — central repository, on-demand execution, build-status display, and release readiness for applications under test (including **Sand Bench**).
 
-## Extraction status
+**Version:** 0.2.0
 
-Application files and local container configuration have been copied into this repository. This is an extraction candidate with passing image builds and limited smoke checks, not a finalized standalone release. See [verification status](docs/verification.md).
+## What it does
 
-## Local evaluation
+| Capability | Description |
+|------------|-------------|
+| **Test Repository** | Application → Suite → Case hierarchy with versioning, tags, lifecycle |
+| **On-demand runs** | Selenium, Playwright, HTTP/API, and concurrent performance runners |
+| **In-container status** | CI posts build results; engine displays them (does not re-run them) |
+| **Workers** | Distributed claim/result protocol |
+| **Schedules** | Interval (`every:N`) and event triggers (`after_build`, …) |
+| **Release readiness** | READY / READY WITH CONDITIONS / NOT READY |
+| **Dashboard** | Dark UI at port **8787** |
+| **SIT console** | Existing post-deploy runner UI at **8098** (preserved) |
 
-Copy .env.example to .env and configure integration endpoints and any required credentials. Run:
+## Quick start
 
-```sh
-docker compose config
-docker compose up --build
+### Docker (recommended)
+
+```bash
+cp .env.example .env   # optional endpoint overrides
+docker compose up -d --build
+
+# Dashboard + API
+open http://localhost:8787/
+
+# Legacy SIT console
+open http://localhost:8098/
 ```
 
-Application ports bind to localhost. Owned databases and volumes are defined in compose.yaml. External systems are configured through .env rather than requiring another source checkout.
+`AUTO_SEED=true` on the API service seeds the Sand Bench smoke pack on first boot.
 
-## Included services
+Optional workers (browser runners):
 
-- sit-console
-- sit-console-db
-- sit
+```bash
+TARGET_BASE_URL=http://host.docker.internal:8001 docker compose --profile workers up -d
+```
 
-## Known limitations
+### Local Node
 
-- Image builds and packaging-path checks passed. Full functional acceptance is still pending.
-- External integrations must be configured. A portal starting does not establish end-to-end functionality.
-- Copied shared code is vendored here; there are no filesystem links back to SandBench.
-- Existing development database credentials remain in inherited local container definitions; production hardening is pending.
+```bash
+export DATABASE_URL=postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
+npm install
+npm run migrate
+npm run seed              # Sand Bench main-flow Selenium + health cases
+npm run import:sit        # register sit/cases/*.sit.ts into the repository
+npm run start:api         # :8787
+npm run start:worker      # optional
+npm run start:scheduler   # optional
+```
 
-## Provenance
+## Key APIs
 
-See [extraction provenance](docs/extraction-provenance.md).
+```
+GET  /health
+GET  /                         → dashboard UI
+GET  /api/v1/test-cases
+POST /api/v1/executions        → queue run
+GET  /api/v1/dashboard
+GET  /api/v1/release-readiness
+GET  /api/v1/test-status       → engine + in-container combined
+POST /api/v1/build-results     → CI posts in-container results
+GET  /api/v1/agents/context
+```
+
+Full surface: see [docs/ENTERPRISE-TEST-ENGINE.md](docs/ENTERPRISE-TEST-ENGINE.md), [docs/RUNNERS-AND-RBAC.md](docs/RUNNERS-AND-RBAC.md), [docs/DOCKER-AND-BUILD-STATUS.md](docs/DOCKER-AND-BUILD-STATUS.md), [docs/PRODUCTION.md](docs/PRODUCTION.md).
+
+## Architecture
+
+```
+Control plane (apps/api :8787)     Workers (apps/worker)
+  Test Repository                   Selenium / Playwright
+  Environments + safety policy      HTTP / performance
+  Executions / schedules            Claim → run → report
+  Build-status store
+  Release readiness / agents
+         │
+         ▼
+   PostgreSQL
+```
+
+SIT console (`sit/`) remains an independent post-deploy runner with its own UI and history.
+
+## Production notes
+
+```bash
+export RBAC_ENABLED=true
+export WORKER_API_KEY="$(openssl rand -hex 32)"
+```
+
+See [docs/PRODUCTION.md](docs/PRODUCTION.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Copyright (c) 2026 Gavriq Labs Global. All rights reserved. Proprietary software; see [LICENSE](LICENSE). Third-party components retain their respective licenses.
-
-## Validation snapshot
-
-Passed: application startup, health endpoint, and one application read endpoint. See [verification](docs/verification.md) and [smoke evidence](docs/smoke-result.json).
-
-## Repository Docker scripts
-
-Use scripts/docker-deploy.ps1 (PowerShell) or sh scripts/docker-deploy.sh to build and deploy. Matching docker-health, docker-test, and docker-stop scripts are included. See [Docker deployment instructions](docs/docker-deployment.md) for configuration, isolated validation, and test coverage.
+Copyright (c) 2026 Gavriq Labs Global. All rights reserved. Proprietary; see [LICENSE](LICENSE).
