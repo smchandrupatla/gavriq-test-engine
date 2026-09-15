@@ -18,10 +18,6 @@
       }
     }
   </script>
-  <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    .badge { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium; }
-  </style>
 </head>
 <body class="bg-surface text-slate-200 min-h-screen">
   <header class="border-b border-surface-border bg-surface-card/80 backdrop-blur sticky top-0 z-10">
@@ -30,19 +26,19 @@
         <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-bold text-white text-sm">TE</div>
         <div>
           <h1 class="text-lg font-semibold tracking-tight">GAVRIQ Test Engine</h1>
-          <p class="text-xs text-slate-400">Control plane · repository · on-demand runs · build status</p>
+          <p class="text-xs text-slate-400">Repository · on-demand runs · build status · release readiness</p>
         </div>
       </div>
       <div class="flex items-center gap-2 text-xs">
-        <span id="healthBadge" class="badge bg-slate-700 text-slate-300">checking…</span>
+        <a href="http://localhost:8098" target="_blank" class="px-3 py-1.5 rounded border border-surface-border hover:bg-surface-border transition text-slate-300">SIT Console</a>
+        <span id="healthBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">checking…</span>
         <button onclick="refreshAll()" class="px-3 py-1.5 rounded bg-surface border border-surface-border hover:bg-surface-border transition">Refresh</button>
       </div>
     </div>
   </header>
 
   <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-    <!-- KPI row -->
-    <section class="grid grid-cols-2 md:grid-cols-4 gap-3" id="kpis">
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="bg-surface-card border border-surface-border rounded-xl p-4">
         <p class="text-xs text-slate-400 uppercase tracking-wide">Total tests</p>
         <p class="text-2xl font-semibold mt-1" id="kpiTotal">—</p>
@@ -62,20 +58,19 @@
     </section>
 
     <div class="grid lg:grid-cols-3 gap-6">
-      <!-- Test cases -->
       <section class="lg:col-span-2 bg-surface-card border border-surface-border rounded-xl overflow-hidden">
         <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
           <h2 class="font-medium">Test repository</h2>
           <span class="text-xs text-slate-400" id="caseCount"></span>
         </div>
-        <div class="overflow-x-auto max-h-[420px] overflow-y-auto">
+        <div class="overflow-x-auto max-h-[440px] overflow-y-auto">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-slate-400 sticky top-0 bg-surface-card">
               <tr>
                 <th class="px-4 py-2 font-medium">Key</th>
                 <th class="px-4 py-2 font-medium">Name</th>
                 <th class="px-4 py-2 font-medium">Method</th>
-                <th class="px-4 py-2 font-medium">Lifecycle</th>
+                <th class="px-4 py-2 font-medium">Last result</th>
                 <th class="px-4 py-2 font-medium"></th>
               </tr>
             </thead>
@@ -84,17 +79,12 @@
         </div>
       </section>
 
-      <!-- Actions + status -->
       <section class="space-y-4">
         <div class="bg-surface-card border border-surface-border rounded-xl p-4 space-y-3">
           <h2 class="font-medium">On-demand run</h2>
-          <p class="text-xs text-slate-400">Queue selected Selenium / HTTP cases against local-dev.</p>
-          <button onclick="runSelected()" class="w-full py-2 rounded-lg bg-accent hover:bg-blue-600 text-white text-sm font-medium transition">
-            Run selected
-          </button>
-          <button onclick="runSmokeSuite()" class="w-full py-2 rounded-lg border border-surface-border hover:bg-surface-border text-sm transition">
-            Run full smoke suite
-          </button>
+          <p class="text-xs text-slate-400">Queue selected cases against local-dev. Requires a worker for browser/HTTP execution.</p>
+          <button onclick="runSelected()" class="w-full py-2 rounded-lg bg-accent hover:bg-blue-600 text-white text-sm font-medium transition">Run selected</button>
+          <button onclick="runSmokeSuite()" class="w-full py-2 rounded-lg border border-surface-border hover:bg-surface-border text-sm transition">Run full smoke suite</button>
           <pre id="runLog" class="text-xs text-slate-400 bg-surface rounded p-2 max-h-28 overflow-y-auto hidden"></pre>
         </div>
 
@@ -105,15 +95,15 @@
 
         <div class="bg-surface-card border border-surface-border rounded-xl p-4">
           <h2 class="font-medium mb-2">In-container / build status</h2>
-          <div id="buildStatus" class="text-sm text-slate-400">No build results yet. CI posts to <code class="text-slate-300">/api/v1/build-results</code>.</div>
+          <div id="buildStatus" class="text-sm text-slate-400">No build results yet.</div>
         </div>
       </section>
     </div>
 
-    <!-- Recent executions -->
     <section class="bg-surface-card border border-surface-border rounded-xl overflow-hidden">
-      <div class="px-4 py-3 border-b border-surface-border">
+      <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
         <h2 class="font-medium">Recent executions</h2>
+        <span class="text-xs text-slate-500">Click a row to expand results</span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -129,6 +119,7 @@
           <tbody id="execRows" class="divide-y divide-surface-border"></tbody>
         </table>
       </div>
+      <div id="execDetail" class="hidden border-t border-surface-border px-4 py-3 text-xs text-slate-300 bg-surface/40"></div>
     </section>
   </main>
 
@@ -136,21 +127,26 @@
     const selected = new Set();
     let suiteId = null;
     let envId = null;
+    let lastByCaseId = {};
 
     function statusBadge(s) {
       const map = {
         passed: 'bg-emerald-900/50 text-emerald-300',
         failed: 'bg-rose-900/50 text-rose-300',
+        error: 'bg-rose-900/50 text-rose-300',
         running: 'bg-amber-900/50 text-amber-300',
         queued: 'bg-slate-700 text-slate-300',
+        cancelled: 'bg-slate-700 text-slate-400',
         active: 'bg-emerald-900/50 text-emerald-300',
-        draft: 'bg-slate-700 text-slate-400',
         online: 'bg-emerald-900/50 text-emerald-300',
         offline: 'bg-slate-700 text-slate-400',
         busy: 'bg-amber-900/50 text-amber-300',
+        READY: 'bg-emerald-900/50 text-emerald-300',
+        'READY WITH CONDITIONS': 'bg-amber-900/50 text-amber-300',
+        'NOT READY': 'bg-rose-900/50 text-rose-300',
       };
       const cls = map[s] || 'bg-slate-700 text-slate-300';
-      return `<span class="badge ${cls}">${s || '—'}</span>`;
+      return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}">${s || '—'}</span>`;
     }
 
     async function api(path, opts) {
@@ -161,10 +157,10 @@
     async function loadHealth() {
       try {
         const h = await api('/health');
-        document.getElementById('healthBadge').className = 'badge bg-emerald-900/50 text-emerald-300';
+        document.getElementById('healthBadge').className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-900/50 text-emerald-300';
         document.getElementById('healthBadge').textContent = `ok · v${h.version || '?'}`;
       } catch {
-        document.getElementById('healthBadge').className = 'badge bg-rose-900/50 text-rose-300';
+        document.getElementById('healthBadge').className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-900/50 text-rose-300';
         document.getElementById('healthBadge').textContent = 'unreachable';
       }
     }
@@ -186,12 +182,26 @@
         (ready === 'READY' ? 'text-emerald-400' : ready.includes('CONDITIONS') ? 'text-amber-400' : 'text-rose-400');
     }
 
+    async function loadLastResults() {
+      try {
+        const res = await api('/api/v1/test-status?application_key=sand-bench');
+        lastByCaseId = {};
+        for (const row of (res.data?.engine_executed || [])) {
+          if (row.last_result) lastByCaseId[row.id] = row.last_result;
+        }
+      } catch { lastByCaseId = {}; }
+    }
+
     async function loadCases() {
+      await loadLastResults();
       const res = await api('/api/v1/test-cases?limit=100');
       const rows = res.data || [];
       document.getElementById('caseCount').textContent = `${rows.length} cases`;
       const tbody = document.getElementById('caseRows');
-      tbody.innerHTML = rows.map(tc => `
+      tbody.innerHTML = rows.map(tc => {
+        const last = lastByCaseId[tc.id];
+        const lastHtml = last ? statusBadge(last.status) : '<span class="text-slate-600 text-xs">never run</span>';
+        return `
         <tr class="hover:bg-surface/50">
           <td class="px-4 py-2 font-mono text-xs text-slate-400">
             <label class="flex items-center gap-2 cursor-pointer">
@@ -201,12 +211,12 @@
           </td>
           <td class="px-4 py-2">${tc.name}</td>
           <td class="px-4 py-2 text-xs">${tc.execution_method || '—'}</td>
-          <td class="px-4 py-2">${statusBadge(tc.lifecycle)}</td>
+          <td class="px-4 py-2">${lastHtml}</td>
           <td class="px-4 py-2 text-right">
             <button onclick="runOne('${tc.id}')" class="text-xs text-accent hover:underline">Run</button>
           </td>
-        </tr>
-      `).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">No cases — run <code>npm run seed</code></td></tr>';
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">No cases — seed or import:sit</td></tr>';
     }
 
     async function loadEnvAndSuite() {
@@ -223,11 +233,11 @@
       const list = document.getElementById('workerList');
       const workers = res.data || [];
       if (!workers.length) {
-        list.innerHTML = '<li class="text-slate-500">No workers registered</li>';
+        list.innerHTML = '<li class="text-slate-500">No workers — run npm run start:worker</li>';
         return;
       }
       list.innerHTML = workers.map(w =>
-        `<li class="flex justify-between"><span>${w.name || w.id}</span>${statusBadge(w.status)}</li>`
+        `<li class="flex justify-between gap-2"><span class="truncate">${w.name || w.id}</span>${statusBadge(w.status)}</li>`
       ).join('');
     }
 
@@ -235,7 +245,7 @@
       const res = await api('/api/v1/executions');
       const rows = res.data || [];
       document.getElementById('execRows').innerHTML = rows.slice(0, 15).map(e => `
-        <tr class="hover:bg-surface/50">
+        <tr class="hover:bg-surface/50 cursor-pointer" onclick="showExec('${e.id || e.key}')">
           <td class="px-4 py-2 font-mono text-xs">${e.key}</td>
           <td class="px-4 py-2">${statusBadge(e.status)}</td>
           <td class="px-4 py-2 text-xs">${e.trigger_source}</td>
@@ -245,18 +255,33 @@
       `).join('') || '<tr><td colspan="5" class="px-4 py-4 text-center text-slate-500">No executions yet</td></tr>';
     }
 
+    async function showExec(id) {
+      const res = await api('/api/v1/executions/' + encodeURIComponent(id));
+      const el = document.getElementById('execDetail');
+      el.classList.remove('hidden');
+      const data = res.data;
+      if (!data) { el.textContent = 'Not found'; return; }
+      const results = data.results || [];
+      el.innerHTML = `<p class="mb-2 font-mono">${data.key} · ${data.status}</p>` +
+        (results.length
+          ? `<ul class="space-y-1">${results.map(r =>
+              `<li class="flex gap-3"><span>${statusBadge(r.status)}</span><span class="truncate">${r.message || r.test_case_id}</span><span class="text-slate-500">${r.duration_ms || 0}ms</span></li>`
+            ).join('')}</ul>`
+          : '<p class="text-slate-500">No case results yet (waiting for worker)</p>');
+    }
+
     async function loadBuildStatus() {
       const res = await api('/api/v1/build-results?application_key=sand-bench');
       const el = document.getElementById('buildStatus');
       if (!res.build_id) {
-        el.innerHTML = 'No build results yet. CI posts to <code class="text-slate-300">/api/v1/build-results</code>.';
+        el.innerHTML = 'No build results yet. CI posts to <code class="text-slate-300">POST /api/v1/build-results</code>.';
         return;
       }
       const s = res.summary || {};
       el.innerHTML = `
         <p class="mb-1"><span class="text-slate-300">Build</span> <code>${res.build_id}</code></p>
-        <p class="text-xs">passed ${s.passed || 0} · failed ${s.failed || 0} · skipped ${s.skipped || 0} · total ${s.total || 0}</p>
-        <ul class="mt-2 space-y-1 max-h-32 overflow-y-auto text-xs">
+        <p class="text-xs mb-2">passed ${s.passed || 0} · failed ${s.failed || 0} · skipped ${s.skipped || 0}</p>
+        <ul class="space-y-1 max-h-32 overflow-y-auto text-xs">
           ${(res.data || []).slice(0, 12).map(r =>
             `<li class="flex justify-between gap-2"><span class="truncate">${r.test_key}</span>${statusBadge(r.status)}</li>`
           ).join('')}
@@ -271,7 +296,7 @@
     function logRun(msg) {
       const pre = document.getElementById('runLog');
       pre.classList.remove('hidden');
-      pre.textContent = msg;
+      pre.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
     }
 
     async function queueRun(body) {
@@ -280,52 +305,28 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      logRun(JSON.stringify(res, null, 2));
-      setTimeout(loadExecutions, 800);
+      logRun(res);
+      setTimeout(() => { loadExecutions(); loadCases(); }, 1000);
     }
 
     async function runOne(id) {
-      await queueRun({
-        test_case_ids: [id],
-        environment_id: envId || 'local-dev',
-        trigger_source: 'manual',
-      });
+      await queueRun({ test_case_ids: [id], environment_id: envId || 'local-dev', trigger_source: 'manual' });
     }
 
     async function runSelected() {
-      if (!selected.size) {
-        logRun('Select at least one test case');
-        return;
-      }
-      await queueRun({
-        test_case_ids: [...selected],
-        environment_id: envId || 'local-dev',
-        trigger_source: 'manual',
-      });
+      if (!selected.size) { logRun('Select at least one test case'); return; }
+      await queueRun({ test_case_ids: [...selected], environment_id: envId || 'local-dev', trigger_source: 'manual' });
     }
 
     async function runSmokeSuite() {
-      if (!suiteId) {
-        logRun('Smoke suite not found — run npm run seed');
-        return;
-      }
-      await queueRun({
-        test_suite_id: suiteId,
-        environment_id: envId || 'local-dev',
-        trigger_source: 'manual',
-      });
+      if (!suiteId) { logRun('Smoke suite not found — run npm run seed'); return; }
+      await queueRun({ test_suite_id: suiteId, environment_id: envId || 'local-dev', trigger_source: 'manual' });
     }
 
     async function refreshAll() {
       await Promise.all([
-        loadHealth(),
-        loadDashboard(),
-        loadReady(),
-        loadCases(),
-        loadEnvAndSuite(),
-        loadWorkers(),
-        loadExecutions(),
-        loadBuildStatus(),
+        loadHealth(), loadDashboard(), loadReady(), loadCases(),
+        loadEnvAndSuite(), loadWorkers(), loadExecutions(), loadBuildStatus(),
       ]);
     }
 
