@@ -1,0 +1,160 @@
+/**
+ * End-to-end control-plane flow (no browser).
+ * Requires DATABASE_URL and a reachable API on TEST_ENGINE_API (default :8787).
+ * Skips cleanly when API is down so local unit runs stay green.
+ */
+import { describe, it, before } from 'node:test';
+import assert from 'node:assert/strict';
+
+const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
+
+async function api(path: string, opts: RequestInit = {}) {
+  const res = await fetch(`${API}${path}`, {
+    ...opts,
+    headers: { 'content-type': 'application/json', ...(opts.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
+}
+
+describe('e2e api flow', () => {
+  let available = false;
+
+  before(async () => {
+    try {
+      const { status, body } = await api('/health');
+      available = status === 200 && body.status === 'ok';
+    } catch {
+      available = false;
+    }
+  });
+
+  it('health reports ok when API is up', async (t) => {
+    if (!available) {
+      t.skip('API not reachable — start with npm run start:api');
+      return;
+    }
+    const { status, body } = await api('/health');
+    assert.equal(status, 200);
+    assert.equal(body.status, 'ok');
+  });
+
+  it('lists applications and seeded cases', async (t) => {
+    if (!available) {
+      t.skip('API not reachable');
+      return;
+    }
+    const apps = await api('/api/v1/applications');
+    assert.equal(apps.status, 200);
+    assert.ok(Array.isArray(apps.body.data));
+
+    const cases = await api('/api/v1/test-cases?limit=20');
+    assert.equal(cases.status, 200);
+    assert.ok(Array.isArray(cases.body.data));
+  });
+
+  it('queues, claims, reports, and completes an HTTP health execution', async (t) => {
+    if (!available) {
+      t.skip('API not reachable');
+      return;
+    }
+
+    const cases = await api('/api/v1/test-cases?limit=50');
+    const healthCase = (cases.body.data || []).find(
+      (c: any) => c.key === 'TC-SB-HEALTH' || c.execution_method === 'http'
+    );
+    if (!healthCase) {
+      t.skip('No HTTP test case — run npm run seed');
+      return;
+    }
+
+    const envs = await api('/api/v1/environments');
+    const env = (envs.body.data || []).find((e: any) => e.key === 'local-dev');
+
+    // Point environment at the engine's own health endpoint for a reliable target
+    const baseUrl = process.env.E2E_TARGET_URL || `${API}`;
+
+    const queued = await api('/api/v1/executions', {
+      method: 'POST',
+      body: JSON.stringify({
+        test_case_ids: [healthCase.id],
+        environment_id: env?.id || env?.key,
+        trigger_source: 'ci',
+        metadata: { e2e: true, baseUrl },
+      }),
+    });
+    assert.equal(queued.status, 202, JSON.stringify(queued.body));
+    const execId = queued.body.data.id;
+
+    // Register ephemeral worker and claim
+    const workerId = `e2e-worker-${Date.now()}`;
+    await api('/api/v1/workers/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: workerId,
+        name: 'E2E Worker',
+        capabilities: ['http', 'api'],
+      }),
+    });
+
+    const claimed = await api('/api/v1/executions/claim', {
+      method: 'POST',
+      body: JSON.stringify({ worker_id: workerId }),
+    });
+    assert.ok(claimed.status === 200 || claimed.status === 204);
+
+    // Simulate HTTP runner against API health
+    const health = await fetch(`${baseUrl}/health`);
+    const ok = health.ok;
+
+    const result = await api(`/api/v1/executions/${execId}/results`, {
+      method: 'POST',
+      body: JSON.stringify({
+        test_case_id: healthCase.id,
+        status: ok ? 'passed' : 'failed',
+        verdict: ok ? 'pass' : 'fail',
+        duration_ms: 50,
+        message: ok ? 'e2e health OK' : 'e2e health failed',
+        metrics: { status_code: health.status },
+      }),
+    });
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+
+    const done = await api(`/api/v1/executions/${execId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ status: ok ? 'passed' : 'failed' }),
+    });
+    assert.equal(done.status, 200);
+    assert.equal(done.body.data.status, ok ? 'passed' : 'failed');
+
+    const report = await api(`/api/v1/reports/summary/${execId}`);
+    assert.equal(report.status, 200);
+    assert.ok(report.body.data.executive_summary);
+  });
+
+  it('accepts build-results and exposes test-status', async (t) => {
+    if (!available) {
+      t.skip('API not reachable');
+      return;
+    }
+
+    const post = await api('/api/v1/build-results', {
+      method: 'POST',
+      body: JSON.stringify({
+        application_key: 'sand-bench',
+        build_id: `e2e-build-${Date.now()}`,
+        commit_sha: 'deadbeef',
+        results: [
+          { test_key: 'e2e-unit-1', test_name: 'E2E unit', status: 'passed', duration_ms: 10 },
+          { test_key: 'e2e-unit-2', test_name: 'E2E unit 2', status: 'passed', duration_ms: 12 },
+        ],
+      }),
+    });
+    assert.equal(post.status, 201, JSON.stringify(post.body));
+
+    const status = await api('/api/v1/test-status?application_key=sand-bench');
+    assert.equal(status.status, 200);
+    assert.ok(status.body.data);
+    assert.ok(Array.isArray(status.body.data.in_container));
+  });
+});
