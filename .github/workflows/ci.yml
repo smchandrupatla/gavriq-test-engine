@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      TEST_ENGINE_API: http://127.0.0.1:8787
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
         run: |
           npx tsx apps/api/src/server.ts &
           echo $! > /tmp/api.pid
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             if curl -sf http://127.0.0.1:8787/health; then exit 0; fi
             sleep 1
           done
@@ -67,3 +68,6 @@ jobs:
           curl -sf http://127.0.0.1:8787/api/v1/dashboard | tee /tmp/dash.json
           curl -sf http://127.0.0.1:8787/api/v1/release-readiness | tee /tmp/ready.json
           test "$(jq -r .status /tmp/health.json)" = "ok"
+
+      - name: E2E API flow
+        run: npx tsx --test tests/e2e-api-flow.test.ts
