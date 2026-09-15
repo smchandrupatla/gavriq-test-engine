@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrate } from './db/client.js';
+import { maybeAutoSeed } from './boot-seed.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
 import { environmentRoutes } from './routes/environments.js';
@@ -32,6 +33,12 @@ async function main() {
     console.warn('[boot] migrate warning:', (err as Error).message);
   }
 
+  try {
+    await maybeAutoSeed();
+  } catch (err) {
+    console.warn('[boot] auto-seed warning:', (err as Error).message);
+  }
+
   const app = Fastify({
     logger: true,
     requestTimeout: 120_000,
@@ -44,7 +51,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.4.0',
+    version: '1.5.0',
     prompts: '1-10',
     rbac: rbacEnabled,
     ui: true,
@@ -52,7 +59,6 @@ async function main() {
 
   app.get('/ready', async () => ({ status: 'ready' }));
 
-  // Dashboard UI
   app.get('/', async (_req, reply) => {
     const index = path.join(publicDir, 'index.html');
     if (!existsSync(index)) {
