@@ -1,8 +1,11 @@
 #!/usr/bin/env tsx
 /**
- * GAVRIQ Test Engine — Control Plane API
+ * GAVRIQ Test Engine — Control Plane API + Dashboard UI
  */
 import Fastify from 'fastify';
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { migrate } from './db/client.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
@@ -19,6 +22,8 @@ import { resolveActor, requirePermission } from './middleware/rbac.js';
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const publicDir = path.join(root, 'apps/api/public');
 
 async function main() {
   try {
@@ -39,37 +44,44 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.3.0',
+    version: '1.4.0',
     prompts: '1-10',
     rbac: rbacEnabled,
+    ui: true,
   }));
 
   app.get('/ready', async () => ({ status: 'ready' }));
 
+  // Dashboard UI
+  app.get('/', async (_req, reply) => {
+    const index = path.join(publicDir, 'index.html');
+    if (!existsSync(index)) {
+      return reply.type('text/plain').send('Dashboard not found. Expected apps/api/public/index.html');
+    }
+    return reply.type('text/html').send(readFileSync(index, 'utf8'));
+  });
+
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
-      const path = req.url.split('?')[0];
+      const pathName = req.url.split('?')[0];
       const method = req.method;
 
-      if (path === '/health' || path === '/ready') return;
-      if (path.startsWith('/api/v1/workers') && method === 'POST') return;
-      if (path === '/api/v1/executions/claim') return;
-      if (path === '/api/v1/build-results' && method === 'POST') return; // CI push
+      if (pathName === '/health' || pathName === '/ready' || pathName === '/') return;
+      if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
+      if (pathName === '/api/v1/executions/claim') return;
+      if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (path.startsWith('/api/v1/test-cases') || path.startsWith('/api/v1/applications') || path.startsWith('/api/v1/dashboard') || path.startsWith('/api/v1/search') || path.startsWith('/api/v1/test-status') || path.startsWith('/api/v1/build-results'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness'))) {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && path === '/api/v1/executions') {
+      if (method === 'POST' && pathName === '/api/v1/executions') {
         return requirePermission('executions:run')(req, reply);
       }
-      if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && path.startsWith('/api/v1/test-cases')) {
+      if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
         return requirePermission('tests:write')(req, reply);
       }
-      if (path.startsWith('/api/v1/audit')) {
+      if (pathName.startsWith('/api/v1/audit')) {
         return requirePermission('audit:read')(req, reply);
-      }
-      if (path.startsWith('/api/v1/release-readiness')) {
-        return requirePermission('release:decide')(req, reply);
       }
     });
   }
@@ -86,7 +98,7 @@ async function main() {
   await app.register(buildStatusRoutes);
 
   await app.listen({ port, host });
-  console.log(`GAVRIQ Test Engine API listening on http://${host}:${port} (rbac=${rbacEnabled})`);
+  console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled})`);
 }
 
 main().catch((err) => {
