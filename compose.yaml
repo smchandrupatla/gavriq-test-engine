@@ -29,6 +29,8 @@ services:
       PORT: "8787"
       HOST: "0.0.0.0"
       RBAC_ENABLED: "false"
+      AUTO_SEED: "true"
+      TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
     ports:
       - "127.0.0.1:8787:8787"
     healthcheck:
@@ -42,7 +44,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 24
-      start_period: 15s
+      start_period: 20s
     restart: unless-stopped
 
   test-engine-worker:
