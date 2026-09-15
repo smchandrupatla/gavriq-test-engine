@@ -18,7 +18,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
-import { resolveActor, requirePermission } from './middleware/rbac.js';
+import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
@@ -45,15 +45,16 @@ async function main() {
   });
 
   app.addHook('onRequest', async (req) => {
-    resolveActor(req);
+    await resolveActorAsync(req);
   });
 
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.5.0',
+    version: '1.6.0',
     prompts: '1-10',
     rbac: rbacEnabled,
+    jwt: Boolean(process.env.JWT_SECRET),
     ui: true,
   }));
 
@@ -104,7 +105,7 @@ async function main() {
   await app.register(buildStatusRoutes);
 
   await app.listen({ port, host });
-  console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled})`);
+  console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
 }
 
 main().catch((err) => {
