@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
+import { audit } from '../middleware/rbac.js';
 
 export async function executionRoutes(app: FastifyInstance) {
-  // List executions
   app.get('/api/v1/executions', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const clauses: string[] = [];
@@ -19,7 +19,6 @@ export async function executionRoutes(app: FastifyInstance) {
     return reply.send({ data: rows });
   });
 
-  // Get one + results
   app.get<{ Params: { id: string } }>('/api/v1/executions/:id', async (req, reply) => {
     const { rows } = await query(
       'SELECT * FROM executions WHERE id = $1 OR key = $1',
@@ -33,7 +32,6 @@ export async function executionRoutes(app: FastifyInstance) {
     return reply.send({ data: { ...rows[0], results: results.rows } });
   });
 
-  // Start execution (Run Test / Suite / Plan / Selected)
   app.post<{ Body: Record<string, unknown> }>('/api/v1/executions', async (req, reply) => {
     const b = req.body || {};
     const testCaseIds: string[] = Array.isArray(b.test_case_ids) ? b.test_case_ids : [];
@@ -41,7 +39,6 @@ export async function executionRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'Provide test_case_ids, test_suite_id, or test_plan_id' });
     }
 
-    // Resolve suite → cases if needed
     let resolvedIds = [...testCaseIds];
     if (b.test_suite_id && !resolvedIds.length) {
       const suiteCases = await query(
@@ -51,7 +48,6 @@ export async function executionRoutes(app: FastifyInstance) {
       resolvedIds = suiteCases.rows.map((r: any) => r.test_case_id);
     }
 
-    // Safety check when environment provided
     if (b.environment_id && b.safety_category) {
       const env = await query(
         'SELECT safety_policy FROM environments WHERE id = $1 OR key = $1',
@@ -77,18 +73,22 @@ export async function executionRoutes(app: FastifyInstance) {
        ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
        RETURNING *`,
       [
-        key, b.requested_by ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
+        key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
         resolvedIds, b.environment_id ?? null, b.execution_location ?? null,
         b.trigger_source ?? null, JSON.stringify(b.metadata ?? {}),
       ]
     );
 
-    // In a full system the orchestrator would pick this up.
-    // For now we mark it queued; workers poll / claim jobs.
+    await audit(req, 'execution.queue', 'execution', rows[0].id, {
+      key,
+      case_count: resolvedIds.length,
+      environment_id: b.environment_id,
+      trigger_source: b.trigger_source || 'manual',
+    });
+
     return reply.status(202).send({ data: rows[0], message: 'Execution queued' });
   });
 
-  // Cancel
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
     const { rows } = await query(
       `UPDATE executions SET status = 'cancelled', finished_at = now()
@@ -97,10 +97,10 @@ export async function executionRoutes(app: FastifyInstance) {
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Execution not found or not cancellable' });
+    await audit(req, 'execution.cancel', 'execution', rows[0].id, {});
     return reply.send({ data: rows[0] });
   });
 
-  // Worker claims next job
   app.post<{ Body: { worker_id: string; capabilities?: string[] } }>(
     '/api/v1/executions/claim',
     async (req, reply) => {
@@ -121,7 +121,6 @@ export async function executionRoutes(app: FastifyInstance) {
            WHERE id = $1 RETURNING *`,
           [rows[0].id, workerId]
         );
-        // Heartbeat worker
         await client.query(
           `UPDATE workers SET last_heartbeat = now(), status = 'busy', current_load = current_load + 1
            WHERE id = $1`,
@@ -135,7 +134,6 @@ export async function executionRoutes(app: FastifyInstance) {
     }
   );
 
-  // Worker reports result
   app.post<{ Params: { id: string }; Body: Record<string, unknown> }>(
     '/api/v1/executions/:id/results',
     async (req, reply) => {
@@ -159,7 +157,6 @@ export async function executionRoutes(app: FastifyInstance) {
         ]
       );
 
-      // Attach evidence if provided
       if (Array.isArray(b.evidence)) {
         for (const ev of b.evidence) {
           await query(
@@ -177,7 +174,6 @@ export async function executionRoutes(app: FastifyInstance) {
     }
   );
 
-  // Mark execution finished
   app.post<{ Params: { id: string }; Body: { status?: string } }>(
     '/api/v1/executions/:id/complete',
     async (req, reply) => {
