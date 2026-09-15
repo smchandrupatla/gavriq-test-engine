@@ -1,11 +1,12 @@
 #!/usr/bin/env tsx
 /**
  * GAVRIQ Test Engine — Execution Worker
- * Registers with control plane, claims jobs, runs Selenium (or other) runners,
- * reports results + evidence metadata.
+ * Dispatches to Selenium, Playwright, or HTTP runners by execution_method.
  */
 import { randomUUID } from 'node:crypto';
 import { runSelenium } from './runners/selenium.js';
+import { runPlaywright } from './runners/playwright.js';
+import { runHttp } from './runners/http.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
@@ -28,10 +29,13 @@ async function register() {
     method: 'POST',
     body: JSON.stringify({
       id: WORKER_ID,
-      name: `Browser Worker ${WORKER_ID}`,
-      capabilities: ['selenium', 'playwright', 'out_of_container', 'in_container', 'ui', 'smoke'],
-      labels: { kind: 'browser', runtime: 'selenium-webdriver' },
-      max_concurrency: 2,
+      name: `Multi-runner Worker ${WORKER_ID}`,
+      capabilities: [
+        'selenium', 'playwright', 'http', 'rest', 'api',
+        'out_of_container', 'in_container', 'ui', 'smoke',
+      ],
+      labels: { kind: 'multi', runtime: 'node' },
+      max_concurrency: 3,
     }),
   });
   console.log(`[worker ${WORKER_ID}] registered at ${API}`);
@@ -64,8 +68,66 @@ async function fetchEnvironment(id: string | null | undefined) {
   }
 }
 
+type RunnerResult = {
+  status: string;
+  verdict?: string;
+  duration_ms: number;
+  message: string;
+  classification?: string | null;
+  metrics?: Record<string, unknown>;
+  evidence?: any[];
+};
+
+async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
+  const method = (tc?.execution_method || 'selenium').toLowerCase();
+  const common = {
+    script: tc?.script || undefined,
+    baseUrl,
+    timeoutSeconds: tc?.timeout_seconds || 30,
+    steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
+  };
+
+  if (method === 'playwright') {
+    const r = await runPlaywright(common);
+    return {
+      status: r.status,
+      verdict: r.status === 'passed' ? 'pass' : 'fail',
+      duration_ms: r.duration_ms,
+      message: r.message,
+      classification: r.classification || null,
+      evidence: [{ type: 'log', storage_key: `evidence/pw-${Date.now()}.log`, content_type: 'text/plain' }],
+    };
+  }
+
+  if (method === 'http' || method === 'rest' || method === 'api') {
+    const r = await runHttp(common);
+    return {
+      status: r.status,
+      verdict: r.status === 'passed' ? 'pass' : 'fail',
+      duration_ms: r.duration_ms,
+      message: r.message,
+      classification: r.classification || null,
+      metrics: r.metrics || {},
+      evidence: [],
+    };
+  }
+
+  // Default: selenium
+  const r = await runSelenium(common);
+  return {
+    status: r.status,
+    verdict: r.status === 'passed' ? 'pass' : 'fail',
+    duration_ms: r.duration_ms,
+    message: r.message,
+    classification: r.classification || null,
+    evidence: r.evidence || [
+      { type: 'log', storage_key: `evidence/sel-${Date.now()}.log`, content_type: 'text/plain' },
+    ],
+  };
+}
+
 async function runJob(execution: any) {
-  console.log(`[worker] claimed ${execution.key} (${execution.id})`);
+  console.log(`[worker] claimed ${execution.key}`);
   const caseIds: string[] = execution.test_case_ids || [];
   const env = await fetchEnvironment(execution.environment_id);
   const baseUrl = env?.base_url || DEFAULT_BASE_URL;
@@ -74,50 +136,7 @@ async function runJob(execution: any) {
   for (const caseId of caseIds) {
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
-    const method = (tc?.execution_method || 'selenium').toLowerCase();
-
-    let result: {
-      status: string;
-      verdict?: string;
-      duration_ms: number;
-      message: string;
-      classification?: string | null;
-      evidence?: any[];
-    };
-
-    if (method === 'selenium' || method === 'ui' || !tc) {
-      const seleniumResult = await runSelenium({
-        script: tc?.script || undefined,
-        baseUrl,
-        timeoutSeconds: tc?.timeout_seconds || 30,
-        steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
-      });
-      result = {
-        status: seleniumResult.status,
-        verdict: seleniumResult.status === 'passed' ? 'pass' : 'fail',
-        duration_ms: seleniumResult.duration_ms,
-        message: seleniumResult.message,
-        classification: seleniumResult.classification || null,
-        evidence: seleniumResult.evidence || [
-          {
-            type: 'log',
-            storage_key: `evidence/${execution.id}/${caseId}.log`,
-            content_type: 'text/plain',
-          },
-        ],
-      };
-    } else {
-      // Placeholder for other runners (pytest, k6, kafka, ...)
-      result = {
-        status: 'passed',
-        verdict: 'pass',
-        duration_ms: 100,
-        message: `Runner '${method}' not yet implemented in this worker — marked passed as stub`,
-        classification: null,
-        evidence: [],
-      };
-    }
-
+    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl);
     if (result.status !== 'passed') anyFailed = true;
 
     await api(`/api/v1/executions/${execution.id}/results`, {
@@ -131,13 +150,10 @@ async function runJob(execution: any) {
         finished_at: new Date().toISOString(),
         message: result.message,
         classification: result.classification,
-        metrics: {},
-        evidence: result.evidence,
+        metrics: result.metrics || {},
+        evidence: result.evidence || [],
       }),
     });
-
-    // Auto-classify failures if not already set
-    // (classification already sent above when available)
   }
 
   await api(`/api/v1/executions/${execution.id}/complete`, {
@@ -150,16 +166,13 @@ async function runJob(execution: any) {
 async function pollLoop() {
   await register();
   setInterval(heartbeat, 15_000);
-
   for (;;) {
     try {
       const claimed = await api('/api/v1/executions/claim', {
         method: 'POST',
         body: JSON.stringify({ worker_id: WORKER_ID }),
       });
-      if (claimed?.data) {
-        await runJob(claimed.data);
-      }
+      if (claimed?.data) await runJob(claimed.data);
     } catch (err) {
       console.warn('[poll]', (err as Error).message);
     }
