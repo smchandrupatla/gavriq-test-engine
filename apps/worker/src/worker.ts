@@ -2,6 +2,7 @@
 /**
  * GAVRIQ Test Engine — Execution Worker
  * Dispatches to Selenium, Playwright, HTTP, or Performance runners.
+ * Sends X-Worker-Key when WORKER_API_KEY is set.
  */
 import { randomUUID } from 'node:crypto';
 import { runSelenium } from './runners/selenium.js';
@@ -13,11 +14,18 @@ const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 4000);
 const DEFAULT_BASE_URL = process.env.TARGET_BASE_URL || 'http://127.0.0.1:8001';
+const WORKER_API_KEY = process.env.WORKER_API_KEY || '';
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { 'content-type': 'application/json' };
+  if (WORKER_API_KEY) h['x-worker-key'] = WORKER_API_KEY;
+  return h;
+}
 
 async function api(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${API}${path}`, {
     ...opts,
-    headers: { 'content-type': 'application/json', ...(opts.headers || {}) },
+    headers: { ...headers(), ...(opts.headers || {}) },
   });
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
