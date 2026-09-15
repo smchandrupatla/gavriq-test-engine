@@ -1,6 +1,6 @@
 {
   "name": "gavriq-test-engine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -14,7 +14,10 @@
     "migrate": "tsx apps/api/src/db/migrate.ts",
     "seed": "tsx apps/api/src/seed.ts",
     "import:sit": "tsx apps/api/src/import-sit-catalog.ts",
+    "mint-token": "tsx apps/api/src/scripts/mint-token.ts",
     "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "tsx --test tests/e2e-api-flow.test.ts",
+    "test:unit": "tsx --test tests/enterprise-api-smoke.test.ts",
     "build:use-cases": "tsx scripts/build-use-cases.ts",
     "check:use-cases": "tsx scripts/build-use-cases.ts --check",
     "test:use-cases": "tsx --test tests/use-case-comprehensive.test.ts tests/use-cases.test.ts tests/use-case-structure.test.ts tests/use-case-pipeline.test.ts tests/use-case-markdown.test.ts tests/use-case-lookup.test.ts",
