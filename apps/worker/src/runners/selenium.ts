@@ -1,12 +1,14 @@
 /**
  * Selenium WebDriver runner for out-of-container UI tests.
  * Used by the execution worker when execution_method = 'selenium'.
+ *
+ * Docker (Dockerfile.worker): Chromium + chromedriver via CHROME_BIN / CHROMEDRIVER_PATH
  */
 import { Builder, By, until, type WebDriver } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
 
 export interface SeleniumRunInput {
-  script?: string;           // named script key or inline steps JSON
+  script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
   steps?: Array<{ action: string; selector?: string; value?: string; expected?: string }>;
@@ -22,17 +24,31 @@ export interface SeleniumRunResult {
 
 async function buildDriver(): Promise<WebDriver> {
   const options = new chrome.Options();
+  const chromeBin = process.env.CHROME_BIN || process.env.CHROMIUM_PATH;
+  if (chromeBin) {
+    options.setChromeBinaryPath(chromeBin);
+  }
   options.addArguments(
     '--headless=new',
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--window-size=1280,800'
+    '--window-size=1280,800',
+    '--disable-software-rasterizer'
   );
-  return new Builder().forBrowser('chrome').setChromeOptions(options).build();
+
+  const builder = new Builder().forBrowser('chrome').setChromeOptions(options);
+
+  const serviceBuilder = process.env.CHROMEDRIVER_PATH
+    ? new chrome.ServiceBuilder(process.env.CHROMEDRIVER_PATH)
+    : undefined;
+  if (serviceBuilder) {
+    builder.setChromeService(serviceBuilder);
+  }
+
+  return builder.build();
 }
 
-/** Named main-flow scripts for Sand Bench / generic targets */
 const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Promise<string>> = {
   async smoke_home(driver, baseUrl) {
     await driver.get(baseUrl);
@@ -47,7 +63,6 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
     await driver.get(baseUrl);
     const links = await driver.findElements(By.partialLinkText('Login'));
     if (!links.length) {
-      // try common selectors
       const alt = await driver.findElements(By.css('a[href*="login"]'));
       if (!alt.length) throw new Error('Login link not found');
       await alt[0].click();
@@ -107,15 +122,12 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
 
   async full_smoke_suite(driver, baseUrl) {
     const parts: string[] = [];
-    // home
     await driver.get(baseUrl);
     await driver.wait(until.elementLocated(By.css('body')), 10000);
     parts.push('home:OK');
-    // widgets
     await driver.sleep(1000);
     const body = (await driver.findElement(By.css('body')).getText()).toLowerCase();
     parts.push(body.includes('active') || body.length > 20 ? 'widgets:OK' : 'widgets:SKIP');
-    // login nav
     const links = await driver.findElements(By.partialLinkText('Login'));
     if (links.length) {
       await links[0].click();
@@ -136,7 +148,6 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
     const timeout = (input.timeoutSeconds || 30) * 1000;
     await driver.manage().setTimeouts({ pageLoad: timeout, implicit: 5000 });
 
-    // Named script
     if (input.script && NAMED_SCRIPTS[input.script]) {
       const msg = await NAMED_SCRIPTS[input.script](driver, input.baseUrl);
       return {
@@ -146,7 +157,6 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
       };
     }
 
-    // Step-based low-code execution
     if (input.steps?.length) {
       await driver.get(input.baseUrl);
       for (const step of input.steps) {
@@ -196,7 +206,6 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
       };
     }
 
-    // Default: just load the page
     await driver.get(input.baseUrl);
     await driver.wait(until.elementLocated(By.css('body')), 10000);
     return {

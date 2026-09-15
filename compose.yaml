@@ -47,10 +47,11 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Selenium-capable worker (Chromium + chromedriver)
   test-engine-worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     image: gavriq-test-engine-worker:local
     command: ["npx", "tsx", "apps/worker/src/worker.ts"]
     depends_on:
@@ -60,7 +61,13 @@ services:
       TEST_ENGINE_API: http://test-engine-api:8787
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       WORKER_POLL_MS: "4000"
+      WORKER_API_KEY: ${WORKER_API_KEY:-}
+      CHROME_BIN: /usr/bin/chromium
+      CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "256mb"
     restart: unless-stopped
     profiles:
       - workers
