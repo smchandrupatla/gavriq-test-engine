@@ -1,7 +1,6 @@
 #!/usr/bin/env tsx
 /**
  * GAVRIQ Test Engine — Control Plane API
- * Prompts 1–10 foundation + RBAC hooks
  */
 import Fastify from 'fastify';
 import { migrate } from './db/client.js';
@@ -13,6 +12,7 @@ import { workerRoutes } from './routes/workers.js';
 import { suitePlanRoutes } from './routes/suites-plans.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
+import { scheduleRoutes } from './routes/schedules.js';
 import { resolveActor, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -31,7 +31,6 @@ async function main() {
     requestTimeout: 120_000,
   });
 
-  // Always resolve actor (anonymous if no headers)
   app.addHook('onRequest', async (req) => {
     resolveActor(req);
   });
@@ -39,21 +38,20 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.1.0',
+    version: '1.2.0',
     prompts: '1-10',
     rbac: rbacEnabled,
   }));
 
   app.get('/ready', async () => ({ status: 'ready' }));
 
-  // Optional hard RBAC gates when RBAC_ENABLED=true
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
       const path = req.url.split('?')[0];
       const method = req.method;
 
       if (path === '/health' || path === '/ready') return;
-      if (path.startsWith('/api/v1/workers') && method === 'POST') return; // workers self-register
+      if (path.startsWith('/api/v1/workers') && method === 'POST') return;
       if (path === '/api/v1/executions/claim') return;
 
       if (method === 'GET' && (path.startsWith('/api/v1/test-cases') || path.startsWith('/api/v1/applications') || path.startsWith('/api/v1/dashboard') || path.startsWith('/api/v1/search'))) {
@@ -82,6 +80,7 @@ async function main() {
   await app.register(suitePlanRoutes);
   await app.register(analyticsRoutes);
   await app.register(intelligenceRoutes);
+  await app.register(scheduleRoutes);
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API listening on http://${host}:${port} (rbac=${rbacEnabled})`);
