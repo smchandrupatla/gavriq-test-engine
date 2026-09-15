@@ -63,11 +63,13 @@ jobs:
       - name: API smoke curls
         run: |
           curl -sf http://127.0.0.1:8787/health | tee /tmp/health.json
+          curl -sf http://127.0.0.1:8787/api/v1/meta | tee /tmp/meta.json
           curl -sf http://127.0.0.1:8787/api/v1/applications | tee /tmp/apps.json
           curl -sf http://127.0.0.1:8787/api/v1/test-cases | tee /tmp/cases.json
           curl -sf http://127.0.0.1:8787/api/v1/dashboard | tee /tmp/dash.json
           curl -sf http://127.0.0.1:8787/api/v1/release-readiness | tee /tmp/ready.json
           test "$(jq -r .status /tmp/health.json)" = "ok"
+          test "$(jq -r .version /tmp/meta.json)" = "0.2.1"
 
       - name: E2E API flow
         run: npx tsx --test tests/e2e-api-flow.test.ts
