@@ -1,6 +1,6 @@
 {
   "name": "gavriq-test-engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,6 +13,7 @@
     "start:scheduler": "tsx apps/api/src/scheduler.ts",
     "migrate": "tsx apps/api/src/db/migrate.ts",
     "seed": "tsx apps/api/src/seed.ts",
+    "import:sit": "tsx apps/api/src/import-sit-catalog.ts",
     "test": "tsx --test tests/*.test.ts",
     "build:use-cases": "tsx scripts/build-use-cases.ts",
     "check:use-cases": "tsx scripts/build-use-cases.ts --check",
