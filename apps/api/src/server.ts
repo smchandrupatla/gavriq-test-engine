@@ -13,6 +13,7 @@ import { suitePlanRoutes } from './routes/suites-plans.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
+import { buildStatusRoutes } from './routes/build-status.js';
 import { resolveActor, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -38,7 +39,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '1.2.0',
+    version: '1.3.0',
     prompts: '1-10',
     rbac: rbacEnabled,
   }));
@@ -53,8 +54,9 @@ async function main() {
       if (path === '/health' || path === '/ready') return;
       if (path.startsWith('/api/v1/workers') && method === 'POST') return;
       if (path === '/api/v1/executions/claim') return;
+      if (path === '/api/v1/build-results' && method === 'POST') return; // CI push
 
-      if (method === 'GET' && (path.startsWith('/api/v1/test-cases') || path.startsWith('/api/v1/applications') || path.startsWith('/api/v1/dashboard') || path.startsWith('/api/v1/search'))) {
+      if (method === 'GET' && (path.startsWith('/api/v1/test-cases') || path.startsWith('/api/v1/applications') || path.startsWith('/api/v1/dashboard') || path.startsWith('/api/v1/search') || path.startsWith('/api/v1/test-status') || path.startsWith('/api/v1/build-results'))) {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && path === '/api/v1/executions') {
@@ -81,6 +83,7 @@ async function main() {
   await app.register(analyticsRoutes);
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
+  await app.register(buildStatusRoutes);
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API listening on http://${host}:${port} (rbac=${rbacEnabled})`);
