@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.2] — 2026-09-16
+
+**Added**
+- `Dockerfile.worker` — Chromium + ChromeDriver for on-demand Selenium in Docker
+- Compose worker profile uses Chrome image, `shm_size`, `host.docker.internal`
+- Selenium failure screenshots stored under `EVIDENCE_DIR` and linked as evidence
+- `CAPTURE_SCREENSHOTS=always` for pass-path screenshots
+- `docs/SELENIUM-WORKER.md`
+
 ## [0.2.1] — 2026-09-15
 
 **Added**
@@ -8,6 +17,7 @@
 - E2E API flow test (`npm run test:e2e`) — queue → claim → result → complete + build-results
 - CI runs E2E after API health
 - `docs/RELEASE.md`, production worker key + audit on execution queue
+- `/api/v1/meta`, `scripts/up.sh`
 
 ## [0.2.0] — 2026-09-15
 
@@ -39,6 +49,7 @@
 docker compose up -d --build
 # Dashboard: http://localhost:8787/
 # SIT console: http://localhost:8098/
+TARGET_BASE_URL=http://host.docker.internal:8001 docker compose --profile workers up -d
 ```
 
 ## [0.1.0] — prior
