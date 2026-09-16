@@ -19,6 +19,7 @@ import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
+import { evidenceRoutes } from './routes/evidence.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -52,7 +53,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '0.2.1',
+    version: '0.2.3',
     prompts: '1-10',
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
@@ -75,11 +76,12 @@ async function main() {
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
+      if (pathName.startsWith('/api/v1/evidence')) return;
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && pathName === '/api/v1/executions') {
@@ -99,6 +101,7 @@ async function main() {
   await app.register(testCaseRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
+  await app.register(evidenceRoutes);
   await app.register(workerRoutes);
   await app.register(suitePlanRoutes);
   await app.register(analyticsRoutes);

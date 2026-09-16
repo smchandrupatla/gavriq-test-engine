@@ -26,7 +26,7 @@
         <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-bold text-white text-sm">TE</div>
         <div>
           <h1 class="text-lg font-semibold tracking-tight">GAVRIQ Test Engine</h1>
-          <p class="text-xs text-slate-400">Repository · on-demand runs · build status · release readiness</p>
+          <p class="text-xs text-slate-400">Repository · on-demand runs · build status · evidence · release readiness</p>
         </div>
       </div>
       <div class="flex items-center gap-2 text-xs">
@@ -103,7 +103,7 @@
     <section class="bg-surface-card border border-surface-border rounded-xl overflow-hidden">
       <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
         <h2 class="font-medium">Recent executions</h2>
-        <span class="text-xs text-slate-500">Click a row to expand results</span>
+        <span class="text-xs text-slate-500">Click a row for results + evidence</span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -137,13 +137,9 @@
         running: 'bg-amber-900/50 text-amber-300',
         queued: 'bg-slate-700 text-slate-300',
         cancelled: 'bg-slate-700 text-slate-400',
-        active: 'bg-emerald-900/50 text-emerald-300',
         online: 'bg-emerald-900/50 text-emerald-300',
         offline: 'bg-slate-700 text-slate-400',
         busy: 'bg-amber-900/50 text-amber-300',
-        READY: 'bg-emerald-900/50 text-emerald-300',
-        'READY WITH CONDITIONS': 'bg-amber-900/50 text-amber-300',
-        'NOT READY': 'bg-rose-900/50 text-rose-300',
       };
       const cls = map[s] || 'bg-slate-700 text-slate-300';
       return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}">${s || '—'}</span>`;
@@ -233,7 +229,7 @@
       const list = document.getElementById('workerList');
       const workers = res.data || [];
       if (!workers.length) {
-        list.innerHTML = '<li class="text-slate-500">No workers — run npm run start:worker</li>';
+        list.innerHTML = '<li class="text-slate-500">No workers — WITH_WORKERS=1 ./scripts/up.sh</li>';
         return;
       }
       list.innerHTML = workers.map(w =>
@@ -262,19 +258,34 @@
       const data = res.data;
       if (!data) { el.textContent = 'Not found'; return; }
       const results = data.results || [];
-      el.innerHTML = `<p class="mb-2 font-mono">${data.key} · ${data.status}</p>` +
-        (results.length
-          ? `<ul class="space-y-1">${results.map(r =>
-              `<li class="flex gap-3"><span>${statusBadge(r.status)}</span><span class="truncate">${r.message || r.test_case_id}</span><span class="text-slate-500">${r.duration_ms || 0}ms</span></li>`
-            ).join('')}</ul>`
-          : '<p class="text-slate-500">No case results yet (waiting for worker)</p>');
+      if (!results.length) {
+        el.innerHTML = `<p class="mb-2 font-mono">${data.key} · ${data.status}</p><p class="text-slate-500">No case results yet (waiting for worker)</p>`;
+        return;
+      }
+      el.innerHTML = `<p class="mb-3 font-mono">${data.key} · ${statusBadge(data.status)}</p>` +
+        results.map(r => {
+          const shots = (r.evidence || []).filter(e => e.evidence_type === 'screenshot' || (e.content_type || '').startsWith('image'));
+          const other = (r.evidence || []).filter(e => !shots.includes(e));
+          return `<div class="mb-4 p-3 rounded-lg bg-surface border border-surface-border">
+            <div class="flex flex-wrap gap-2 items-center mb-1">
+              ${statusBadge(r.status)}
+              <span class="text-slate-400">${r.classification || ''}</span>
+              <span class="text-slate-500">${r.duration_ms || 0}ms</span>
+            </div>
+            <p class="mb-2 break-words">${r.message || r.test_case_id || ''}</p>
+            ${shots.length ? `<div class="flex flex-wrap gap-2">${shots.map(s =>
+              `<a href="${s.url}" target="_blank" class="block"><img src="${s.url}" alt="evidence" class="max-h-40 rounded border border-surface-border hover:opacity-90" /></a>`
+            ).join('')}</div>` : ''}
+            ${other.length ? `<p class="mt-1 text-slate-500">${other.map(o => o.evidence_type + ': ' + o.storage_key).join(' · ')}</p>` : ''}
+          </div>`;
+        }).join('');
     }
 
     async function loadBuildStatus() {
       const res = await api('/api/v1/build-results?application_key=sand-bench');
       const el = document.getElementById('buildStatus');
       if (!res.build_id) {
-        el.innerHTML = 'No build results yet. CI posts to <code class="text-slate-300">POST /api/v1/build-results</code>.';
+        el.innerHTML = 'No build results yet. Use <code class="text-slate-300">scripts/post-build-results.sh</code> or <code class="text-slate-300">POST /api/v1/build-results</code>.';
         return;
       }
       const s = res.summary || {};

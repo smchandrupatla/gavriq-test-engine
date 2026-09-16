@@ -29,7 +29,26 @@ export async function executionRoutes(app: FastifyInstance) {
       'SELECT * FROM execution_results WHERE execution_id = $1 ORDER BY created_at',
       [rows[0].id]
     );
-    return reply.send({ data: { ...rows[0], results: results.rows } });
+
+    // Attach evidence per result
+    const enriched = [];
+    for (const r of results.rows) {
+      const ev = await query(
+        `SELECT * FROM evidence WHERE execution_result_id = $1 ORDER BY created_at`,
+        [r.id]
+      );
+      enriched.push({
+        ...r,
+        evidence: ev.rows.map((e: any) => ({
+          ...e,
+          url: e.storage_key
+            ? `/api/v1/evidence/file?key=${encodeURIComponent(e.storage_key)}`
+            : null,
+        })),
+      });
+    }
+
+    return reply.send({ data: { ...rows[0], results: enriched } });
   });
 
   app.post<{ Body: Record<string, unknown> }>('/api/v1/executions', async (req, reply) => {
