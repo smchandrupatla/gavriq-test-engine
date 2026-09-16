@@ -31,8 +31,11 @@ services:
       RBAC_ENABLED: "false"
       AUTO_SEED: "true"
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
+      EVIDENCE_DIR: /data/evidence
     ports:
       - "127.0.0.1:8787:8787"
+    volumes:
+      - test-engine-evidence:/data/evidence
     healthcheck:
       test:
         [
@@ -47,7 +50,6 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  # Selenium-capable worker (Chromium + chromedriver)
   test-engine-worker:
     build:
       context: .
@@ -65,6 +67,9 @@ services:
       CHROME_BIN: /usr/bin/chromium
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      EVIDENCE_DIR: /data/evidence
+    volumes:
+      - test-engine-evidence:/data/evidence
     extra_hosts:
       - "host.docker.internal:host-gateway"
     shm_size: "256mb"
@@ -135,3 +140,4 @@ volumes:
   sit-console-data:
   sandbench-logs:
   sit-console-db-data:
+  test-engine-evidence:
