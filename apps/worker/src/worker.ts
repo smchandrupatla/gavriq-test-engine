@@ -1,14 +1,14 @@
 #!/usr/bin/env tsx
 /**
  * GAVRIQ Test Engine — Execution Worker
- * Dispatches to Selenium, Playwright, HTTP, or Performance runners.
- * Sends X-Worker-Key when WORKER_API_KEY is set.
+ * Dispatches to Selenium, Playwright, HTTP, Performance, or SIT file runners.
  */
 import { randomUUID } from 'node:crypto';
 import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
 import { runPerformance } from './runners/performance.js';
+import { runSit, isSitScript } from './runners/sit.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
@@ -40,7 +40,7 @@ async function register() {
       id: WORKER_ID,
       name: `Multi-runner Worker ${WORKER_ID}`,
       capabilities: [
-        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load',
+        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load', 'sit',
         'out_of_container', 'in_container', 'ui', 'smoke',
       ],
       labels: { kind: 'multi', runtime: 'node' },
@@ -89,8 +89,28 @@ type RunnerResult = {
 
 async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
   const method = (tc?.execution_method || 'selenium').toLowerCase();
+  const script = tc?.script || '';
+
+  // Imported SIT catalog entries
+  if (isSitScript(script) || method === 'sit') {
+    const r = await runSit({
+      script,
+      baseUrl,
+      timeoutSeconds: tc?.timeout_seconds || 120,
+    });
+    return {
+      status: r.status === 'skipped' ? 'skipped' : r.status,
+      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+      duration_ms: r.duration_ms,
+      message: r.message,
+      classification: r.classification || null,
+      metrics: r.metrics || {},
+      evidence: [],
+    };
+  }
+
   const common = {
-    script: tc?.script || undefined,
+    script: script || undefined,
     baseUrl,
     timeoutSeconds: tc?.timeout_seconds || 30,
     steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
@@ -151,9 +171,7 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
     duration_ms: r.duration_ms,
     message: r.message,
     classification: r.classification || null,
-    evidence: r.evidence || [
-      { type: 'log', storage_key: `evidence/sel-${Date.now()}.log`, content_type: 'text/plain' },
-    ],
+    evidence: r.evidence || [],
   };
 }
 
@@ -168,7 +186,7 @@ async function runJob(execution: any) {
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
     const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl);
-    if (result.status !== 'passed') anyFailed = true;
+    if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
 
     await api(`/api/v1/executions/${execution.id}/results`, {
       method: 'POST',
