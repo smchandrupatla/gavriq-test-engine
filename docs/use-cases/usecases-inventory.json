@@ -1,0 +1,93 @@
+{
+  "generatedAt": "2026-09-12",
+  "sourceSha": "03c452e425d238418c9a46cd90d0ccc28faad9eb",
+  "authority": "Official HTML and SHELL_PAGES. FEATURE_PAGES is not modified by documentation-only keys.",
+  "featurePages": 44,
+  "packBAdded": ["helpStandalone", "demoWalkthrough", "notProduction", "publicUrls", "isoFamilyReference", "dbViewer", "testCasesDesk", "testSuitesDesk"],
+  "pathPages": {
+    "help.html": "helpStandalone",
+    "demo.html": "demoWalkthrough",
+    "not-production.html": "notProduction",
+    "pitch.html": "publicUrls",
+    "test-cases.html": "testCasesDesk",
+    "test-suites.html": "testSuitesDesk",
+    "security.html": "security"
+  },
+  "notMappedUntilFileExists": ["reference.html"],
+  "notMappedOnPurpose": {
+    "index.html": "sessionLogin is the login gate on / but pathPages must not steal Overview from the console shell"
+  },
+  "scan2026-09-12": {
+    "publicHtml": [
+      "about.html",
+      "admin.html",
+      "attacks.html",
+      "bring-your-own-xsd.html",
+      "demo.html",
+      "external-systems.html",
+      "help-center.html",
+      "help.html",
+      "index.html",
+      "mask-demo.html",
+      "not-production.html",
+      "pitch.html",
+      "schema-tree.html",
+      "security.html",
+      "test-cases.html",
+      "test-suites.html",
+      "use-case-review.html",
+      "use-case.html"
+    ],
+    "officialScreens": 22,
+    "shellPages": ["index", "ops-console", "attacks", "admin", "reference", "dbviewer"],
+    "notes": [
+      "external-systems.html is a sidecar; official UC-externalSystems remains the console screen.",
+      "schema-tree.html, admin.html, and attacks.html do not load use-case-bind.js. pathPages in the binder is the mapping contract when the binder is present; injecting the binder onto those sidecars is a separate change.",
+      "ops-console.html is declared on SHELL_PAGES and is the visual bundle, not the live API shell.",
+      "help-center.html PDF links are backed by apps/web/public/help/pdf/{id}.pdf plus sand-bench-help-consolidated.pdf and Sand-Bench-Help-Manual.pdf."
+    ]
+  },
+  "surfaces": {
+    "helpCenter": "screen",
+    "keyboardShortcuts": "screen",
+    "maskDemo": "screen",
+    "n2ControlWalk": "both",
+    "bringYourOwnXsd": "screen",
+    "helpStandalone": "screen",
+    "demoWalkthrough": "screen",
+    "notProduction": "screen",
+    "publicUrls": "screen",
+    "isoFamilyReference": "both",
+    "dbViewer": "both",
+    "testCasesDesk": "both",
+    "testSuitesDesk": "both",
+    "helpCenter": "screen",
+    "maskDemo": "screen",
+    "bringYourOwnXsd": "screen"
+  },
+  "scan2026-09-12-helpCenter": {
+    "publicHtmlReviewed": ["help-center.html"],
+    "officialScreens": 22,
+    "shellPages": ["index", "ops-console", "attacks", "admin", "reference", "dbviewer"],
+    "notes": [
+      "help-center.html is a standalone Help Center. Surface tag helpCenter=screen. No Help Center REST API.",
+      "Unknown hash now discloses Topic not found. Empty hash still opens topic id help-center.",
+      "Pack A remaining reviews (sessionLogin, viewUseCase, schemaInstanceTree, adminIdentities, attackHistory) stay on PR #37."
+    ]
+  },
+  "followUps": [
+    "Run node scripts/build-use-cases.ts then --check so generated UC-*.md includes pack B keys.",
+    "Do not title-match /reference.html until apps/web/public/reference.html exists.",
+    "Reconcile SHELL_PAGES read-only note with DB Viewer delete/CLEAR.",
+    "Pack A remaining reviews: sessionLogin, viewUseCase, schemaInstanceTree, adminIdentities, attackHistory (open PR #37).",
+    "Per-topic PDFs are linked from Help Center; existence of every topics.js id file is not certified.",
+    "Test Runs: new-run form posts hardcoded values; Active runs never subscribe to stream; storage errors return empty list; history last 30 days has no real filter.",
+    "Overview stats still show prototype numbers; Message Designer save/import/export still local-only.",
+    "Issue log: seed empty logs into existing UC-*.md via the builder; confirm the Issue log tab on /use-case.html.",
+    "Optional later PR: load use-case-bind.js on schema-tree.html, admin.html, and attacks.html so View use case is present on those sidecars. Do not restyle official HTML.",
+    "Token keys remain split (sbe_token vs sbe_admin_token vs sbe.token). Recorded in pack A gaps; do not invent a new key in this loop.",
+    "Help topic screenshot files under apps/web/public/help/img/ are referenced by topics.js and are not certified. Do not add dummy sample figures to Overview help.",
+    "Unknown-hash byId(topics[0]) substitution remains on main; tracked on PR #38."
+    "Overview stats still show prototype numbers; Message Designer save/import/export still local-only."
+  ]
+}

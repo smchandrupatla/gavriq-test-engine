@@ -1,12 +1,15 @@
 /**
  * Selenium WebDriver runner for out-of-container UI tests.
- * Used by the execution worker when execution_method = 'selenium'.
+ * Captures PNG screenshots on failure (and always if CAPTURE_SCREENSHOTS=always).
+ * Evidence written under EVIDENCE_DIR (default ./evidence).
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { Builder, By, until, type WebDriver } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
 
 export interface SeleniumRunInput {
-  script?: string;           // named script key or inline steps JSON
+  script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
   steps?: Array<{ action: string; selector?: string; value?: string; expected?: string }>;
@@ -17,22 +20,59 @@ export interface SeleniumRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
-  evidence?: Array<{ type: string; storage_key: string; content_type?: string }>;
+  evidence?: Array<{ type: string; storage_key: string; content_type?: string; size_bytes?: number }>;
 }
+
+const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
 
 async function buildDriver(): Promise<WebDriver> {
   const options = new chrome.Options();
+  const chromeBin = process.env.CHROME_BIN || process.env.CHROMIUM_PATH;
+  if (chromeBin) {
+    options.setChromeBinaryPath(chromeBin);
+  }
   options.addArguments(
     '--headless=new',
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--window-size=1280,800'
+    '--window-size=1280,800',
+    '--disable-software-rasterizer'
   );
-  return new Builder().forBrowser('chrome').setChromeOptions(options).build();
+
+  const builder = new Builder().forBrowser('chrome').setChromeOptions(options);
+  const serviceBuilder = process.env.CHROMEDRIVER_PATH
+    ? new chrome.ServiceBuilder(process.env.CHROMEDRIVER_PATH)
+    : undefined;
+  if (serviceBuilder) {
+    builder.setChromeService(serviceBuilder);
+  }
+  return builder.build();
 }
 
-/** Named main-flow scripts for Sand Bench / generic targets */
+async function captureScreenshot(
+  driver: WebDriver,
+  prefix: string
+): Promise<{ type: string; storage_key: string; content_type: string; size_bytes: number } | null> {
+  try {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const name = `${prefix}-${Date.now()}.png`;
+    const full = path.join(EVIDENCE_DIR, name);
+    const b64 = await driver.takeScreenshot();
+    const buf = Buffer.from(b64, 'base64');
+    writeFileSync(full, buf);
+    return {
+      type: 'screenshot',
+      storage_key: `evidence/${name}`,
+      content_type: 'image/png',
+      size_bytes: buf.length,
+    };
+  } catch (err) {
+    console.warn('[selenium] screenshot failed:', (err as Error).message);
+    return null;
+  }
+}
+
 const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Promise<string>> = {
   async smoke_home(driver, baseUrl) {
     await driver.get(baseUrl);
@@ -47,7 +87,6 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
     await driver.get(baseUrl);
     const links = await driver.findElements(By.partialLinkText('Login'));
     if (!links.length) {
-      // try common selectors
       const alt = await driver.findElements(By.css('a[href*="login"]'));
       if (!alt.length) throw new Error('Login link not found');
       await alt[0].click();
@@ -107,15 +146,12 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
 
   async full_smoke_suite(driver, baseUrl) {
     const parts: string[] = [];
-    // home
     await driver.get(baseUrl);
     await driver.wait(until.elementLocated(By.css('body')), 10000);
     parts.push('home:OK');
-    // widgets
     await driver.sleep(1000);
     const body = (await driver.findElement(By.css('body')).getText()).toLowerCase();
     parts.push(body.includes('active') || body.length > 20 ? 'widgets:OK' : 'widgets:SKIP');
-    // login nav
     const links = await driver.findElements(By.partialLinkText('Login'));
     if (links.length) {
       await links[0].click();
@@ -131,23 +167,19 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
 export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunResult> {
   const start = Date.now();
   let driver: WebDriver | null = null;
+  const evidence: SeleniumRunResult['evidence'] = [];
+  const alwaysShot = process.env.CAPTURE_SCREENSHOTS === 'always';
+
   try {
     driver = await buildDriver();
     const timeout = (input.timeoutSeconds || 30) * 1000;
     await driver.manage().setTimeouts({ pageLoad: timeout, implicit: 5000 });
 
-    // Named script
-    if (input.script && NAMED_SCRIPTS[input.script]) {
-      const msg = await NAMED_SCRIPTS[input.script](driver, input.baseUrl);
-      return {
-        status: 'passed',
-        message: msg,
-        duration_ms: Date.now() - start,
-      };
-    }
+    let message: string;
 
-    // Step-based low-code execution
-    if (input.steps?.length) {
+    if (input.script && NAMED_SCRIPTS[input.script]) {
+      message = await NAMED_SCRIPTS[input.script](driver, input.baseUrl);
+    } else if (input.steps?.length) {
       await driver.get(input.baseUrl);
       for (const step of input.steps) {
         switch (step.action) {
@@ -189,20 +221,23 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
             throw new Error(`Unknown step action: ${step.action}`);
         }
       }
-      return {
-        status: 'passed',
-        message: `Executed ${input.steps.length} steps`,
-        duration_ms: Date.now() - start,
-      };
+      message = `Executed ${input.steps.length} steps`;
+    } else {
+      await driver.get(input.baseUrl);
+      await driver.wait(until.elementLocated(By.css('body')), 10000);
+      message = `Loaded ${input.baseUrl}`;
     }
 
-    // Default: just load the page
-    await driver.get(input.baseUrl);
-    await driver.wait(until.elementLocated(By.css('body')), 10000);
+    if (alwaysShot) {
+      const shot = await captureScreenshot(driver, 'pass');
+      if (shot) evidence.push(shot);
+    }
+
     return {
       status: 'passed',
-      message: `Loaded ${input.baseUrl}`,
+      message,
       duration_ms: Date.now() - start,
+      evidence,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -212,11 +247,17 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
     else if (/assert|expected/i.test(msg)) classification = 'assertion_failure';
     else if (/element|selector|not found/i.test(msg)) classification = 'script_problem';
 
+    if (driver) {
+      const shot = await captureScreenshot(driver, 'fail');
+      if (shot) evidence.push(shot);
+    }
+
     return {
       status: 'failed',
       message: msg.slice(0, 500),
       duration_ms: Date.now() - start,
       classification,
+      evidence,
     };
   } finally {
     if (driver) {
