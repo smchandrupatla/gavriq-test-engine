@@ -20,13 +20,15 @@ import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
+import { sitCatalogRoutes } from './routes/sit-catalog.js';
+import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const publicDir = path.join(root, 'apps/api/public');
 
 function packageVersion(): string {
@@ -80,22 +82,30 @@ async function main() {
     return reply.type('text/html').send(readFileSync(index, 'utf8'));
   });
 
+  app.get('/:asset', async (req, reply) => {
+    const name = String((req.params as { asset?: string }).asset || '');
+    if (!/^[a-zA-Z0-9._-]+\.(js|css)$/.test(name)) return reply.callNotFound();
+    const file = path.join(publicDir, name);
+    if (!existsSync(file)) return reply.status(404).type('text/plain').send(`${name} missing`);
+    const type = name.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8';
+    return reply.type(type).send(readFileSync(file, 'utf8'));
+  });
+
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
       const pathName = req.url.split('?')[0];
       const method = req.method;
 
-      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
+      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta' || /\.(js|css)$/.test(pathName)) return;
       if (pathName.startsWith('/api/v1/evidence')) return;
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
-      if (pathName === '/api/v1/preflight') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/intelligence'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/sit-catalog') || pathName.startsWith('/api/v1/sit-status') || pathName.startsWith('/api/v1/kit-log') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/intelligence') || pathName.startsWith('/api/v1/preflight'))) {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && pathName === '/api/v1/executions') {
+      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
         return requirePermission('executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
@@ -108,6 +118,8 @@ async function main() {
   }
 
   await app.register(metaRoutes);
+  await app.register(sitCatalogRoutes);
+  await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
   await app.register(environmentRoutes);
