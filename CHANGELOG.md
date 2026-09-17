@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.4] — 2026-09-17
+
+**Added**
+- Unified dashboard shell on `:8787` with a left-hand menu: Overview, Test catalog, SIT test cases, Test cases, Schedules, Test runs, Test kit log, Workers & builds
+- SIT cases stay labelled as SIT; repository (seeded) cases stay on Test cases
+- `GET /api/v1/sit-catalog` — pack inventory from `sit/cases` plus registered `SIT-*` rows
+- Test cards use the existing GAVRIQ surface / accent tokens (no separate SIT palette)
+
+**Fixed**
+- Dashboard static root now resolves from `apps/api/src` to `apps/api/public`
+- RBAC GET allow-list includes `/api/v1/sit-catalog` and `/api/v1/schedules`
+
 ## [0.2.3] — 2026-09-16
 
 **Added**
