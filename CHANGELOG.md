@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.3] — 2026-09-18
+
+**Added**
+- Unified left-nav dashboard on :8787 (overview, catalog, SIT cases, repository cases, schedules, runs, kit log, workers)
+- `POST /api/v1/sit-runs` hands selected SIT cases to `sit/lib/runner` through the SIT console `/api/run`; falls back to queued `SIT-*` engine executions if the console is down
+- Live Test kit log: `GET /api/v1/kit-log/stream` (SSE) and `GET /api/v1/kit-log`
+- Schedule create / enable / run-now form on the unified dashboard
+- Legacy `:8098` portal restyled to GAVRIQ engine tokens, with a link to `:8787#sit`
+
 ## [0.3.2] — 2026-09-17
 
 **Fixed**
