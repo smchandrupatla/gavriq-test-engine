@@ -1,11 +1,13 @@
 /**
- * RBAC middleware (Prompt 9).
+ * RBAC + identity resolution.
  *
- * Dev: headers x-actor-id / x-actor-roles
- * Prod: set RBAC_ENABLED=true and optionally JWT_SECRET for Bearer tokens
- *       (jose HS256). Worker endpoints accept X-Worker-Key when WORKER_API_KEY is set.
+ * Priority:
+ * 1. X-Worker-Key matches WORKER_API_KEY → worker role
+ * 2. Authorization: Bearer <jwt> verified with JWT_SECRET (HS256) via jose
+ * 3. x-actor-id / x-actor-roles headers (dev only unless RBAC_ALLOW_DEV_HEADERS=true)
  */
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { jwtVerify } from 'jose';
 import { query } from '../db/client.js';
 
 export type Role =
@@ -48,14 +50,47 @@ declare module 'fastify' {
   }
 }
 
-function parseRoles(raw: string | undefined): Role[] {
-  if (!raw) return ['viewer'];
-  return raw.split(',').map((r) => r.trim()).filter(Boolean) as Role[];
+function parseRoles(raw: unknown): Role[] {
+  if (Array.isArray(raw)) return raw.map(String).map((r) => r.trim()).filter(Boolean) as Role[];
+  if (typeof raw === 'string') {
+    return raw.split(',').map((r) => r.trim()).filter(Boolean) as Role[];
+  }
+  return ['viewer'];
 }
 
-/** Extract actor from headers or optional Bearer JWT (HS256). */
+async function verifyBearer(token: string): Promise<{ id: string; roles: Role[] } | null> {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) return null;
+  try {
+    const key = new TextEncoder().encode(secret);
+    const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] });
+    const id = String(payload.sub || payload.user_id || 'jwt-user');
+    const roles = parseRoles(payload.roles ?? payload.role);
+    return { id, roles: roles.length ? roles : ['viewer'] };
+  } catch (err) {
+    console.warn('[jwt] verify failed:', (err as Error).message);
+    return null;
+  }
+}
+
 export function resolveActor(req: FastifyRequest) {
-  // Worker key short-circuit
+  const workerKey = process.env.WORKER_API_KEY;
+  const providedKey = req.headers['x-worker-key'] as string | undefined;
+  if (workerKey && providedKey && providedKey === workerKey) {
+    req.actor = { id: 'worker', roles: ['worker', 'automation_agent'] };
+    return;
+  }
+  const allowDevHeaders = process.env.RBAC_ALLOW_DEV_HEADERS === 'true' || process.env.RBAC_ENABLED !== 'true';
+  if (process.env.RBAC_ENABLED === 'true' && process.env.JWT_SECRET && !allowDevHeaders) {
+    req.actor = { id: 'unauthenticated', roles: ['viewer'] };
+    return;
+  }
+  const roleHeader = req.headers['x-actor-roles'] as string | undefined;
+  const id = (req.headers['x-actor-id'] as string) || 'anonymous';
+  req.actor = { id, roles: parseRoles(roleHeader) };
+}
+
+export async function resolveActorAsync(req: FastifyRequest) {
   const workerKey = process.env.WORKER_API_KEY;
   const providedKey = req.headers['x-worker-key'] as string | undefined;
   if (workerKey && providedKey && providedKey === workerKey) {
@@ -63,28 +98,34 @@ export function resolveActor(req: FastifyRequest) {
     return;
   }
 
-  const roleHeader = req.headers['x-actor-roles'] as string | undefined;
-  const id = (req.headers['x-actor-id'] as string) || 'anonymous';
-
-  // Optional JWT (payload: { sub, roles: string[] })
   const auth = req.headers.authorization;
-  if (auth?.startsWith('Bearer ') && process.env.JWT_SECRET) {
-    // Lazy verify without blocking import if jose unavailable in edge cases
-    try {
-      // Synchronous-ish path: store unresolved; full verify can be added with jose
-      // For now trust x-actor headers when JWT_SECRET set only after external gateway validates.
-      // Placeholder: roles from header still required alongside Bearer.
-    } catch {
-      /* fall through */
+  if (auth?.startsWith('Bearer ')) {
+    const token = auth.slice(7).trim();
+    const verified = await verifyBearer(token);
+    if (verified) {
+      req.actor = verified;
+      return;
+    }
+    if (process.env.JWT_SECRET) {
+      req.actor = { id: 'invalid-token', roles: ['viewer'] };
+      return;
     }
   }
 
+  const allowDevHeaders = process.env.RBAC_ALLOW_DEV_HEADERS === 'true';
+  if (process.env.RBAC_ENABLED === 'true' && process.env.JWT_SECRET && !allowDevHeaders) {
+    req.actor = { id: 'unauthenticated', roles: ['viewer'] };
+    return;
+  }
+
+  const roleHeader = req.headers['x-actor-roles'] as string | undefined;
+  const id = (req.headers['x-actor-id'] as string) || 'anonymous';
   req.actor = { id, roles: parseRoles(roleHeader) };
 }
 
 export function requirePermission(permission: string) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    resolveActor(req);
+    await resolveActorAsync(req);
     const allowed = PERMISSIONS[permission] || [];
     const has = req.actor?.roles.some((r) => allowed.includes(r) || r === 'test_admin');
     if (!has) {
@@ -98,7 +139,6 @@ export function requirePermission(permission: string) {
   };
 }
 
-/** Persist an audit event (best-effort). */
 export async function audit(
   req: FastifyRequest,
   action: string,

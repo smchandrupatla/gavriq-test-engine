@@ -2,7 +2,7 @@
 
 Enterprise Test Engineering & Validation platform — central repository, on-demand execution, build-status display, and release readiness for applications under test (including **Sand Bench**).
 
-**Version:** 0.2.0
+**Version:** 0.2.1
 
 ## What it does
 
@@ -51,12 +51,14 @@ npm run import:sit        # register sit/cases/*.sit.ts into the repository
 npm run start:api         # :8787
 npm run start:worker      # optional
 npm run start:scheduler   # optional
+npm run test:e2e          # with API running
 ```
 
 ## Key APIs
 
 ```
 GET  /health
+GET  /api/v1/meta          → version + capability map
 GET  /                         → dashboard UI
 GET  /api/v1/test-cases
 POST /api/v1/executions        → queue run
@@ -67,7 +69,7 @@ POST /api/v1/build-results     → CI posts in-container results
 GET  /api/v1/agents/context
 ```
 
-Full surface: see [docs/ENTERPRISE-TEST-ENGINE.md](docs/ENTERPRISE-TEST-ENGINE.md), [docs/RUNNERS-AND-RBAC.md](docs/RUNNERS-AND-RBAC.md), [docs/DOCKER-AND-BUILD-STATUS.md](docs/DOCKER-AND-BUILD-STATUS.md), [docs/PRODUCTION.md](docs/PRODUCTION.md).
+Docs: [ENTERPRISE-TEST-ENGINE](docs/ENTERPRISE-TEST-ENGINE.md) · [RUNNERS-AND-RBAC](docs/RUNNERS-AND-RBAC.md) · [DOCKER-AND-BUILD-STATUS](docs/DOCKER-AND-BUILD-STATUS.md) · [PRODUCTION](docs/PRODUCTION.md) · [RELEASE](docs/RELEASE.md)
 
 ## Architecture
 
@@ -83,13 +85,13 @@ Control plane (apps/api :8787)     Workers (apps/worker)
    PostgreSQL
 ```
 
-SIT console (`sit/`) remains an independent post-deploy runner with its own UI and history.
-
 ## Production notes
 
 ```bash
 export RBAC_ENABLED=true
 export WORKER_API_KEY="$(openssl rand -hex 32)"
+export JWT_SECRET="$(openssl rand -hex 32)"
+npm run mint-token -- test_admin ops-user
 ```
 
 See [docs/PRODUCTION.md](docs/PRODUCTION.md).
