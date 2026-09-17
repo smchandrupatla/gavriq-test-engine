@@ -1,9 +1,22 @@
 import type { FastifyInstance } from 'fastify';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+function packageVersion(): string {
+  try {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+    return String(pkg.version || '0.0.0');
+  } catch {
+    return process.env.npm_package_version || '0.0.0';
+  }
+}
 
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/api/v1/meta', async () => ({
     service: 'gavriq-test-engine',
-    version: '0.2.1',
+    version: packageVersion(),
     control_plane: true,
     capabilities: {
       repository: true,
@@ -18,7 +31,7 @@ export async function metaRoutes(app: FastifyInstance) {
       jwt: Boolean(process.env.JWT_SECRET),
       dashboard: true,
     },
-    runners: ['selenium', 'playwright', 'http', 'rest', 'api', 'performance'],
+    runners: ['selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'sit', 'mq', 'kafka', 'database'],
     endpoints: {
       health: '/health',
       dashboard: '/',
@@ -35,6 +48,7 @@ export async function metaRoutes(app: FastifyInstance) {
       release_readiness: '/api/v1/release-readiness',
       reports_summary: '/api/v1/reports/summary/:id',
       agents_context: '/api/v1/agents/context',
+      preflight: '/api/v1/preflight',
       meta: '/api/v1/meta',
     },
   }));
