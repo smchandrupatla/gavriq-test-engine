@@ -20,6 +20,7 @@ import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
+import { opsRoutes } from './routes/ops.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -118,6 +119,7 @@ async function main() {
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
   await app.register(buildStatusRoutes);
+  await app.register(opsRoutes);
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
