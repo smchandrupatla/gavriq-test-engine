@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main, hardening-0.3.0]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sitconsole
+          POSTGRES_PASSWORD: sitconsole
+          POSTGRES_DB: sitconsole
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sitconsole -d sitconsole"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      TEST_ENGINE_API: http://127.0.0.1:8787
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm install
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if node -e "const n=require('net'); const s=n.connect({host:'127.0.0.1',port:5432},()=>{s.end();process.exit(0)}); s.on('error',()=>process.exit(1))"; then
+              echo "postgres port open"
+              exit 0
+            fi
+            echo "waiting for postgres $i"
+            sleep 1
+          done
+          echo "postgres never accepted connections on 127.0.0.1:5432"
+          exit 1
+
+      - name: Migrate
+        run: npm run migrate
+
+      - name: Seed
+        run: npm run seed
+
+      - name: Unit smoke tests
+        run: npx tsx --test tests/enterprise-api-smoke.test.ts
+
+      - name: Start API
+        run: |
+          npx tsx apps/api/src/server.ts &
+          echo $! > /tmp/api.pid
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8787/health; then exit 0; fi
+            sleep 1
+          done
+          echo "API failed to become healthy"
+          exit 1
+
+      - name: API smoke curls
+        run: |
+          curl -sf http://127.0.0.1:8787/health | tee /tmp/health.json
+          curl -sf http://127.0.0.1:8787/api/v1/meta | tee /tmp/meta.json
+          curl -sf http://127.0.0.1:8787/api/v1/applications | tee /tmp/apps.json
+          curl -sf http://127.0.0.1:8787/api/v1/test-cases | tee /tmp/cases.json
+          curl -sf http://127.0.0.1:8787/api/v1/dashboard | tee /tmp/dash.json
+          curl -sf http://127.0.0.1:8787/api/v1/release-readiness | tee /tmp/ready.json
+          test "$(jq -r .status /tmp/health.json)" = "ok"
+          PKG_VER="$(node -p "require('./package.json').version")"
+          META_VER="$(jq -r .version /tmp/meta.json)"
+          echo "package.json=$PKG_VER meta=$META_VER"
+          test -n "$META_VER"
+          test "$META_VER" != "null"
+          test "$META_VER" = "$PKG_VER"
+
+      - name: E2E API flow
+        run: npx tsx --test tests/e2e-api-flow.test.ts
