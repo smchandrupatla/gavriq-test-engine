@@ -1,6 +1,6 @@
 {
   "name": "gavriq-test-engine",
-  "version": "0.1.0",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,23 +10,17 @@
     "start": "tsx apps/api/src/server.ts",
     "start:api": "tsx apps/api/src/server.ts",
     "start:worker": "tsx apps/worker/src/worker.ts",
+    "start:scheduler": "tsx apps/api/src/scheduler.ts",
     "migrate": "tsx apps/api/src/db/migrate.ts",
+    "seed": "tsx apps/api/src/seed.ts",
+    "import:sit": "tsx apps/api/src/import-sit-catalog.ts",
+    "mint-token": "tsx apps/api/src/scripts/mint-token.ts",
     "test": "tsx --test tests/*.test.ts",
-    "build:use-cases": "tsx scripts/build-use-cases.ts",
-    "check:use-cases": "tsx scripts/build-use-cases.ts --check",
-    "test:use-cases": "tsx --test tests/use-case-comprehensive.test.ts tests/use-cases.test.ts tests/use-case-structure.test.ts tests/use-case-pipeline.test.ts tests/use-case-markdown.test.ts tests/use-case-lookup.test.ts",
-    "test:gui": "playwright test tests/gui",
-    "build:schema-canvas": "esbuild apps/web/src/schema-canvas-flow.tsx --bundle --minify --format=iife --global-name=SbeSchemaCanvasFlow --jsx=automatic --outfile=apps/web/public/vendor/schema-canvas-flow.js",
-    "build:schema-canvas-layout": "esbuild apps/web/src/schema-canvas-layout.ts --bundle --minify --format=iife --global-name=SbeSchemaCanvasLayout --outfile=apps/web/public/vendor/schema-canvas-layout.js",
-    "build:agentdesk-rule-flow": "esbuild apps/agentdesk/src/rule-flow-canvas.tsx --bundle --minify --format=iife --global-name=SbeAgentDeskRuleFlow --jsx=automatic --outfile=apps/agentdesk/public/rule-flow-canvas.js",
-    "test:cypress": "cypress run --e2e",
-    "audit:prod": "npm audit --omit=dev --audit-level=high",
-    "audit:snyk": "npx --yes snyk test --severity-threshold=high --all-projects",
+    "test:e2e": "tsx --test tests/e2e-api-flow.test.ts",
+    "test:unit": "tsx --test tests/enterprise-api-smoke.test.ts tests/classify.test.ts",
+    "parse:junit": "node scripts/parse-junit.mjs",
     "sit": "node sit/run.mjs",
     "sit:console": "PORT=8098 node sit/console.mjs",
-    "test:sit": "tsx --test tests/sit-console.test.ts tests/sit-release.test.ts tests/delivery-capture.test.ts tests/testhub.test.ts",
-    "test:engine-traceability": "tsx --test tests/test-engine-traceability.test.ts tests/sit-console.test.ts",
-    "sit:use-cases": "node sit/run-use-cases.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -53,6 +47,7 @@
     "react": "^19.2.8",
     "react-dom": "^18.3.1",
     "typescript": "^7.0.2"
+    "typescript": "^5.8.2"
   },
   "license": "UNLICENSED"
 }
