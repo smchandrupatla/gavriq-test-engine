@@ -70,6 +70,8 @@ describe('e2e api flow', () => {
 
     const envs = await api('/api/v1/environments');
     const env = (envs.body.data || []).find((e: any) => e.key === 'local-dev');
+
+    // Point environment at the engine's own health endpoint for a reliable target
     const baseUrl = process.env.E2E_TARGET_URL || `${API}`;
 
     const queued = await api('/api/v1/executions', {
@@ -84,6 +86,7 @@ describe('e2e api flow', () => {
     assert.equal(queued.status, 202, JSON.stringify(queued.body));
     const execId = queued.body.data.id;
 
+    // Register ephemeral worker and claim
     const workerId = `e2e-worker-${Date.now()}`;
     await api('/api/v1/workers/register', {
       method: 'POST',
@@ -100,6 +103,7 @@ describe('e2e api flow', () => {
     });
     assert.ok(claimed.status === 200 || claimed.status === 204);
 
+    // Simulate HTTP runner against API health
     const health = await fetch(`${baseUrl}/health`);
     const ok = health.ok;
 
