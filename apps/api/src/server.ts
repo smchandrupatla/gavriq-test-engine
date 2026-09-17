@@ -72,12 +72,13 @@ async function main() {
     return reply.type('text/html').send(readFileSync(index, 'utf8'));
   });
 
-  app.get('/console.js', async (_req, reply) => {
-    const file = path.join(publicDir, 'console.js');
-    if (!existsSync(file)) {
-      return reply.status(404).type('text/plain').send('console.js missing');
-    }
-    return reply.type('application/javascript; charset=utf-8').send(readFileSync(file, 'utf8'));
+  app.get('/:asset', async (req, reply) => {
+    const name = String((req.params as { asset?: string }).asset || '');
+    if (!/^[a-zA-Z0-9._-]+\.(js|css)$/.test(name)) return reply.callNotFound();
+    const file = path.join(publicDir, name);
+    if (!existsSync(file)) return reply.status(404).type('text/plain').send(`${name} missing`);
+    const type = name.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/javascript; charset=utf-8';
+    return reply.type(type).send(readFileSync(file, 'utf8'));
   });
 
   if (rbacEnabled) {
@@ -85,7 +86,7 @@ async function main() {
       const pathName = req.url.split('?')[0];
       const method = req.method;
 
-      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/console.js' || pathName === '/api/v1/meta') return;
+      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta' || /\.(js|css)$/.test(pathName)) return;
       if (pathName.startsWith('/api/v1/evidence')) return;
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
