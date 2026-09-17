@@ -9,7 +9,7 @@ export async function environmentRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/environments/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM environments WHERE id = $1 OR key = $1',
+      'SELECT * FROM environments WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Environment not found' });
@@ -35,7 +35,7 @@ export async function environmentRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/environments/:id/policy', async (req, reply) => {
     const { rows } = await query(
-      'SELECT key, name, safety_policy FROM environments WHERE id = $1 OR key = $1',
+      'SELECT key, name, safety_policy FROM environments WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Environment not found' });
@@ -47,7 +47,7 @@ export async function environmentRoutes(app: FastifyInstance) {
     '/api/v1/environments/:id/policy/check',
     async (req, reply) => {
       const { rows } = await query(
-        'SELECT safety_policy FROM environments WHERE id = $1 OR key = $1',
+        'SELECT safety_policy FROM environments WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Environment not found' });
