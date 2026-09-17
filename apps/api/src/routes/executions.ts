@@ -30,7 +30,6 @@ export async function executionRoutes(app: FastifyInstance) {
       [rows[0].id]
     );
 
-    // Attach evidence per result
     const enriched = [];
     for (const r of results.rows) {
       const ev = await query(
@@ -84,16 +83,22 @@ export async function executionRoutes(app: FastifyInstance) {
       }
     }
 
+    let environmentId = b.environment_id ?? null;
+    if (typeof environmentId === 'string' && environmentId && !/^[0-9a-f-]{36}$/i.test(environmentId)) {
+      const envRow = await query('SELECT id FROM environments WHERE key = $1', [environmentId]);
+      environmentId = envRow.rows[0]?.id ?? null;
+    }
+
     const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const { rows } = await query(
       `INSERT INTO executions (
          key, requested_by, test_plan_id, test_suite_id, test_case_ids,
          environment_id, execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
+       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::execution_location, 'out_of_container'::execution_location),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
        RETURNING *`,
       [
         key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
-        resolvedIds, b.environment_id ?? null, b.execution_location ?? null,
+        resolvedIds, environmentId, b.execution_location ?? null,
         b.trigger_source ?? null, JSON.stringify(b.metadata ?? {}),
       ]
     );
@@ -101,7 +106,7 @@ export async function executionRoutes(app: FastifyInstance) {
     await audit(req, 'execution.queue', 'execution', rows[0].id, {
       key,
       case_count: resolvedIds.length,
-      environment_id: b.environment_id,
+      environment_id: environmentId,
       trigger_source: b.trigger_source || 'manual',
     });
 
@@ -167,7 +172,7 @@ export async function executionRoutes(app: FastifyInstance) {
         `INSERT INTO execution_results (
            execution_id, test_case_id, status, verdict, duration_ms,
            started_at, finished_at, message, classification, metrics
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,'{}'::jsonb))
+         ) VALUES ($1,$2,$3::execution_status,$4,$5,$6,$7,$8,$9::failure_classification,COALESCE($10,'{}'::jsonb))
          RETURNING *`,
         [
           exec.rows[0].id, b.test_case_id, b.status, b.verdict ?? null,
@@ -198,7 +203,7 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const status = req.body?.status || 'passed';
       const { rows } = await query(
-        `UPDATE executions SET status = $2, finished_at = now()
+        `UPDATE executions SET status = $2::execution_status, finished_at = now()
          WHERE id = $1 OR key = $1 RETURNING *`,
         [req.params.id, status]
       );
