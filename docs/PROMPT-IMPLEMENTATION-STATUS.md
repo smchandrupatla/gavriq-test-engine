@@ -1,83 +1,72 @@
 # Prompt Implementation Status
 
-Branch: `feature/enterprise-test-engine`
+**Branch:** `main` · **Version:** 0.2.2+
 
 ## Prompt 1 — Foundation, Test Repository & Data Model
 **DONE**
-- Full PostgreSQL schema (`apps/api/src/db/schema.sql`)
-- Hierarchy tables, enums, versioning, audit fields
-- Applications, test cases, suites, plans CRUD APIs
-- Definitions separated from executions/results
+- PostgreSQL schema, hierarchy, versioning, audit
+- Applications, cases, suites, plans CRUD
 
 ## Prompt 2 — Test Authoring, Scripting & AI Generation
-**DONE (API layer)**
-- Create / update / clone test cases with version snapshots
-- AI proposal generation (`POST /api/v1/test-cases/generate`) → drafts only
-- Review accept/reject materialises draft cases
-- Low-code + script fields on test_cases (steps, script, assertions)
+**DONE (API)**
+- Create/update/clone + version snapshots
+- AI proposals (draft → accept/reject)
+- Steps / script / assertions on cases
 
 ## Prompt 3 — Environments, Containers & Distributed Workers
 **DONE**
-- Environment registry + safety_policy matrix
-- Policy check endpoint (allowed / approval_required / prohibited)
-- Worker register, heartbeat, drain
-- Job claim / result / complete protocol
-- Sample worker (`apps/worker/src/worker.ts`)
+- Environment registry + safety_policy
+- Worker register / heartbeat / claim / complete
+- Chrome-enabled `Dockerfile.worker` for Selenium
 
 ## Prompt 4 — Functional, API, Database & Messaging
-**FOUNDATION**
-- `test_type` and `execution_method` enums cover all listed types
-- Pluggable via worker capabilities; adapters added incrementally
+**PARTIAL**
+- Types + HTTP runner solid
+- No dedicated Kafka/MQ/DB adapter yet (SIT still covers many via sit/cases)
 
 ## Prompt 5 — Performance Engineering
-**FOUNDATION**
-- `metrics` jsonb on execution_results for latency percentiles, throughput, etc.
-- Dashboard ready for regression comparison
+**PARTIAL**
+- Concurrent HTTP performance runner + metrics jsonb
+- No k6 binary integration yet
 
 ## Prompt 6 — Deployment, Upgrade, Resilience
 **FOUNDATION**
-- Safety categories include deployment, chaos, destructive_db
-- Policy enforcement blocks prohibited runs
+- Safety categories + policy enforcement
+- Pack content still thin
 
 ## Prompt 7 — Execution Console, Scheduling & CI/CD
-**DONE (API)**
-- Run / cancel / claim / complete
-- trigger_source: manual | schedule | ci | agent | api
-- Schedules table present
+**DONE (API) + dashboard run**
+- Queue / cancel / claim / complete
+- Schedules table + scheduler process
+- Build-results ingest + `scripts/post-build-results.sh`
 
 ## Prompt 8 — Search, Dashboards, Reporting
 **DONE**
-- Global search across cases, apps, suites, environments
-- Dashboard aggregates
-- Test Summary Report with PASS / PASS WITH CONDITIONS / FAIL / INCONCLUSIVE
+- Search, dashboard KPIs, summary reports
+- Dark dashboard UI with last-result + execution detail + **evidence**
 
-## Prompt 9 — Failure Intelligence, Evidence, Security & Governance
+## Prompt 9 — Failure Intelligence, Evidence, Governance
 **DONE (core)**
-- Auto classification endpoint
-- Evidence table + attach on result report
-- Audit events API
-- Environment safety controls
+- Classification, evidence table, screenshots on Selenium fail
+- Evidence file serve API + dashboard thumbnails
+- Audit events, RBAC/JWT
 
 ## Prompt 10 — Test Intelligence, Agents & Release Readiness
-**DONE**
-- Coverage gaps (untested requirements, stale, never-run)
-- Release readiness scorecard (READY / READY WITH CONDITIONS / NOT READY)
-- Agent context endpoint
-- Test packs table
-- AI proposals lifecycle
+**DONE (core)**
+- Gaps, release readiness, agent context, test packs table
 
-## How to validate
+## Remaining (see check-in)
+- Live Sand Bench E2E validation against real URL
+- Full SIT case *execution* via worker (registry import exists)
+- k6 / DB / messaging adapters
+- Richer authoring UI, defect workflow UI
+- OIDC / object-store evidence
+
+## Validate
 
 ```bash
-export DATABASE_URL=postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
-npm run migrate
-npm run start:api   # :8787
-npm run start:worker
-
-curl -s http://127.0.0.1:8787/health
-curl -s http://127.0.0.1:8787/api/v1/applications
-curl -s http://127.0.0.1:8787/api/v1/dashboard
-curl -s http://127.0.0.1:8787/api/v1/release-readiness
+./scripts/up.sh
+WITH_WORKERS=1 ./scripts/up.sh
+curl -s localhost:8787/api/v1/meta | jq .
+npm run test:e2e
 ```
-
-Existing SIT console on :8098 is preserved and unchanged.

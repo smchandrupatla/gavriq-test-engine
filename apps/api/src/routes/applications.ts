@@ -9,7 +9,7 @@ export async function applicationRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/applications/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM applications WHERE id = $1 OR key = $1',
+      'SELECT * FROM applications WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Application not found' });
@@ -42,7 +42,7 @@ export async function applicationRoutes(app: FastifyInstance) {
            metadata = COALESCE($6, metadata),
            updated_at = now(),
            updated_by = $7
-         WHERE id = $1 OR key = $1
+         WHERE id::text = $1 OR key = $1
          RETURNING *`,
         [req.params.id, b.name ?? null, b.description ?? null, b.owner_id ?? null,
          b.status ?? null, b.metadata ? JSON.stringify(b.metadata) : null, b.updated_by ?? null]

@@ -1,0 +1,58 @@
+name: nightly-browsers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'
+
+jobs:
+  chrome-worker:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sitconsole
+          POSTGRES_PASSWORD: sitconsole
+          POSTGRES_DB: sitconsole
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sitconsole -d sitconsole"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
+      TEST_ENGINE_API: http://127.0.0.1:8787
+      TARGET_BASE_URL: http://127.0.0.1:8787
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm install
+      - run: npm run migrate
+      - run: npm run seed
+      - name: Start API
+        run: |
+          npx tsx apps/api/src/server.ts &
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:8787/health && exit 0; sleep 1; done
+          exit 1
+      - name: Target preflight
+        run: |
+          curl -sf "http://127.0.0.1:8787/api/v1/preflight?base_url=http://127.0.0.1:8787" | tee /tmp/preflight.json
+          test "$(jq -r .data.reachable /tmp/preflight.json)" = "true"
+      - name: Queue HTTP health case
+        run: |
+          CASE_ID=$(curl -sf http://127.0.0.1:8787/api/v1/test-cases | jq -r '.data[] | select(.key=="TC-SB-HEALTH") | .id' | head -1)
+          test -n "$CASE_ID"
+          curl -sf -X POST http://127.0.0.1:8787/api/v1/executions \
+            -H 'content-type: application/json' \
+            -d "{\"test_case_ids\":[\"$CASE_ID\"],\"trigger_source\":\"nightly\"}"
+      - name: Worker one-shot
+        run: |
+          timeout 40s npx tsx apps/worker/src/worker.ts || true
+          curl -sf http://127.0.0.1:8787/api/v1/executions | jq '.data[0] | {key,status}'

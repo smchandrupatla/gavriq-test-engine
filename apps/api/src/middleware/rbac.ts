@@ -4,7 +4,7 @@
  * Priority:
  * 1. X-Worker-Key matches WORKER_API_KEY → worker role
  * 2. Authorization: Bearer <jwt> verified with JWT_SECRET (HS256) via jose
- * 3. x-actor-id / x-actor-roles headers (dev / trusted gateway)
+ * 3. x-actor-id / x-actor-roles headers (dev only unless RBAC_ALLOW_DEV_HEADERS=true)
  */
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { jwtVerify } from 'jose';
@@ -80,15 +80,16 @@ export function resolveActor(req: FastifyRequest) {
     req.actor = { id: 'worker', roles: ['worker', 'automation_agent'] };
     return;
   }
-
-  // Async JWT is resolved in preHandler hook when needed; sync path uses headers.
-  // Callers that need JWT must await resolveActorAsync.
+  const allowDevHeaders = process.env.RBAC_ALLOW_DEV_HEADERS === 'true' || process.env.RBAC_ENABLED !== 'true';
+  if (process.env.RBAC_ENABLED === 'true' && process.env.JWT_SECRET && !allowDevHeaders) {
+    req.actor = { id: 'unauthenticated', roles: ['viewer'] };
+    return;
+  }
   const roleHeader = req.headers['x-actor-roles'] as string | undefined;
   const id = (req.headers['x-actor-id'] as string) || 'anonymous';
   req.actor = { id, roles: parseRoles(roleHeader) };
 }
 
-/** Full async resolution including Bearer JWT. */
 export async function resolveActorAsync(req: FastifyRequest) {
   const workerKey = process.env.WORKER_API_KEY;
   const providedKey = req.headers['x-worker-key'] as string | undefined;
@@ -105,11 +106,16 @@ export async function resolveActorAsync(req: FastifyRequest) {
       req.actor = verified;
       return;
     }
-    // Invalid token when JWT_SECRET is set → anonymous viewer (RBAC will block writes)
     if (process.env.JWT_SECRET) {
       req.actor = { id: 'invalid-token', roles: ['viewer'] };
       return;
     }
+  }
+
+  const allowDevHeaders = process.env.RBAC_ALLOW_DEV_HEADERS === 'true';
+  if (process.env.RBAC_ENABLED === 'true' && process.env.JWT_SECRET && !allowDevHeaders) {
+    req.actor = { id: 'unauthenticated', roles: ['viewer'] };
+    return;
   }
 
   const roleHeader = req.headers['x-actor-roles'] as string | undefined;
