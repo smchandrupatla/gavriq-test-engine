@@ -13,6 +13,7 @@ const databaseUrl =
 export const pool = new Pool({
   connectionString: databaseUrl,
   max: Number(process.env.DB_POOL_MAX || 10),
+  connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 5000),
 });
 
 pool.on('error', (err) => {
@@ -41,10 +42,40 @@ export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<
   }
 }
 
+async function waitForDatabase(attempts = Number(process.env.DB_WAIT_ATTEMPTS || 30)) {
+  let last: Error | undefined;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await pool.query('SELECT 1');
+      if (i > 1) console.log(`[migrate] postgres ready after ${i} attempt(s)`);
+      return;
+    } catch (err) {
+      last = err as Error;
+      console.warn(`[migrate] waiting for postgres (${i}/${attempts}): ${last.message}`);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  throw last || new Error('postgres never became reachable');
+}
+
 export async function migrate() {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  // client.ts lives at apps/api/src/db — four levels up is the repo root.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
   const schemaPath = path.join(root, 'apps/api/src/db/schema.sql');
-  const sql = readFileSync(schemaPath, 'utf8');
+  let sql: string;
+  try {
+    sql = readFileSync(schemaPath, 'utf8');
+  } catch (err) {
+    throw new Error(
+      `Cannot read schema at ${schemaPath} (repo root resolved to ${root}): ${(err as Error).message}`
+    );
+  }
+  await waitForDatabase();
   await pool.query(sql);
-  console.log('[migrate] schema applied successfully');
+  try {
+    await pool.query(`ALTER TYPE failure_classification ADD VALUE IF NOT EXISTS 'target_unreachable'`);
+  } catch (err) {
+    console.warn('[migrate] enum extend skipped:', (err as Error).message);
+  }
+  console.log('[migrate] schema applied successfully from', schemaPath);
 }
