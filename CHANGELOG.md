@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] — 2026-09-17
+
+**Fixed**
+- Lookups of the form `id = $1 OR key = $1` made Postgres infer `$1` as uuid, so `key` (text) comparison raised `operator does not exist: text = uuid`. Cast `id::text` so E2E can POST results and complete an execution.
+
 ## [0.3.1] — 2026-09-17
 
 **Fixed**

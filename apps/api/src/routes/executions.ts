@@ -21,7 +21,7 @@ export async function executionRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/executions/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM executions WHERE id = $1 OR key = $1',
+      'SELECT * FROM executions WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
@@ -68,7 +68,7 @@ export async function executionRoutes(app: FastifyInstance) {
 
     if (b.environment_id && b.safety_category) {
       const env = await query(
-        'SELECT safety_policy FROM environments WHERE id = $1 OR key = $1',
+        'SELECT safety_policy FROM environments WHERE id::text = $1 OR key = $1',
         [b.environment_id]
       );
       if (env.rows[0]) {
@@ -116,7 +116,7 @@ export async function executionRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
     const { rows } = await query(
       `UPDATE executions SET status = 'cancelled', finished_at = now()
-       WHERE (id = $1 OR key = $1) AND status IN ('queued','preparing','running')
+       WHERE (id::text = $1 OR key = $1) AND status IN ('queued','preparing','running')
        RETURNING *`,
       [req.params.id]
     );
@@ -163,7 +163,7 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const exec = await query(
-        'SELECT id FROM executions WHERE id = $1 OR key = $1',
+        'SELECT id FROM executions WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
@@ -204,7 +204,7 @@ export async function executionRoutes(app: FastifyInstance) {
       const status = req.body?.status || 'passed';
       const { rows } = await query(
         `UPDATE executions SET status = $2::execution_status, finished_at = now()
-         WHERE id = $1 OR key = $1 RETURNING *`,
+         WHERE id::text = $1 OR key = $1 RETURNING *`,
         [req.params.id, status]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
