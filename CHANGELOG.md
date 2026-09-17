@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] — 2026-09-17
+
+**Fixed**
+- Queueing an execution failed in CI: `execution_location` text was not cast to the enum
+- Worker now rolls up all-blocked runs as `blocked` instead of `failed`
+
+**Added**
+- `GET /api/v1/preflight` and `GET /api/v1/intelligence/flakes`
+- Release readiness excludes blocked/environment results and checks posted build status
+- `:8098` compatibility banner (`SIT_CONSOLE_REDIRECT=true` 302s to :8787)
+- Dashboard `blocked` badge
+
 ## [0.3.0] — 2026-09-17
 
 **Fixed**
@@ -9,12 +21,9 @@
 
 **Added**
 - Postgres wait in migrate and CI
-- `GET /api/v1/preflight` and readiness that excludes blocked results and checks posted build status
-- `GET /api/v1/intelligence/flakes`
 - JUnit / Jest converter `scripts/parse-junit.mjs`
 - Nightly / manual Chrome-worker workflow
 - MQ / Kafka / DB adapter stubs that fail closed as blocked
-- `:8098` compatibility banner (optional `SIT_CONSOLE_REDIRECT=true`)
 - JWT required for RBAC unless `RBAC_ALLOW_DEV_HEADERS=true`
 
 **Changed**
@@ -24,32 +33,23 @@
 
 **Added**
 - Evidence file API + dashboard screenshot viewer; shared Docker evidence volume
-- `scripts/post-build-results.sh` + `docs/CI-BUILD-RESULTS.md` + example GH workflow
-- SIT case execution via worker (`apps/worker/src/runners/sit.ts`) for imported catalog entries
+- `scripts/post-build-results.sh` + `docs/CI-BUILD-RESULTS.md`
+- SIT case execution via worker for imported catalog entries
 - `scripts/validate-target.sh` for TARGET_BASE_URL / Sand Bench reachability
 
 ## [0.2.2] — 2026-09-16
 
 **Added**
-- `Dockerfile.worker` — Chromium + ChromeDriver for on-demand Selenium in Docker
-- Compose worker profile uses Chrome image, `shm_size`, `host.docker.internal`
-- Selenium failure screenshots stored under `EVIDENCE_DIR` and linked as evidence
-- `CAPTURE_SCREENSHOTS=always` for pass-path screenshots
-- `docs/SELENIUM-WORKER.md`
+- Chrome-enabled worker image and Selenium evidence screenshots
 
 ## [0.2.1] — 2026-09-15
 
 **Added**
-- JWT Bearer auth (jose HS256) when `JWT_SECRET` is set; `npm run mint-token`
-- Dashboard: last-result column, execution detail panel, SIT Console link
-- E2E API flow test (`npm run test:e2e`)
-- CI runs E2E after API health
-- `docs/RELEASE.md`, production worker key + audit on execution queue
-- `/api/v1/meta`, `scripts/up.sh`
+- JWT Bearer auth, E2E API flow test, `/api/v1/meta`
 
 ## [0.2.0] — 2026-09-15
 
-Enterprise Test Engine foundation (Prompts 1–10). See prior notes in git history.
+Enterprise Test Engine foundation (Prompts 1–10).
 
 ## [0.1.0] — prior
 
