@@ -2,7 +2,7 @@
 
 Enterprise Test Engineering & Validation platform — central repository, on-demand execution, build-status display, and release readiness for applications under test (including **Sand Bench**).
 
-**Version:** 0.2.1
+**Version:** 0.2.4
 
 ## What it does
 
@@ -14,8 +14,8 @@ Enterprise Test Engineering & Validation platform — central repository, on-dem
 | **Workers** | Distributed claim/result protocol |
 | **Schedules** | Interval (`every:N`) and event triggers (`after_build`, …) |
 | **Release readiness** | READY / READY WITH CONDITIONS / NOT READY |
-| **Dashboard** | Dark UI at port **8787** |
-| **SIT console** | Existing post-deploy runner UI at **8098** (preserved) |
+| **Dashboard** | Unified dark UI at port **8787** (catalog, SIT cases, repository cases, schedules, kit log) |
+| **SIT console** | Existing post-deploy runner UI at **8098** (preserved; same cases) |
 
 ## Quick start
 
@@ -60,6 +60,7 @@ npm run test:e2e          # with API running
 GET  /health
 GET  /api/v1/meta          → version + capability map
 GET  /                         → dashboard UI
+GET  /api/v1/sit-catalog     → SIT packs + registered SIT-* cases
 GET  /api/v1/test-cases
 POST /api/v1/executions        → queue run
 GET  /api/v1/dashboard
