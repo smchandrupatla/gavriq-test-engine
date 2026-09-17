@@ -11,338 +11,76 @@
       theme: {
         extend: {
           colors: {
-            surface: { DEFAULT: '#0f1419', card: '#1a2332', border: '#2d3a4f' },
+            surface: { DEFAULT: '#0f1419', card: '#1a2332', border: '#2d3a4f', inset: '#121924' },
             accent: { DEFAULT: '#3b82f6', soft: '#1e3a5f' }
+          },
+          fontFamily: {
+            sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui'],
+            mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace']
           }
         }
       }
     }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    html { color-scheme: dark; }
+    body { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .nav-btn.active { background: #1e3a5f; color: #93c5fd; border-color: #3b82f6; }
+    .card-row { border-left: 3px solid #2d3a4f; }
+    .card-row:hover { border-left-color: #3b82f6; }
+    .card-row.picked { border-left-color: #3b82f6; background: rgba(30,58,95,.35); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 8px; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
 </head>
 <body class="bg-surface text-slate-200 min-h-screen">
-  <header class="border-b border-surface-border bg-surface-card/80 backdrop-blur sticky top-0 z-10">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-bold text-white text-sm">TE</div>
+  <div class="min-h-screen flex">
+    <aside class="w-60 shrink-0 bg-surface-card border-r border-surface-border flex flex-col sticky top-0 h-screen">
+      <div class="px-4 py-4 border-b border-surface-border flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-semibold text-white text-sm" aria-hidden="true">TE</div>
         <div>
-          <h1 class="text-lg font-semibold tracking-tight">GAVRIQ Test Engine</h1>
-          <p class="text-xs text-slate-400">Repository · on-demand runs · build status · evidence · release readiness</p>
+          <p class="text-sm font-semibold leading-tight">GAVRIQ</p>
+          <p class="text-[11px] text-slate-400 leading-tight">Test Engine</p>
         </div>
       </div>
-      <div class="flex items-center gap-2 text-xs">
-        <a href="http://localhost:8098" target="_blank" class="px-3 py-1.5 rounded border border-surface-border hover:bg-surface-border transition text-slate-300">SIT Console</a>
-        <span id="healthBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">checking…</span>
-        <button onclick="refreshAll()" class="px-3 py-1.5 rounded bg-surface border border-surface-border hover:bg-surface-border transition">Refresh</button>
+      <nav class="p-3 space-y-1 flex-1 overflow-y-auto" aria-label="Main">
+        <p class="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider text-slate-500">Workspace</p>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="overview">Overview</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="catalog">Test catalog</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="sit">SIT test cases</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="cases">Test cases</button>
+        <p class="px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-slate-500">Operations</p>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="schedules">Schedules</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="runs">Test runs</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="log">Test kit log</button>
+        <button class="nav-btn w-full text-left px-3 py-2 rounded-lg border border-transparent text-sm hover:bg-surface-border/60" data-nav="workers">Workers &amp; builds</button>
+      </nav>
+      <div class="p-3 border-t border-surface-border text-[11px] text-slate-500 space-y-1">
+        <p>Unified console · :8787</p>
+        <p>Legacy SIT portal remains on :8098</p>
       </div>
+    </aside>
+    <div class="flex-1 min-w-0 flex flex-col">
+      <header class="border-b border-surface-border bg-surface-card/80 backdrop-blur sticky top-0 z-10">
+        <div class="px-5 py-3 flex items-center justify-between gap-4">
+          <div>
+            <h1 id="pageTitle" class="text-lg font-semibold tracking-tight">Overview</h1>
+            <p id="pageSub" class="text-xs text-slate-400">Repository · SIT catalog · schedules · evidence</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <span id="healthBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">checking…</span>
+            <button onclick="refreshAll()" class="px-3 py-1.5 rounded bg-surface border border-surface-border hover:bg-surface-border transition">Refresh</button>
+          </div>
+        </div>
+      </header>
+      <main id="view" class="flex-1 px-5 py-5 space-y-5"></main>
     </div>
-  </header>
-
-  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-    <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-        <p class="text-xs text-slate-400 uppercase tracking-wide">Total tests</p>
-        <p class="text-2xl font-semibold mt-1" id="kpiTotal">—</p>
-      </div>
-      <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-        <p class="text-xs text-slate-400 uppercase tracking-wide">Automated</p>
-        <p class="text-2xl font-semibold mt-1" id="kpiAuto">—</p>
-      </div>
-      <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-        <p class="text-xs text-slate-400 uppercase tracking-wide">Failed (7d)</p>
-        <p class="text-2xl font-semibold mt-1 text-rose-400" id="kpiFailed">—</p>
-      </div>
-      <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-        <p class="text-xs text-slate-400 uppercase tracking-wide">Release</p>
-        <p class="text-lg font-semibold mt-1" id="kpiReady">—</p>
-      </div>
-    </section>
-
-    <div class="grid lg:grid-cols-3 gap-6">
-      <section class="lg:col-span-2 bg-surface-card border border-surface-border rounded-xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
-          <h2 class="font-medium">Test repository</h2>
-          <span class="text-xs text-slate-400" id="caseCount"></span>
-        </div>
-        <div class="overflow-x-auto max-h-[440px] overflow-y-auto">
-          <table class="w-full text-sm">
-            <thead class="text-left text-xs text-slate-400 sticky top-0 bg-surface-card">
-              <tr>
-                <th class="px-4 py-2 font-medium">Key</th>
-                <th class="px-4 py-2 font-medium">Name</th>
-                <th class="px-4 py-2 font-medium">Method</th>
-                <th class="px-4 py-2 font-medium">Last result</th>
-                <th class="px-4 py-2 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody id="caseRows" class="divide-y divide-surface-border"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="space-y-4">
-        <div class="bg-surface-card border border-surface-border rounded-xl p-4 space-y-3">
-          <h2 class="font-medium">On-demand run</h2>
-          <p class="text-xs text-slate-400">Queue selected cases against local-dev. Requires a worker for browser/HTTP execution.</p>
-          <button onclick="runSelected()" class="w-full py-2 rounded-lg bg-accent hover:bg-blue-600 text-white text-sm font-medium transition">Run selected</button>
-          <button onclick="runSmokeSuite()" class="w-full py-2 rounded-lg border border-surface-border hover:bg-surface-border text-sm transition">Run full smoke suite</button>
-          <pre id="runLog" class="text-xs text-slate-400 bg-surface rounded p-2 max-h-28 overflow-y-auto hidden"></pre>
-        </div>
-
-        <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-          <h2 class="font-medium mb-2">Workers</h2>
-          <ul id="workerList" class="text-sm space-y-1 text-slate-300"></ul>
-        </div>
-
-        <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-          <h2 class="font-medium mb-2">In-container / build status</h2>
-          <div id="buildStatus" class="text-sm text-slate-400">No build results yet.</div>
-        </div>
-      </section>
-    </div>
-
-    <section class="bg-surface-card border border-surface-border rounded-xl overflow-hidden">
-      <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
-        <h2 class="font-medium">Recent executions</h2>
-        <span class="text-xs text-slate-500">Click a row for results + evidence</span>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="text-left text-xs text-slate-400">
-            <tr>
-              <th class="px-4 py-2">Key</th>
-              <th class="px-4 py-2">Status</th>
-              <th class="px-4 py-2">Trigger</th>
-              <th class="px-4 py-2">Cases</th>
-              <th class="px-4 py-2">Created</th>
-            </tr>
-          </thead>
-          <tbody id="execRows" class="divide-y divide-surface-border"></tbody>
-        </table>
-      </div>
-      <div id="execDetail" class="hidden border-t border-surface-border px-4 py-3 text-xs text-slate-300 bg-surface/40"></div>
-    </section>
-  </main>
-
-  <script>
-    const selected = new Set();
-    let suiteId = null;
-    let envId = null;
-    let lastByCaseId = {};
-
-    function statusBadge(s) {
-      const map = {
-        passed: 'bg-emerald-900/50 text-emerald-300',
-        failed: 'bg-rose-900/50 text-rose-300',
-        error: 'bg-rose-900/50 text-rose-300',
-        running: 'bg-amber-900/50 text-amber-300',
-        queued: 'bg-slate-700 text-slate-300',
-        cancelled: 'bg-slate-700 text-slate-400',
-        online: 'bg-emerald-900/50 text-emerald-300',
-        offline: 'bg-slate-700 text-slate-400',
-        busy: 'bg-amber-900/50 text-amber-300',
-      };
-      const cls = map[s] || 'bg-slate-700 text-slate-300';
-      return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}">${s || '—'}</span>`;
-    }
-
-    async function api(path, opts) {
-      const res = await fetch(path, opts);
-      return res.json();
-    }
-
-    async function loadHealth() {
-      try {
-        const h = await api('/health');
-        document.getElementById('healthBadge').className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-900/50 text-emerald-300';
-        document.getElementById('healthBadge').textContent = `ok · v${h.version || '?'}`;
-      } catch {
-        document.getElementById('healthBadge').className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-rose-900/50 text-rose-300';
-        document.getElementById('healthBadge').textContent = 'unreachable';
-      }
-    }
-
-    async function loadDashboard() {
-      const d = await api('/api/v1/dashboard');
-      const data = d.data || {};
-      document.getElementById('kpiTotal').textContent = data.total_tests ?? 0;
-      document.getElementById('kpiAuto').textContent = data.automated ?? 0;
-      document.getElementById('kpiFailed').textContent = data.failed_last_7d ?? 0;
-    }
-
-    async function loadReady() {
-      const r = await api('/api/v1/release-readiness');
-      const ready = r.data?.readiness || '—';
-      const el = document.getElementById('kpiReady');
-      el.textContent = ready;
-      el.className = 'text-lg font-semibold mt-1 ' +
-        (ready === 'READY' ? 'text-emerald-400' : ready.includes('CONDITIONS') ? 'text-amber-400' : 'text-rose-400');
-    }
-
-    async function loadLastResults() {
-      try {
-        const res = await api('/api/v1/test-status?application_key=sand-bench');
-        lastByCaseId = {};
-        for (const row of (res.data?.engine_executed || [])) {
-          if (row.last_result) lastByCaseId[row.id] = row.last_result;
-        }
-      } catch { lastByCaseId = {}; }
-    }
-
-    async function loadCases() {
-      await loadLastResults();
-      const res = await api('/api/v1/test-cases?limit=100');
-      const rows = res.data || [];
-      document.getElementById('caseCount').textContent = `${rows.length} cases`;
-      const tbody = document.getElementById('caseRows');
-      tbody.innerHTML = rows.map(tc => {
-        const last = lastByCaseId[tc.id];
-        const lastHtml = last ? statusBadge(last.status) : '<span class="text-slate-600 text-xs">never run</span>';
-        return `
-        <tr class="hover:bg-surface/50">
-          <td class="px-4 py-2 font-mono text-xs text-slate-400">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" value="${tc.id}" onchange="toggleCase(this)" class="rounded border-slate-600" />
-              ${tc.key}
-            </label>
-          </td>
-          <td class="px-4 py-2">${tc.name}</td>
-          <td class="px-4 py-2 text-xs">${tc.execution_method || '—'}</td>
-          <td class="px-4 py-2">${lastHtml}</td>
-          <td class="px-4 py-2 text-right">
-            <button onclick="runOne('${tc.id}')" class="text-xs text-accent hover:underline">Run</button>
-          </td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="5" class="px-4 py-6 text-center text-slate-500">No cases — seed or import:sit</td></tr>';
-    }
-
-    async function loadEnvAndSuite() {
-      const envs = await api('/api/v1/environments');
-      const local = (envs.data || []).find(e => e.key === 'local-dev');
-      envId = local?.id || local?.key || null;
-      const suites = await api('/api/v1/suites');
-      const smoke = (suites.data || []).find(s => s.key === 'smoke-main-flows');
-      suiteId = smoke?.id || null;
-    }
-
-    async function loadWorkers() {
-      const res = await api('/api/v1/workers');
-      const list = document.getElementById('workerList');
-      const workers = res.data || [];
-      if (!workers.length) {
-        list.innerHTML = '<li class="text-slate-500">No workers — WITH_WORKERS=1 ./scripts/up.sh</li>';
-        return;
-      }
-      list.innerHTML = workers.map(w =>
-        `<li class="flex justify-between gap-2"><span class="truncate">${w.name || w.id}</span>${statusBadge(w.status)}</li>`
-      ).join('');
-    }
-
-    async function loadExecutions() {
-      const res = await api('/api/v1/executions');
-      const rows = res.data || [];
-      document.getElementById('execRows').innerHTML = rows.slice(0, 15).map(e => `
-        <tr class="hover:bg-surface/50 cursor-pointer" onclick="showExec('${e.id || e.key}')">
-          <td class="px-4 py-2 font-mono text-xs">${e.key}</td>
-          <td class="px-4 py-2">${statusBadge(e.status)}</td>
-          <td class="px-4 py-2 text-xs">${e.trigger_source}</td>
-          <td class="px-4 py-2 text-xs">${(e.test_case_ids || []).length}</td>
-          <td class="px-4 py-2 text-xs text-slate-400">${e.created_at ? new Date(e.created_at).toLocaleString() : '—'}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="5" class="px-4 py-4 text-center text-slate-500">No executions yet</td></tr>';
-    }
-
-    async function showExec(id) {
-      const res = await api('/api/v1/executions/' + encodeURIComponent(id));
-      const el = document.getElementById('execDetail');
-      el.classList.remove('hidden');
-      const data = res.data;
-      if (!data) { el.textContent = 'Not found'; return; }
-      const results = data.results || [];
-      if (!results.length) {
-        el.innerHTML = `<p class="mb-2 font-mono">${data.key} · ${data.status}</p><p class="text-slate-500">No case results yet (waiting for worker)</p>`;
-        return;
-      }
-      el.innerHTML = `<p class="mb-3 font-mono">${data.key} · ${statusBadge(data.status)}</p>` +
-        results.map(r => {
-          const shots = (r.evidence || []).filter(e => e.evidence_type === 'screenshot' || (e.content_type || '').startsWith('image'));
-          const other = (r.evidence || []).filter(e => !shots.includes(e));
-          return `<div class="mb-4 p-3 rounded-lg bg-surface border border-surface-border">
-            <div class="flex flex-wrap gap-2 items-center mb-1">
-              ${statusBadge(r.status)}
-              <span class="text-slate-400">${r.classification || ''}</span>
-              <span class="text-slate-500">${r.duration_ms || 0}ms</span>
-            </div>
-            <p class="mb-2 break-words">${r.message || r.test_case_id || ''}</p>
-            ${shots.length ? `<div class="flex flex-wrap gap-2">${shots.map(s =>
-              `<a href="${s.url}" target="_blank" class="block"><img src="${s.url}" alt="evidence" class="max-h-40 rounded border border-surface-border hover:opacity-90" /></a>`
-            ).join('')}</div>` : ''}
-            ${other.length ? `<p class="mt-1 text-slate-500">${other.map(o => o.evidence_type + ': ' + o.storage_key).join(' · ')}</p>` : ''}
-          </div>`;
-        }).join('');
-    }
-
-    async function loadBuildStatus() {
-      const res = await api('/api/v1/build-results?application_key=sand-bench');
-      const el = document.getElementById('buildStatus');
-      if (!res.build_id) {
-        el.innerHTML = 'No build results yet. Use <code class="text-slate-300">scripts/post-build-results.sh</code> or <code class="text-slate-300">POST /api/v1/build-results</code>.';
-        return;
-      }
-      const s = res.summary || {};
-      el.innerHTML = `
-        <p class="mb-1"><span class="text-slate-300">Build</span> <code>${res.build_id}</code></p>
-        <p class="text-xs mb-2">passed ${s.passed || 0} · failed ${s.failed || 0} · skipped ${s.skipped || 0}</p>
-        <ul class="space-y-1 max-h-32 overflow-y-auto text-xs">
-          ${(res.data || []).slice(0, 12).map(r =>
-            `<li class="flex justify-between gap-2"><span class="truncate">${r.test_key}</span>${statusBadge(r.status)}</li>`
-          ).join('')}
-        </ul>`;
-    }
-
-    function toggleCase(el) {
-      if (el.checked) selected.add(el.value);
-      else selected.delete(el.value);
-    }
-
-    function logRun(msg) {
-      const pre = document.getElementById('runLog');
-      pre.classList.remove('hidden');
-      pre.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2);
-    }
-
-    async function queueRun(body) {
-      const res = await api('/api/v1/executions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      logRun(res);
-      setTimeout(() => { loadExecutions(); loadCases(); }, 1000);
-    }
-
-    async function runOne(id) {
-      await queueRun({ test_case_ids: [id], environment_id: envId || 'local-dev', trigger_source: 'manual' });
-    }
-
-    async function runSelected() {
-      if (!selected.size) { logRun('Select at least one test case'); return; }
-      await queueRun({ test_case_ids: [...selected], environment_id: envId || 'local-dev', trigger_source: 'manual' });
-    }
-
-    async function runSmokeSuite() {
-      if (!suiteId) { logRun('Smoke suite not found — run npm run seed'); return; }
-      await queueRun({ test_suite_id: suiteId, environment_id: envId || 'local-dev', trigger_source: 'manual' });
-    }
-
-    async function refreshAll() {
-      await Promise.all([
-        loadHealth(), loadDashboard(), loadReady(), loadCases(),
-        loadEnvAndSuite(), loadWorkers(), loadExecutions(), loadBuildStatus(),
-      ]);
-    }
-
-    refreshAll();
-    setInterval(refreshAll, 15000);
-  </script>
+  </div>
+  <script src="/console.js"></script>
 </body>
 </html>
