@@ -8,11 +8,14 @@
 4. Preserve the Ops Console navigation and page composition. Do not invent screens that contradict the prototype.
 5. If a requirement is ambiguous, record the assumption in an ADR and proceed with the documented default.
 
-## Branching
+## Branching and pull requests
 
 - Default branch: `main`.
 - Implementation work happens on feature branches and is merged by pull request.
+- **Do not commit or push directly to `main`.** Agents and operators open a PR and wait for review.
+- Suggested branch names: `feat/…`, `fix/…`, `chore/…`, `docs/…`.
 - Do not mix unrelated refactors with behaviour changes.
+- After a change is ready: push the branch, open a PR against `main`, include why + tests run, and leave merge to the reviewer unless they ask to merge.
 
 ## Tests
 
@@ -46,7 +49,7 @@ Those files assert login fields, catalogue and rule row fields, create-payload d
 npx tsx --test --test-name "add-row actions" tests/console-fields-actions.test.ts
 ```
 
-Do not push if `npm test` is red. Skipped tests (no Postgres, stub preview) are acceptable; failures are not.
+Do not open a PR if `npm test` is red. Skipped tests (no Postgres, stub preview) are acceptable; failures are not.
 
 ## Commits
 

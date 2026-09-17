@@ -34,7 +34,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
   // Get one
   app.get<{ Params: { id: string } }>('/api/v1/test-cases/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM test_cases WHERE id = $1 OR key = $1',
+      'SELECT * FROM test_cases WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Test case not found' });
@@ -115,7 +115,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const existing = await query(
-        'SELECT * FROM test_cases WHERE id = $1 OR key = $1',
+        'SELECT * FROM test_cases WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!existing.rows[0]) return reply.status(404).send({ error: 'Test case not found' });
@@ -174,7 +174,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
     '/api/v1/test-cases/:id/clone',
     async (req, reply) => {
       const { rows } = await query(
-        'SELECT * FROM test_cases WHERE id = $1 OR key = $1',
+        'SELECT * FROM test_cases WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Test case not found' });
