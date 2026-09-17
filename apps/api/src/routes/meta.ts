@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/api/v1/meta', async () => ({
     service: 'gavriq-test-engine',
-    version: '0.2.1',
+    version: '0.2.4',
     control_plane: true,
     capabilities: {
       repository: true,
@@ -22,6 +22,7 @@ export async function metaRoutes(app: FastifyInstance) {
     endpoints: {
       health: '/health',
       dashboard: '/',
+      sit_catalog: '/api/v1/sit-catalog',
       applications: '/api/v1/applications',
       test_cases: '/api/v1/test-cases',
       executions: '/api/v1/executions',
