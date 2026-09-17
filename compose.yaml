@@ -30,6 +30,7 @@ services:
       HOST: "0.0.0.0"
       RBAC_ENABLED: "false"
       AUTO_SEED: "true"
+      SIT_CONSOLE_BASE: ${SIT_CONSOLE_BASE:-http://sit-console:8098}
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       EVIDENCE_DIR: /data/evidence
     ports:
