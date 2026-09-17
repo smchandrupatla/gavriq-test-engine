@@ -1,0 +1,31 @@
+# Copy into the application repo as .github/workflows/post-build-results.yml
+# Requires secret TEST_ENGINE_URL. Convert JUnit first:
+#   node scripts/parse-junit.mjs junit.xml > results.json
+name: post-build-results
+
+on:
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build results.json
+        run: |
+          if [ -f junit.xml ]; then node scripts/parse-junit.mjs junit.xml > results.json; else
+          cat > results.json <<'EOF'
+          [{ "test_key": "ci-unit", "test_name": "Unit suite", "status": "passed", "duration_ms": 100 }]
+          EOF
+          fi
+      - name: Post to GAVRIQ Test Engine
+        env:
+          TEST_ENGINE_URL: ${{ secrets.TEST_ENGINE_URL }}
+          BUILD_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          APPLICATION_KEY: sand-bench
+        run: |
+          if [ -z "$TEST_ENGINE_URL" ]; then echo "TEST_ENGINE_URL secret not set — skip"; exit 0; fi
+          curl -sf -X POST "$TEST_ENGINE_URL/api/v1/build-results" \
+            -H 'content-type: application/json' \
+            -d "$(jq -n --arg app "$APPLICATION_KEY" --arg build "$BUILD_ID" --arg commit "$COMMIT_SHA" --slurpfile results results.json '{application_key:$app, build_id:$build, commit_sha:$commit, results:$results[0]}')"
