@@ -28,6 +28,14 @@ const rbacEnabled = process.env.RBAC_ENABLED === 'true';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const publicDir = path.join(root, 'apps/api/public');
 
+function packageVersion(): string {
+  try {
+    return JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  } catch {
+    return process.env.npm_package_version || '0.0.0';
+  }
+}
+
 async function main() {
   try {
     await migrate();
@@ -44,6 +52,7 @@ async function main() {
   const app = Fastify({
     logger: true,
     requestTimeout: 120_000,
+    bodyLimit: 8 * 1024 * 1024,
   });
 
   app.addHook('onRequest', async (req) => {
@@ -53,7 +62,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '0.2.3',
+    version: packageVersion(),
     prompts: '1-10',
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
@@ -80,8 +89,9 @@ async function main() {
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
+      if (pathName === '/api/v1/preflight') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/intelligence'))) {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && pathName === '/api/v1/executions') {
