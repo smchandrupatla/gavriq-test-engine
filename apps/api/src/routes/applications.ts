@@ -10,8 +10,8 @@ export async function applicationRoutes(app: FastifyInstance) {
 
   // Application detail with related data — home screen for an application
   app.get<{ Params: { id: string } }>('/api/v1/applications/:id', async (req, reply) => {
-    const app = await query(
-      'SELECT * FROM applications WHERE id::text = $1 OR key = $1',
+    const { rows } = await query(
+      'SELECT * FROM applications WHERE id = $1 OR key = $1',
       [req.params.id]
     );
     if (!app.rows[0]) return reply.status(404).send({ error: 'Application not found' });
