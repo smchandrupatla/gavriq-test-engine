@@ -13,7 +13,7 @@ Out-of-container test runner with its own web portal. It is **not** Testhub.
 | Surface | Port | Role |
 | --- | --- | --- |
 | Testhub | 8091 | External system simulator (file / HTTP / MQ / Kafka) |
-| Test Engine / SIT console | **8098** | After deploy: health, integration, GUI smoke, E2E UX |
+| Test Engine / SIT console | **8787**, path `/sit/` | After deploy: health, integration, GUI smoke, E2E UX. Same container/port as the Test Engine dashboard, run as its own supervised process — see "The SIT console" below. |
 
 The main API does not `depends_on` this service. Stop it and Sand Bench stays up.
 
@@ -69,8 +69,8 @@ After the stack is up and healthy:
 ## Portal
 
 ```sh
-docker compose up -d --build sit-console
-# http://127.0.0.1:8098
+docker compose up -d --build test-engine
+# http://127.0.0.1:8787/sit/
 ```
 
 From the host without Docker:
@@ -93,9 +93,10 @@ Every base URL, and the demo credentials used to authenticate, are overridable �
 `sit/lib/env.ts`. Defaults match `docker-compose.yml`'s service names, so `sit` runs
 unmodified as the one-shot container on the compose network.
 
-Both `sit` and `sit-console` build from `sit/Dockerfile` (based on
-`mcr.microsoft.com/playwright`, not the plain `node:22` image the rest of the platform
-uses) — it needs a real, matching browser for the UI phase, twice over: Playwright's own
+The one-shot `sit` job builds from `sit/Dockerfile`; the always-on `sit-console` process
+now ships inside the consolidated `test-engine` image (root `Dockerfile`), which is based
+on the same `mcr.microsoft.com/playwright` base for the same reason. Either way it needs a
+real, matching browser for the UI phase, twice over: Playwright's own
 bundled Chromium for `60-ui-eventing.sit.ts`, and a separately apt-installed
 `chromium`/`chromium-driver` pair for the Selenium-driven `70`/`80` cases (installed from
 the same apt transaction so the two stay version-matched — Selenium's ChromeDriver refuses
@@ -118,12 +119,16 @@ so "did the last deployment actually work end to end" has one place to look.
 
 ## The SIT console
 
-`sit-console` (`docker-compose.yml`) is a separate, always-on service — its own container,
-its own port (`8093` in `docker-compose.yml`; the script itself defaults to `8092` when run
-directly, see below), its own dashboard at `/`, styled with the same Sand Bench branding
-(dark ground, gold accent) as the main application's Ops Console and the Test Hub coverage
-page — this is a different application, not a different product. It is deliberately **not**
-wired into the main application in either direction:
+`sit-console` (`sit/console.mjs`) is always-on, with its own dashboard at `/sit/`, styled
+with the same Sand Bench branding (dark ground, gold accent) as the main application's Ops
+Console and the Test Hub coverage page — this is a different application, not a different
+product.
+
+It ships inside the same container/image and behind the same published port as the Test
+Engine control-plane API (`compose.yaml`'s `test-engine` service — see
+`scripts/consolidated-entrypoint.mjs` for how the two are supervised and proxied), but runs
+as its own independent Node process, and stays deliberately **not** wired into the main
+application in either direction:
 
 - the application never calls it — it only ever calls out to the application the same way
   any other real client would, through the public API, or through test hub standing in
@@ -136,11 +141,13 @@ wired into the main application in either direction:
 - it keeps its own run history in its own volume (`sit-console-data`), independent of the
   application's database.
 
-Stopping `sit-console` has no effect on the application. Stopping the application does not
-stop `sit-console` — its dashboard keeps working, targets just show unreachable until the
-application comes back, and triggering a run reports clean failures instead of hanging
-(every request the engine makes has a bounded timeout).
-or `npm run sit` against published ports. Exit code is non-zero if any case fails.
+A crash in the Test Engine API's process does not take the SIT console process down (or
+vice versa) — the supervisor restarts whichever child exited, and the other keeps serving
+its dashboard the whole time, targets just show unreachable until the crashed side comes
+back, and triggering a run reports clean failures instead of hanging (every request the
+engine makes has a bounded timeout). Stopping the *container* stops both — they are no
+longer independently stoppable services, since "one deployable" was the explicit tradeoff
+made when the two were consolidated.
 
 ## Cases
 

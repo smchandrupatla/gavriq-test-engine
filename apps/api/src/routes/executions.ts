@@ -21,7 +21,7 @@ export async function executionRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/executions/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM executions WHERE id = $1 OR key = $1',
+      'SELECT * FROM executions WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
@@ -69,7 +69,7 @@ export async function executionRoutes(app: FastifyInstance) {
 
     if (b.environment_id && b.safety_category) {
       const env = await query(
-        'SELECT safety_policy FROM environments WHERE id = $1 OR key = $1',
+        'SELECT safety_policy FROM environments WHERE id::text = $1 OR key = $1',
         [b.environment_id]
       );
       if (env.rows[0]) {
@@ -89,7 +89,7 @@ export async function executionRoutes(app: FastifyInstance) {
       `INSERT INTO executions (
          key, requested_by, test_plan_id, test_suite_id, test_case_ids,
          environment_id, execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
+       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'out_of_container')::execution_location,'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
        RETURNING *`,
       [
         key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
@@ -111,7 +111,7 @@ export async function executionRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
     const { rows } = await query(
       `UPDATE executions SET status = 'cancelled', finished_at = now()
-       WHERE (id = $1 OR key = $1) AND status IN ('queued','preparing','running')
+       WHERE (id::text = $1 OR key = $1) AND status IN ('queued','preparing','running')
        RETURNING *`,
       [req.params.id]
     );
@@ -158,7 +158,7 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const exec = await query(
-        'SELECT id FROM executions WHERE id = $1 OR key = $1',
+        'SELECT id FROM executions WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
@@ -199,7 +199,7 @@ export async function executionRoutes(app: FastifyInstance) {
       const status = req.body?.status || 'passed';
       const { rows } = await query(
         `UPDATE executions SET status = $2, finished_at = now()
-         WHERE id = $1 OR key = $1 RETURNING *`,
+         WHERE id::text = $1 OR key = $1 RETURNING *`,
         [req.params.id, status]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });

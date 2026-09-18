@@ -13,9 +13,10 @@ export function parseArgs(args) {
     else if (arg === '--timeout' && args[i + 1]) options.timeout = Number(args[++i]);
     else throw new Error(`Unknown or incomplete option: ${arg}`);
   }
-  if (!['help', 'config', 'deploy', 'health', 'test', 'stop', 'validate'].includes(options.action)) throw new Error('Unknown action');
+  if (!['help', 'config', 'deploy', 'rebuild', 'health', 'test', 'stop', 'validate'].includes(options.action)) throw new Error('Unknown action');
   if (!Number.isInteger(options.timeout) || options.timeout < 1 || options.timeout > 1800) throw new Error('Timeout must be 1–1800 seconds');
   if (options.action === 'validate' && !options.isolated) throw new Error('validate requires --isolated; use deploy, health and test for a normal deployment');
+  if (options.action === 'rebuild' && !options.build) throw new Error('rebuild always builds; --no-build is not valid with it');
   return options;
 }
 
@@ -62,22 +63,29 @@ for (const check of checks) await test(check.name, async () => {
 `;
 }
 
+export function resolveConfig(root, composeSourceFile, envFile) {
+  const result = spawnSync('docker', ['compose', '--project-directory', root, '--env-file', envFile, '-f', composeSourceFile, '--profile', '*', 'config', '--format', 'json'], { cwd: root, encoding: 'utf8', timeout: 30000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  if (result.error || result.status !== 0) throw new Error(`Failed to resolve compose.yaml: ${(result.stderr || result.error?.message || '').trim()}`);
+  return JSON.parse(result.stdout);
+}
+
 export function main(args = process.argv.slice(2)) {
   const options = parseArgs(args);
   if (options.action === 'help') {
-    console.log('node scripts/docker.mjs <config|deploy|health|test|stop|validate> [--env-file FILE] [--isolated] [--no-build] [--timeout SECONDS]\nvalidate requires --isolated and stops its temporary containers even on test failure. Volumes are retained. Node.js 22+ and Docker Compose v2 are required.');
+    console.log('node scripts/docker.mjs <config|deploy|rebuild|health|test|stop|validate> [--env-file FILE] [--isolated] [--no-build] [--timeout SECONDS]\nrebuild discards cached image layers before redeploying; use it after dependency or base image changes.\nvalidate requires --isolated and stops its temporary containers even on test failure. Volumes are retained. Node.js 22+ and Docker Compose v2 are required.');
     return;
   }
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const config = JSON.parse(fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8'));
-  const checks = JSON.parse(fs.readFileSync(path.join(root, 'scripts/docker-checks.json'), 'utf8'));
-  if (!config.services[checks.service]) throw new Error('Test service is absent from compose.yaml');
+  const composeSourceFile = path.join(root, 'compose.yaml');
   const envFile = path.resolve(root, options.envFile);
   if (!fs.existsSync(envFile)) throw new Error(`Missing ${options.envFile}. Copy .env.example to .env and configure it, or explicitly pass --env-file .env.example for local evaluation.`);
+  const config = resolveConfig(root, composeSourceFile, envFile);
+  const checks = JSON.parse(fs.readFileSync(path.join(root, 'scripts/docker-checks.json'), 'utf8'));
+  if (!config.services[checks.service]) throw new Error('Test service is absent from compose.yaml');
   const reportDir = path.join(root, '.docker-results');
   fs.mkdirSync(reportDir, { recursive: true });
   const project = options.isolated ? `${config.name}-validation` : config.name;
-  let composeFile = path.join(root, 'compose.yaml');
+  let composeFile = composeSourceFile;
   if (options.isolated) {
     composeFile = path.join(reportDir, 'compose-isolated.json');
     fs.writeFileSync(composeFile, JSON.stringify(isolatedConfig(config, root), null, 2));
@@ -93,6 +101,10 @@ export function main(args = process.argv.slice(2)) {
   };
   const expected = Object.entries(config.services).filter(([, value]) => !value.profiles?.length).map(([name]) => name);
   const deploy = () => run(['up', '-d', ...(options.build ? ['--build'] : ['--no-build']), '--wait', '--wait-timeout', String(options.timeout)]);
+  const rebuild = () => {
+    run(['build', '--no-cache', '--pull']);
+    run(['up', '-d', '--wait', '--wait-timeout', String(options.timeout)]);
+  };
   const health = () => {
     const text = run(['ps', '--all', '--format', 'json'], { quiet: true, timeout: 30000 }).trim();
     const rows = text.startsWith('[') ? JSON.parse(text) : text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
@@ -112,6 +124,7 @@ export function main(args = process.argv.slice(2)) {
   try {
     run(['config', '--quiet'], { timeout: 30000 });
     if (options.action === 'deploy') deploy();
+    if (options.action === 'rebuild') rebuild();
     if (options.action === 'health') health();
     if (options.action === 'test') { health(); test(); }
     if (options.action === 'stop') run(['down', '--timeout', '20']);

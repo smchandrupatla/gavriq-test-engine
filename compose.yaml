@@ -16,11 +16,11 @@ services:
       - sit-console-db-data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  test-engine-api:
+  test-engine:
     build:
       context: .
       dockerfile: Dockerfile
-    image: gavriq-test-engine-api:local
+    image: gavriq-test-engine:local
     depends_on:
       sit-console-db:
         condition: service_healthy
@@ -28,21 +28,40 @@ services:
       DATABASE_URL: postgres://sitconsole:sitconsole@sit-console-db:5432/sitconsole
       PORT: "8787"
       HOST: "0.0.0.0"
+      API_INTERNAL_PORT: "18787"
+      SIT_INTERNAL_PORT: "18098"
       RBAC_ENABLED: "false"
       AUTO_SEED: "true"
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       EVIDENCE_DIR: /data/evidence
+      LOG_DIR: /var/log/sandbench
+      LOG_SERVICE: sit-console
+      SIT_CONSOLE_STORE: /data/history.json
+      SIT_API_BASE: ${SIT_CONSOLE_SIT_API_BASE:-http://127.0.0.1:18787}
+      SIT_DBVIEWER_BASE: ${SIT_CONSOLE_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
+      SIT_DEFAULT_SUITES: health,gui,security
+      SIT_ON_START: "false"
+      SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
+      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:80}
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:${TEST_ENGINE_HOST_PORT:-8787}:8787"
     volumes:
       - test-engine-evidence:/data/evidence
+      - sit-console-data:/data
+      - sandbench-logs:/var/log/sandbench
+      - type: bind
+        source: ./apps/logging
+        target: /opt/sbe-logging
+        read_only: true
+        bind:
+          create_host_path: true
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "Promise.all(['http://127.0.0.1:8787/health','http://127.0.0.1:8787/sit/health'].map(u=>fetch(u).then(r=>{if(!r.ok)throw new Error(u)}))).then(()=>process.exit(0)).catch(()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 5s
@@ -57,10 +76,10 @@ services:
     image: gavriq-test-engine-worker:local
     command: ["npx", "tsx", "apps/worker/src/worker.ts"]
     depends_on:
-      test-engine-api:
+      test-engine:
         condition: service_healthy
     environment:
-      TEST_ENGINE_API: http://test-engine-api:8787
+      TEST_ENGINE_API: http://test-engine:8787
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       WORKER_POLL_MS: "4000"
       WORKER_API_KEY: ${WORKER_API_KEY:-}
@@ -77,51 +96,6 @@ services:
     profiles:
       - workers
 
-  sit-console:
-    build:
-      context: .
-      dockerfile: sit/Dockerfile
-    image: gavriq-test-engine-sit-console:local
-    depends_on:
-      sit-console-db:
-        condition: service_healthy
-    environment:
-      LOG_DIR: /var/log/sandbench
-      LOG_SERVICE: sit-console
-      PORT: "8098"
-      SIT_API_BASE: ${SIT_CONSOLE_SIT_API_BASE:-http://test-engine-api:8787}
-      SIT_CONSOLE_STORE: /data/history.json
-      SIT_DBVIEWER_BASE: ${SIT_CONSOLE_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
-      SIT_DEFAULT_SUITES: health,gui,security
-      SIT_ON_START: "false"
-      SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
-      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:80}
-      DATABASE_URL: postgres://sitconsole:sitconsole@sit-console-db:5432/sitconsole
-    ports:
-      - "127.0.0.1:8098:8098"
-    volumes:
-      - sit-console-data:/data
-      - sandbench-logs:/var/log/sandbench
-      - type: bind
-        source: ./apps/logging
-        target: /opt/sbe-logging
-        read_only: true
-        bind:
-          create_host_path: true
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:8098/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 24
-      start_period: 10s
-    restart: unless-stopped
-
   sit:
     build:
       context: .
@@ -129,7 +103,7 @@ services:
     image: gavriq-test-engine-sit:local
     command: ["node", "sit/run.mjs"]
     environment:
-      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://test-engine-api:8787}
+      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://test-engine:8787}
       SIT_DBVIEWER_BASE: ${SIT_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
       SIT_TESTHUB_BASE: ${SIT_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
       SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:80}

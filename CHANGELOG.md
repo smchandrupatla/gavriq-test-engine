@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+**Changed**
+- Consolidated Test Engine (`test-engine-api`) and SIT console (`sit-console`) into a
+  single `test-engine` deployable — one image, one container, one port (8787). Both keep
+  running as independent Node processes, supervised and reverse-proxied by
+  `scripts/consolidated-entrypoint.mjs` (`/sit/*` → SIT console, everything else → API),
+  so a crash in one doesn't take the other down. SIT console is now reached at `/sit/`
+  instead of its own port; `TEST_ENGINE_API_HOST_PORT` renamed to `TEST_ENGINE_HOST_PORT`.
+
 ## [0.2.3] — 2026-09-16
 
 **Added**

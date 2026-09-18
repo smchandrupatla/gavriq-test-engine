@@ -278,22 +278,27 @@ function json(res, status, body) {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://sit-console.local");
+  // Reached both directly (standalone dev, this port) and proxied under /sit inside the
+  // consolidated container — strip the prefix once so every route below matches either way.
+  let pathname = url.pathname;
+  if (pathname === "/sit") pathname = "/";
+  else if (pathname.startsWith("/sit/")) pathname = pathname.slice("/sit".length);
   try {
-    if (url.pathname === "/health" || url.pathname === "/ready") {
+    if (pathname === "/health" || pathname === "/ready") {
       return json(res, 200, { status: "ok", service: "sit-console", product: "GARVIQ Test Engine", decoupled: true, port });
     }
-    if (url.pathname === "/api/targets" && req.method === "GET") return json(res, 200, { data: await probeTargets() });
-    if (url.pathname === "/api/taxonomy" && req.method === "GET") return json(res, 200, { types: TYPES, groups: GROUPS });
-    if (url.pathname === "/api/cases" && req.method === "GET") return json(res, 200, { data: listCatalog() });
-    if (url.pathname === '/api/specifications' && req.method === 'GET') return json(res, 200, { data: specificationCases() });
-    if (url.pathname === '/api/use-cases' && req.method === 'GET') return json(res, 200, { data: useCases() });
-    if (url.pathname.startsWith('/api/use-cases/') && req.method === 'GET') {
-      const doc = useCaseDocument(decodeURIComponent(url.pathname.slice('/api/use-cases/'.length)));
+    if (pathname === "/api/targets" && req.method === "GET") return json(res, 200, { data: await probeTargets() });
+    if (pathname === "/api/taxonomy" && req.method === "GET") return json(res, 200, { types: TYPES, groups: GROUPS });
+    if (pathname === "/api/cases" && req.method === "GET") return json(res, 200, { data: listCatalog() });
+    if (pathname === '/api/specifications' && req.method === 'GET') return json(res, 200, { data: specificationCases() });
+    if (pathname === '/api/use-cases' && req.method === 'GET') return json(res, 200, { data: useCases() });
+    if (pathname.startsWith('/api/use-cases/') && req.method === 'GET') {
+      const doc = useCaseDocument(decodeURIComponent(pathname.slice('/api/use-cases/'.length)));
       if (doc === null) return json(res, 404, { error: 'Unknown use case' });
       res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(doc);
     }
-    if (url.pathname === "/api/status" && req.method === "GET") {
+    if (pathname === "/api/status" && req.method === "GET") {
       return json(res, 200, {
         running: state.running,
         currentFile: state.currentFile,
@@ -301,19 +306,19 @@ const server = createServer(async (req, res) => {
         lastRun: state.lastRun ? { ...state.lastRun, id: state.lastRun.id ?? null, crashed: Boolean(state.lastRun.crashed) } : null,
       });
     }
-    if (url.pathname === "/api/runs" && req.method === "GET") return json(res, 200, { data: [...state.history].reverse() });
-    if (url.pathname === "/api/evidence" && req.method === "GET") {
+    if (pathname === "/api/runs" && req.method === "GET") return json(res, 200, { data: [...state.history].reverse() });
+    if (pathname === "/api/evidence" && req.method === "GET") {
       const evidenceDir = path.join(publicDir, "evidence");
       const files = existsSync(evidenceDir) ? readdirSync(evidenceDir).sort() : [];
-      return json(res, 200, { data: files.map((name) => ({ name, path: `/evidence/${name}` })) });
+      return json(res, 200, { data: files.map((name) => ({ name, path: `/sit/evidence/${name}` })) });
     }
-    if (url.pathname.startsWith("/api/runs/") && req.method === "GET") {
-      const id = Number(url.pathname.slice("/api/runs/".length));
+    if (pathname.startsWith("/api/runs/") && req.method === "GET") {
+      const id = Number(pathname.slice("/api/runs/".length));
       if (!Number.isFinite(id)) return json(res, 400, { error: "run id must be numeric (Postgres-backed runs only)" });
       const run = state.lastRun?.id === id ? state.lastRun : await fetchRunById(id);
       return json(res, run ? 200 : 404, run ? { data: run } : { error: "run not found (full artifacts require DATABASE_URL)" });
     }
-    if (url.pathname === "/api/run" && req.method === "POST") {
+    if (pathname === "/api/run" && req.method === "POST") {
       const body = await readBody(req);
       for (const key of ['suites', 'groups', 'files', 'caseNames']) {
         if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].some(value => typeof value !== 'string' || !value.trim()))) return json(res, 400, { error: `${key} must be an array of nonempty strings` });
@@ -322,13 +327,13 @@ const server = createServer(async (req, res) => {
       const outcome = await triggerRun({ suites: body.suites, groups: body.groups, files: body.files, caseNames: body.caseNames });
       return json(res, outcome.started ? 202 : 409, outcome);
     }
-    if (url.pathname === "/" || url.pathname === "/index.html") {
+    if (pathname === "/" || pathname === "/index.html") {
       const html = await readFile(path.join(publicDir, "index.html"), "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return res.end(html);
     }
-    if (url.pathname.startsWith('/evidence/') && req.method === 'GET') {
-      const name = decodeURIComponent(url.pathname.slice('/evidence/'.length));
+    if (pathname.startsWith('/evidence/') && req.method === 'GET') {
+      const name = decodeURIComponent(pathname.slice('/evidence/'.length));
       if (!/^[a-zA-Z0-9_.-]+\.(json|png)$/.test(name)) return json(res, 404, { error: 'Unknown evidence' });
       const file = path.join(publicDir, 'evidence', name);
       if (!existsSync(file)) return json(res, 404, { error: 'Unknown evidence' });

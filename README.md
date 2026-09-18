@@ -15,7 +15,7 @@ Enterprise Test Engineering & Validation platform — central repository, on-dem
 | **Schedules** | Interval (`every:N`) and event triggers (`after_build`, …) |
 | **Release readiness** | READY / READY WITH CONDITIONS / NOT READY |
 | **Dashboard** | Dark UI at port **8787** |
-| **SIT console** | Existing post-deploy runner UI at **8098** (preserved) |
+| **SIT console** | Post-deploy runner UI at **8787/sit/** — same container/port as the dashboard, run as an independent supervised process (see `scripts/consolidated-entrypoint.mjs`) |
 
 ## Quick start
 
@@ -28,8 +28,8 @@ docker compose up -d --build
 # Dashboard + API
 open http://localhost:8787/
 
-# Legacy SIT console
-open http://localhost:8098/
+# SIT console (same container/port)
+open http://localhost:8787/sit/
 ```
 
 `AUTO_SEED=true` on the API service seeds the Sand Bench smoke pack on first boot.

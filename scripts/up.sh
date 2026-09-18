@@ -20,7 +20,7 @@ for i in $(seq 1 60); do
   sleep 1
   if [[ $i -eq 60 ]]; then
     echo "API did not become healthy in time" >&2
-    docker compose logs --tail=80 test-engine-api || true
+    docker compose logs --tail=80 test-engine || true
     exit 1
   fi
 done
@@ -30,7 +30,7 @@ curl -sf http://127.0.0.1:8787/api/v1/meta | head -c 400 || true
 echo
 echo
 echo "Dashboard:    http://localhost:8787/"
-echo "SIT console:  http://localhost:8098/"
+echo "SIT console:  http://localhost:8787/sit/"
 echo "Health:       http://localhost:8787/health"
 echo "Meta:         http://localhost:8787/api/v1/meta"
 if [[ "$WITH_WORKERS" != "1" ]]; then
