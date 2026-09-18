@@ -59,9 +59,18 @@ async function waitForDatabase(attempts = Number(process.env.DB_WAIT_ATTEMPTS ||
 }
 
 export async function migrate() {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  // client.ts lives at apps/api/src/db — four levels up is the repo root.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
   const schemaPath = path.join(root, 'apps/api/src/db/schema.sql');
-  const sql = readFileSync(schemaPath, 'utf8');
+  let sql: string;
+  try {
+    sql = readFileSync(schemaPath, 'utf8');
+  } catch (err) {
+    throw new Error(
+      `Cannot read schema at ${schemaPath} (repo root resolved to ${root}): ${(err as Error).message}`
+    );
+  }
+  await waitForDatabase();
   await pool.query(sql);
   try {
     await pool.query(`ALTER TYPE failure_classification ADD VALUE IF NOT EXISTS 'target_unreachable'`);
