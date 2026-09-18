@@ -10,6 +10,7 @@ Copy .env.example to .env and set the required values. Review compose.yaml for l
 
 ```powershell
 ./scripts/docker-deploy.ps1
+./scripts/docker-rebuild.ps1
 ./scripts/docker-health.ps1
 ./scripts/docker-test.ps1
 ./scripts/docker-stop.ps1
@@ -19,12 +20,13 @@ Copy .env.example to .env and set the required values. Review compose.yaml for l
 
 ```sh
 sh scripts/docker-deploy.sh
+sh scripts/docker-rebuild.sh
 sh scripts/docker-health.sh
 sh scripts/docker-test.sh
 sh scripts/docker-stop.sh
 ```
 
-Deploy validates Compose, builds images, and waits for readiness. Health checks every default-profile service and the application HTTP health endpoint. Test requires a running deployment, checks readiness, and runs the cases in scripts/docker-checks.json. Stop removes only this Compose project's containers and network; it does not remove volumes.
+Deploy validates Compose, builds images, and waits for readiness. Rebuild discards cached image layers (`docker compose build --no-cache --pull`) before redeploying; use it after dependency or base image changes, or whenever `deploy` would otherwise reuse a stale cached layer. Health checks every default-profile service and the application HTTP health endpoint. Test requires a running deployment, checks readiness, and runs the cases in scripts/docker-checks.json. Stop removes only this Compose project's containers and network; it does not remove volumes.
 
 ## Isolated validation
 

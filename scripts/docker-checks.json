@@ -1,20 +1,34 @@
 {
-  "service": "sit-console",
-  "port": 8098,
-  "scope": "Container readiness, HTTP health, landing page where available, and a representative application read contract. These are repository deployment tests, not the full inherited acceptance suite. Broker round trips, external integrations, and persistence are not covered.",
+  "service": "test-engine",
+  "port": 8787,
+  "scope": "Container readiness, HTTP health, landing page where available, and a representative read contract for both surfaces served by the consolidated deployable: the Test Engine control-plane API/dashboard at / and the SIT console at /sit. These are repository deployment tests, not the full inherited acceptance suite. Broker round trips, external integrations, and persistence are not covered.",
   "checks": [
     {
-      "name": "sit-console health",
+      "name": "test engine health",
       "path": "/health"
     },
     {
-      "name": "sit-console read contract",
-      "path": "/api/cases",
+      "name": "sit console health",
+      "path": "/sit/health"
+    },
+    {
+      "name": "test engine read contract",
+      "path": "/api/v1/test-cases",
       "array": "data"
     },
     {
-      "name": "sit-console landing page",
+      "name": "sit console read contract",
+      "path": "/sit/api/cases",
+      "array": "data"
+    },
+    {
+      "name": "test engine landing page",
       "path": "/",
+      "kind": "html"
+    },
+    {
+      "name": "sit console landing page",
+      "path": "/sit/",
       "kind": "html"
     }
   ],

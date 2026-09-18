@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAVRIQ Test Catalog</title>
+<style>
+:root{
+  --bg:#131109; --panel:#1c1810; --panel2:#221d13; --line:#3a3220; --line-soft:#2a2417;
+  --text:#efe8d8; --muted:#a89b7c; --muted2:#7c715a;
+  --gold:#d8a53d; --gold-soft:#3a2f13; --gold-text:#f0c96a;
+  --green:#3ecf8e; --green-soft:#123626; --red:#ff6b6b; --red-soft:#3a1a1a;
+  --amber:#e8b84b; --amber-soft:#3a2c11; --blue:#6fb3e0;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,Segoe UI,system-ui,sans-serif}
+a{color:var(--gold-text);text-decoration:none}
+a:hover{text-decoration:underline}
+button,select,input{font:inherit;color:inherit}
+.shell{display:flex;min-height:100vh}
+
+/* Sidebar */
+.sidebar{width:270px;flex:0 0 270px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--gold),#a97c1f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#1b1608;flex:0 0 auto}
+.brand-title{font-weight:600;font-size:15px}
+.brand-sub{font-size:11px;color:var(--muted)}
+.side-nav{flex:1;padding:10px 8px}
+.nav-section{margin:14px 6px 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted2)}
+.nav-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:6px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px}
+.nav-item:hover{background:var(--panel2)}
+.nav-item.active{background:var(--gold-soft);color:var(--gold-text)}
+.nav-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--muted2)}
+.nav-dot.green{background:var(--green)}
+.nav-dot.red{background:var(--red)}
+.nav-dot.amber{background:var(--amber)}
+.nav-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-count{font-size:11px;color:var(--muted);background:var(--panel2);border-radius:10px;padding:1px 7px}
+.sidebar-foot{padding:12px 16px;border-top:1px solid var(--line);font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--muted)}
+
+/* Main */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.topbar h1{font-size:18px;margin:0;flex:0 0 auto}
+.icon-btn{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:6px;width:34px;height:34px;cursor:pointer;display:none}
+.topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
+input[type=search],input[type=text],select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px;min-width:0}
+#globalSearch{width:220px}
+.pill{font-size:11px;padding:4px 9px;border-radius:12px;background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+.pill.ok{color:var(--green);border-color:var(--green-soft)}
+.pill.bad{color:var(--red);border-color:var(--red-soft)}
+.pill.warn{color:var(--amber);border-color:var(--amber-soft)}
+.banner{margin:0 22px;padding:10px 14px;border-radius:8px;background:var(--amber-soft);border:1px solid #5a431a;color:var(--amber);font-size:13px}
+.content{padding:22px;flex:1}
+
+/* Cards / KPIs */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.kpi-value{font-size:24px;font-weight:600;margin-top:4px}
+.kpi-value.green{color:var(--green)}
+.kpi-value.red{color:var(--red)}
+.kpi-value.amber{color:var(--amber)}
+
+.grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.card-head h2{font-size:14px;margin:0;font-weight:600}
+.card-body{padding:14px 16px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+
+/* Toolbar */
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.toolbar input[type=search]{flex:1;min-width:160px}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--gold)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--gold);color:#1b1608;border-color:var(--gold);font-weight:600}
+.btn.primary:hover{background:#e8b84f}
+
+/* Table */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;font-size:13px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);position:sticky;top:0;background:var(--panel)}
+tbody tr:hover{background:var(--panel2)}
+td.key{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--muted)}
+.case-name{background:none;border:none;color:var(--gold-text);cursor:pointer;font:inherit;text-align:left;padding:0}
+.case-name:hover{text-decoration:underline}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge.passed{background:var(--green-soft);color:var(--green)}
+.badge.failed,.badge.error,.badge.timed_out{background:var(--red-soft);color:var(--red)}
+.badge.running,.badge.queued,.badge.preparing{background:var(--amber-soft);color:var(--amber)}
+.badge.skipped,.badge.blocked,.badge.cancelled{background:var(--panel2);color:var(--muted)}
+.badge.never{background:var(--panel2);color:var(--muted2)}
+.tags{display:flex;gap:4px;flex-wrap:wrap}
+.tag{font-size:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:1px 6px;color:var(--muted)}
+
+dialog{width:min(760px,94vw);max-height:88vh;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:0}
+dialog::backdrop{background:#000a}
+.dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dialog-head h2{font-size:16px;margin:0}
+.dialog-body{padding:16px 18px;overflow-y:auto;max-height:calc(88vh - 60px)}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin-bottom:12px;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0}
+pre.script{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:12px;max-height:220px;overflow:auto}
+ol.steps{padding-left:18px;font-size:13px}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+.toast-wrap{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--panel2);border:1px solid var(--gold);color:var(--text);padding:10px 14px;border-radius:8px;font-size:13px;max-width:340px;box-shadow:0 6px 20px #0008}
+
+@media(max-width:860px){
+  .icon-btn{display:inline-block}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:20;transform:translateX(-100%);transition:transform .18s ease}
+  .sidebar.open{transform:translateX(0)}
+  #globalSearch{width:140px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">TC</div>
+      <div>
+        <div class="brand-title">Test Catalog</div>
+        <div class="brand-sub">GAVRIQ Test Engine</div>
+      </div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="sidebar-foot">
+      <a href="/" title="Control-plane dashboard">Test Engine dashboard</a>
+      <a href="/sit/" title="Post-deploy SIT console">SIT console</a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="menuToggle" aria-label="Toggle menu">&#9776;</button>
+      <h1 id="viewTitle">Overview</h1>
+      <div class="topbar-actions">
+        <input id="globalSearch" type="search" placeholder="Search test cases…" aria-label="Search test cases">
+        <select id="envSelect" aria-label="Target environment"></select>
+        <span id="workerPill" class="pill">workers —</span>
+        <span id="healthPill" class="pill">checking…</span>
+        <button class="btn" id="refreshBtn" title="Reload catalog">Refresh</button>
+      </div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<dialog id="detail">
+  <div class="dialog-head">
+    <h2 id="detailTitle"></h2>
+    <button class="icon-btn" id="detailClose" aria-label="Close" style="display:inline-block">&#10005;</button>
+  </div>
+  <div class="dialog-body" id="detailBody"></div>
+</dialog>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+'use strict';
+
+/* ---------------------------------------------------------------------- */
+/* Friendly labels for suites created by the SIT importer / seed script.  */
+/* Falls back to the suite's own name when a key isn't recognised, so a   */
+/* newly added suite still shows up (just less prettily) instead of      */
+/* silently vanishing from the nav.                                      */
+/* ---------------------------------------------------------------------- */
+const SUITE_LABELS = {
+  'smoke-main-flows': 'Smoke / Main Flows',
+  'sit-health': 'Deployment Health & Readiness',
+  'sit-mq': 'MQ Round Trip',
+  'sit-kafka': 'Kafka Round Trip',
+  'sit-api': 'External API Round Trip',
+  'sit-worker': 'Worker Job Queue',
+  'sit-db': 'Database Cross-Check',
+  'sit-use-case-api': 'Use-Case API Coverage',
+  'sit-gui-smoke': 'GUI Smoke (Playwright)',
+  'sit-ui-eventing': 'UI — Eventing Panel (Playwright)',
+  'sit-selenium-screens': 'UI — Screens (Selenium)',
+  'sit-selenium-fields': 'UI — Fields (Selenium)',
+  'sit-selenium-workflows': 'UI — Workflows (Selenium)',
+  'sit-use-case-ui': 'Use-Case UI Coverage',
+  'sit-official-clicks': 'UI — Official Click Paths',
+  'sit-feature-access': 'UI — Feature Access',
+  'sit-console-chrome': 'UI — Console Chrome',
+  'sit-e2e-ux': 'End-to-End UX',
+  'sit-ui-pages': 'UI — Page Coverage (Selenium)',
+  'sit-security': 'Security',
+  'sit-ui-workflows': 'UI — Workflow & Data Integrity (Selenium)',
+  'sit-agents': 'Agent Desk / Workers',
+};
+function suiteLabel(suite) {
+  return SUITE_LABELS[suite.key] || suite.name || suite.key;
+}
+
+const TERMINAL_STATUSES = new Set(['passed', 'failed', 'skipped', 'blocked', 'cancelled', 'error', 'timed_out']);
+
+const state = {
+  view: 'overview',
+  suiteId: null,
+  suites: [],
+  membership: [],
+  cases: [],
+  statusByCase: new Map(),
+  environments: [],
+  envId: null,
+  workers: [],
+  executions: [],
+  dashboard: {},
+  readiness: {},
+  specs: null,       // null = not yet fetched, 'unavailable' = SIT unreachable, [] / [...] = data
+  useCaseNames: new Map(),
+  search: '',
+  filterStatus: 'all',
+  filterAutomation: 'all',
+  selected: new Set(),
+  trackedExecutions: new Set(),
+};
+
+const el = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error?.message || body?.error || `Request failed: ${res.status}`);
+  return body;
+}
+
+function toast(msg) {
+  const wrap = el('toastWrap');
+  const node = document.createElement('div');
+  node.className = 'toast';
+  node.textContent = msg;
+  wrap.appendChild(node);
+  setTimeout(() => node.remove(), 6000);
+}
+
+function banner(msg) {
+  const b = el('banner');
+  if (!msg) { b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = msg;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Loading                                                                 */
+/* ---------------------------------------------------------------------- */
+async function fetchAllCases() {
+  const limit = 200;
+  let offset = 0;
+  let all = [];
+  for (;;) {
+    const res = await api(`/api/v1/test-cases?limit=${limit}&offset=${offset}`);
+    const rows = res.data || [];
+    all = all.concat(rows);
+    offset += rows.length;
+    if (!rows.length || offset >= (res.total ?? all.length)) break;
+  }
+  return all;
+}
+
+async function loadStatic() {
+  const [suitesRes, membershipRes, cases, envRes] = await Promise.all([
+    api('/api/v1/suites'),
+    api('/api/v1/test-case-suites'),
+    fetchAllCases(),
+    api('/api/v1/environments'),
+  ]);
+  state.suites = suitesRes.data || [];
+  state.membership = membershipRes.data || [];
+  state.cases = cases;
+  state.environments = envRes.data || [];
+  if (!state.envId) {
+    const local = state.environments.find((e) => e.key === 'local-dev');
+    state.envId = local?.id || state.environments[0]?.id || null;
+  }
+  renderEnvSelect();
+}
+
+async function loadDynamic() {
+  const [statusRes, workersRes, execRes, dashRes, readyRes] = await Promise.all([
+    api('/api/v1/test-status?application_key=sand-bench'),
+    api('/api/v1/workers'),
+    api('/api/v1/executions'),
+    api('/api/v1/dashboard'),
+    api('/api/v1/release-readiness'),
+  ]);
+  state.statusByCase = new Map((statusRes.data?.engine_executed || []).filter((r) => r.last_result).map((r) => [r.id, r.last_result]));
+  state.workers = workersRes.data || [];
+  state.executions = execRes.data || [];
+  state.dashboard = dashRes.data || {};
+  state.readiness = readyRes.data || {};
+}
+
+async function loadSpecs() {
+  try {
+    const [specRes, ucRes] = await Promise.all([
+      api('/sit/api/specifications'),
+      api('/sit/api/use-cases'),
+    ]);
+    state.specs = specRes.data || [];
+    state.useCaseNames = new Map((ucRes.data || []).map((u) => [u.id, u.name]));
+  } catch {
+    state.specs = 'unavailable';
+  }
+}
+
+async function loadHealth() {
+  try {
+    const h = await api('/health');
+    el('healthPill').textContent = `engine ok · v${h.version || '?'}`;
+    el('healthPill').className = 'pill ok';
+  } catch {
+    el('healthPill').textContent = 'engine unreachable';
+    el('healthPill').className = 'pill bad';
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Derived data                                                           */
+/* ---------------------------------------------------------------------- */
+function casesInSuite(suiteId) {
+  if (suiteId === 'uncategorized') return uncategorizedCases();
+  const ids = new Set(state.membership.filter((m) => m.test_suite_id === suiteId).map((m) => m.test_case_id));
+  return state.cases.filter((c) => ids.has(c.id));
+}
+function uncategorizedCases() {
+  const categorized = new Set(state.membership.map((m) => m.test_case_id));
+  return state.cases.filter((c) => !categorized.has(c.id));
+}
+function statusOf(caseId) {
+  return state.statusByCase.get(caseId) || null;
+}
+function suiteDot(suiteId) {
+  const cases = casesInSuite(suiteId);
+  const results = cases.map((c) => statusOf(c.id)).filter(Boolean);
+  if (!results.length) return '';
+  if (results.some((r) => ['failed', 'error', 'timed_out'].includes(r.status))) return 'red';
+  if (results.every((r) => r.status === 'passed')) return 'green';
+  return 'amber';
+}
+
+function passthroughFilter(list) {
+  const q = state.search.trim().toLowerCase();
+  return list.filter((c) => {
+    if (q) {
+      const hay = [c.key, c.name, c.test_type, c.execution_method, ...(c.tags || [])].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (state.filterAutomation !== 'all' && c.automation_status !== state.filterAutomation) return false;
+    if (state.filterStatus !== 'all') {
+      const r = statusOf(c.id);
+      if (state.filterStatus === 'never') { if (r) return false; }
+      else if (!r || r.status !== state.filterStatus) return false;
+    }
+    return true;
+  });
+}
+
+/* ---------------------------------------------------------------------- */
+/* Sidebar                                                                 */
+/* ---------------------------------------------------------------------- */
+function renderSideNav() {
+  const suites = [...state.suites].sort((a, b) => suiteLabel(a).localeCompare(suiteLabel(b)));
+  const uncategorized = uncategorizedCases();
+
+  const item = (view, id, label, count, dot) => `
+    <button class="nav-item ${state.view === view && state.suiteId === id ? 'active' : ''}" data-view="${view}" data-id="${id ?? ''}">
+      <span class="nav-dot ${dot || ''}"></span>
+      <span class="nav-label">${esc(label)}</span>
+      ${count != null ? `<span class="nav-count">${count}</span>` : ''}
+    </button>`;
+
+  let html = '';
+  html += `<div class="nav-section">Overview</div>`;
+  html += item('overview', null, 'Dashboard');
+  html += item('history', null, 'Run history', state.executions.length || null);
+  html += item('specs', null, 'Specifications', state.specs === 'unavailable' ? '!' : (Array.isArray(state.specs) ? state.specs.length : null));
+
+  html += `<div class="nav-section">All cases</div>`;
+  html += item('all', null, 'Every test case', state.cases.length || null);
+
+  html += `<div class="nav-section">Categories</div>`;
+  for (const s of suites) {
+    html += item('suite', s.id, suiteLabel(s), casesInSuite(s.id).length, suiteDot(s.id));
+  }
+  if (uncategorized.length) {
+    html += item('suite', 'uncategorized', 'Uncategorized', uncategorized.length, suiteDot('uncategorized'));
+  }
+
+  el('sideNav').innerHTML = html;
+  el('sideNav').querySelectorAll('[data-view]').forEach((btn) => {
+    btn.onclick = () => {
+      const view = btn.dataset.view;
+      const id = btn.dataset.id || null;
+      location.hash = view === 'suite' ? `#/suite/${encodeURIComponent(id)}` : `#/${view}`;
+    };
+  });
+  el('sidebar').classList.remove('open');
+}
+
+function renderEnvSelect() {
+  const sel = el('envSelect');
+  sel.innerHTML = state.environments.map((e) => `<option value="${esc(e.id)}" ${e.id === state.envId ? 'selected' : ''}>${esc(e.name)}</option>`).join('') || '<option>No environments</option>';
+  sel.onchange = () => { state.envId = sel.value; };
+}
+
+function renderWorkerPill() {
+  const online = state.workers.filter((w) => w.status === 'online' || w.status === 'busy').length;
+  const pill = el('workerPill');
+  if (!state.workers.length) {
+    pill.textContent = 'no workers registered';
+    pill.className = 'pill warn';
+  } else {
+    pill.textContent = `${online}/${state.workers.length} workers online`;
+    pill.className = 'pill ' + (online ? 'ok' : 'warn');
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Badges & rows                                                          */
+/* ---------------------------------------------------------------------- */
+function badgeFor(caseId) {
+  const r = statusOf(caseId);
+  if (!r) return '<span class="badge never">never run</span>';
+  const when = r.created_at ? new Date(r.created_at).toLocaleString() : '';
+  return `<span class="badge ${esc(r.status)}" title="${esc(when)}">${esc(r.status)}</span>`;
+}
+
+function caseTableRows(cases) {
+  if (!cases.length) return `<tr><td colspan="7" class="empty">No matching test cases.</td></tr>`;
+  return cases.map((c) => `
+    <tr>
+      <td><input type="checkbox" data-select="${esc(c.id)}" ${state.selected.has(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.name)}"></td>
+      <td>
+        <button class="case-name" data-open="${esc(c.id)}">${esc(c.name)}</button>
+        <div class="small muted key">${esc(c.key)}</div>
+      </td>
+      <td class="small">${esc(c.test_type || '—')}<br><span class="muted">${esc(c.execution_method || '')}</span></td>
+      <td class="small">${esc(c.priority || '')} / ${esc(c.severity || '')}</td>
+      <td class="small"><div class="tags">${(c.tags || []).slice(0, 4).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div></td>
+      <td>${badgeFor(c.id)}</td>
+      <td class="small"><button class="btn" data-run="${esc(c.id)}">Run</button></td>
+    </tr>`).join('');
+}
+
+function wireCaseTable(root) {
+  root.querySelectorAll('[data-select]').forEach((cb) => {
+    cb.onchange = () => {
+      if (cb.checked) state.selected.add(cb.dataset.select);
+      else state.selected.delete(cb.dataset.select);
+      updateSelectionUI(root);
+    };
+  });
+  root.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => showCaseDetail(b.dataset.open)));
+  root.querySelectorAll('[data-run]').forEach((b) => (b.onclick = () => runCases([b.dataset.run], b.closest('tr').querySelector('.case-name').textContent)));
+}
+
+function updateSelectionUI(root) {
+  const btn = root.querySelector('[data-run-selected]');
+  if (!btn) return;
+  btn.textContent = `Run selected (${state.selected.size})`;
+  btn.disabled = !state.selected.size;
+}
+
+function filterToolbar(showCategory) {
+  const statuses = ['all', 'passed', 'failed', 'never', 'running', 'queued', 'skipped'];
+  return `
+    <div class="toolbar">
+      <input type="search" id="tcSearch" placeholder="Search this list…" value="${esc(state.search)}" aria-label="Search">
+      <select id="tcStatus" aria-label="Filter by last result">
+        ${statuses.map((s) => `<option value="${s}" ${state.filterStatus === s ? 'selected' : ''}>${s === 'all' ? 'All results' : s === 'never' ? 'Never run' : s}</option>`).join('')}
+      </select>
+      <select id="tcAuto" aria-label="Filter by automation status">
+        ${['all', 'automated', 'partially_automated', 'manual', 'to_be_automated', 'not_automatable'].map((s) => `<option value="${s}" ${state.filterAutomation === s ? 'selected' : ''}>${s === 'all' ? 'All automation states' : s}</option>`).join('')}
+      </select>
+      <button class="btn" data-run-selected disabled>Run selected (0)</button>
+      ${showCategory !== undefined ? `<button class="btn primary" data-run-category>Run all in this category</button>` : ''}
+    </div>`;
+}
+
+function wireToolbar(root, cases, onFilterChange) {
+  const search = root.querySelector('#tcSearch');
+  const st = root.querySelector('#tcStatus');
+  const au = root.querySelector('#tcAuto');
+  search.oninput = () => { state.search = search.value; onFilterChange(); };
+  st.onchange = () => { state.filterStatus = st.value; onFilterChange(); };
+  au.onchange = () => { state.filterAutomation = au.value; onFilterChange(); };
+  const runSel = root.querySelector('[data-run-selected]');
+  if (runSel) runSel.onclick = () => runCases([...state.selected], `${state.selected.size} selected case(s)`);
+  const runCat = root.querySelector('[data-run-category]');
+  if (runCat) runCat.onclick = () => {
+    if (state.suiteId === 'uncategorized') runCases(cases.map((c) => c.id), 'uncategorized cases');
+    else runSuite(state.suiteId, cases.map((c) => c.id));
+  };
+  updateSelectionUI(root);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Views                                                                   */
+/* ---------------------------------------------------------------------- */
+function renderOverview() {
+  el('viewTitle').textContent = 'Overview';
+  const d = state.dashboard;
+  const ready = state.readiness.readiness || '—';
+  const readyClass = ready === 'READY' ? 'green' : ready.includes('CONDITIONS') ? 'amber' : 'red';
+  const online = state.workers.filter((w) => w.status === 'online' || w.status === 'busy').length;
+
+  const topSuites = [...state.suites]
+    .map((s) => ({ s, count: casesInSuite(s.id).length, dot: suiteDot(s.id) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+
+  el('content').innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Total test cases</div><div class="kpi-value">${d.total_tests ?? state.cases.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Automated</div><div class="kpi-value">${d.automated ?? '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Failed (7d)</div><div class="kpi-value ${d.failed_last_7d ? 'red' : ''}">${d.failed_last_7d ?? 0}</div></div>
+      <div class="kpi"><div class="kpi-label">Categories</div><div class="kpi-value">${state.suites.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Workers online</div><div class="kpi-value ${online ? 'green' : 'amber'}">${online}/${state.workers.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Release readiness</div><div class="kpi-value ${readyClass}">${esc(ready)}</div></div>
+    </div>
+    <div class="grid2">
+      <section class="card">
+        <div class="card-head"><h2>Categories</h2><span class="small muted">click to open</span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Category</th><th>Cases</th><th>Status</th></tr></thead>
+          <tbody>${topSuites.map(({ s, count, dot }) => `
+            <tr class="clickable" data-suite="${esc(s.id)}" style="cursor:pointer">
+              <td>${esc(suiteLabel(s))}</td>
+              <td>${count}</td>
+              <td><span class="nav-dot ${dot}" style="display:inline-block"></span></td>
+            </tr>`).join('') || '<tr><td colspan="3" class="empty">No categories yet — run <code>npm run seed</code> / <code>npm run import:sit</code>.</td></tr>'}
+          </tbody>
+        </table></div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>Recent executions</h2></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Key</th><th>Status</th><th>Cases</th></tr></thead>
+          <tbody>${state.executions.slice(0, 8).map((e) => `
+            <tr class="clickable" data-exec="${esc(e.id)}" style="cursor:pointer">
+              <td class="key small">${esc(e.key)}</td>
+              <td>${badgeShell(e.status)}</td>
+              <td class="small">${(e.test_case_ids || []).length}</td>
+            </tr>`).join('') || '<tr><td colspan="3" class="empty">No executions yet</td></tr>'}
+          </tbody>
+        </table></div>
+      </section>
+    </div>`;
+
+  el('content').querySelectorAll('[data-suite]').forEach((r) => (r.onclick = () => { location.hash = `#/suite/${encodeURIComponent(r.dataset.suite)}`; }));
+  el('content').querySelectorAll('[data-exec]').forEach((r) => (r.onclick = () => showExecutionDetail(r.dataset.exec)));
+}
+
+function badgeShell(status) {
+  return `<span class="badge ${esc(status)}">${esc(status)}</span>`;
+}
+
+function renderSuiteView(suiteId) {
+  const suite = suiteId === 'uncategorized' ? { id: 'uncategorized', name: 'Uncategorized' } : state.suites.find((s) => s.id === suiteId);
+  const label = suite ? (suiteId === 'uncategorized' ? 'Uncategorized' : suiteLabel(suite)) : 'Unknown category';
+  el('viewTitle').textContent = label;
+  const all = casesInSuite(suiteId);
+  const filtered = passthroughFilter(all);
+
+  el('content').innerHTML = `
+    <section class="card">
+      <div class="card-head"><h2>${esc(label)}</h2><span class="small muted">${filtered.length} of ${all.length} case(s)</span></div>
+      ${filterToolbar(true)}
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Test case</th><th>Type / method</th><th>Priority / severity</th><th>Tags</th><th>Last result</th><th></th></tr></thead>
+        <tbody>${caseTableRows(filtered)}</tbody>
+      </table></div>
+    </section>`;
+
+  const root = el('content');
+  wireToolbar(root, filtered, () => renderSuiteView(suiteId));
+  wireCaseTable(root);
+}
+
+function renderAllView() {
+  el('viewTitle').textContent = 'Every test case';
+  const filtered = passthroughFilter(state.cases);
+  el('content').innerHTML = `
+    <section class="card">
+      <div class="card-head"><h2>Every test case</h2><span class="small muted">${filtered.length} of ${state.cases.length} case(s)</span></div>
+      ${filterToolbar()}
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Test case</th><th>Type / method</th><th>Priority / severity</th><th>Tags</th><th>Last result</th><th></th></tr></thead>
+        <tbody>${caseTableRows(filtered)}</tbody>
+      </table></div>
+    </section>`;
+  const root = el('content');
+  wireToolbar(root, filtered, renderAllView);
+  wireCaseTable(root);
+}
+
+function renderHistoryView() {
+  el('viewTitle').textContent = 'Run history';
+  el('content').innerHTML = `
+    <section class="card">
+      <div class="card-head"><h2>Executions</h2><span class="small muted">${state.executions.length} recent run(s)</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Key</th><th>Status</th><th>Trigger</th><th>Cases</th><th>Created</th></tr></thead>
+        <tbody>${state.executions.map((e) => `
+          <tr class="clickable" data-exec="${esc(e.id)}" style="cursor:pointer">
+            <td class="key small">${esc(e.key)}</td>
+            <td>${badgeShell(e.status)}</td>
+            <td class="small">${esc(e.trigger_source)}</td>
+            <td class="small">${(e.test_case_ids || []).length}</td>
+            <td class="small muted">${e.created_at ? new Date(e.created_at).toLocaleString() : '—'}</td>
+          </tr>`).join('') || '<tr><td colspan="5" class="empty">No executions yet</td></tr>'}
+        </tbody>
+      </table></div>
+    </section>`;
+  el('content').querySelectorAll('[data-exec]').forEach((r) => (r.onclick = () => showExecutionDetail(r.dataset.exec)));
+}
+
+function renderSpecsView() {
+  el('viewTitle').textContent = 'Specifications';
+  if (state.specs === 'unavailable') {
+    el('content').innerHTML = `
+      <section class="card"><div class="card-body">
+        <p>The SIT console (<code>/sit/</code>) is unreachable, so specification-only acceptance criteria can't be shown here right now.</p>
+        <p class="muted small">This does not affect the executable test cases in the categories on the left — those come from the Test Repository directly.</p>
+      </div></section>`;
+    return;
+  }
+  const specs = state.specs || [];
+  el('content').innerHTML = `
+    <section class="card">
+      <div class="card-head"><h2>Acceptance specifications</h2><span class="small muted">${specs.length} specification(s) — not executable here</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Specification</th><th>Use case</th></tr></thead>
+        <tbody>${specs.map((s) => `
+          <tr>
+            <td>${esc(s.name)}<div class="small muted">${esc(s.id)}</div></td>
+            <td>${s.useCaseId ? `<a href="/sit/api/use-cases/${encodeURIComponent(s.useCaseId)}" target="_blank" rel="noopener">${esc(s.useCaseId)} — ${esc(state.useCaseNames.get(s.useCaseId) || s.useCaseName || '')}</a>` : '<span class="muted">Not mapped</span>'}</td>
+          </tr>`).join('') || '<tr><td colspan="2" class="empty">No specifications registered.</td></tr>'}
+        </tbody>
+      </table></div>
+    </section>`;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Detail dialogs                                                         */
+/* ---------------------------------------------------------------------- */
+function showCaseDetail(id) {
+  const c = state.cases.find((x) => x.id === id);
+  if (!c) return;
+  const suites = state.membership.filter((m) => m.test_case_id === id).map((m) => state.suites.find((s) => s.id === m.test_suite_id)).filter(Boolean);
+  const r = statusOf(id);
+  el('detailTitle').textContent = c.name;
+  el('detailBody').innerHTML = `
+    <dl class="kv">
+      <dt>Key</dt><dd class="key">${esc(c.key)}</dd>
+      <dt>Type</dt><dd>${esc(c.test_type || '—')} / ${esc(c.execution_method || '—')}</dd>
+      <dt>Priority</dt><dd>${esc(c.priority || '—')} · ${esc(c.severity || '—')}</dd>
+      <dt>Lifecycle</dt><dd>${esc(c.lifecycle || '—')} · ${esc(c.automation_status || '—')}</dd>
+      <dt>Categories</dt><dd>${suites.map((s) => esc(suiteLabel(s))).join(', ') || '<span class="muted">Uncategorized</span>'}</dd>
+      <dt>Tags</dt><dd><div class="tags">${(c.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('') || '<span class="muted">—</span>'}</div></dd>
+      <dt>Last result</dt><dd>${r ? `${badgeFor(id)} ${esc(r.message || '')} <span class="muted small">(${r.created_at ? new Date(r.created_at).toLocaleString() : ''})</span>` : '<span class="muted">Never run</span>'}</dd>
+    </dl>
+    ${c.description ? `<p>${esc(c.description)}</p>` : ''}
+    ${c.expected_results ? `<p><strong>Expected:</strong> ${esc(c.expected_results)}</p>` : ''}
+    ${c.script ? `<pre class="script">${esc(c.script)}</pre>` : ''}
+    <button class="btn primary" id="runFromDetail">Run this case</button>`;
+  el('runFromDetail').onclick = () => { el('detail').close(); runCases([id], c.name); };
+  el('detail').showModal();
+}
+
+async function showExecutionDetail(id) {
+  el('detailTitle').textContent = 'Execution';
+  el('detailBody').innerHTML = '<p class="muted">Loading…</p>';
+  el('detail').showModal();
+  try {
+    const res = await api(`/api/v1/executions/${encodeURIComponent(id)}`);
+    const data = res.data;
+    el('detailTitle').textContent = data.key;
+    const results = data.results || [];
+    if (!results.length) {
+      el('detailBody').innerHTML = `<p>${badgeShell(data.status)}</p><p class="muted">No case results yet — waiting for a worker to pick this up.</p>`;
+      return;
+    }
+    el('detailBody').innerHTML = `<p>${badgeShell(data.status)}</p>` + results.map((r) => {
+      const shots = (r.evidence || []).filter((e) => e.evidence_type === 'screenshot' || (e.content_type || '').startsWith('image'));
+      return `<div class="card"><div class="card-body">
+        <div style="margin-bottom:6px">${badgeShell(r.status)} <span class="muted small">${r.duration_ms || 0}ms</span></div>
+        <p class="small">${esc(r.message || r.test_case_id || '')}</p>
+        ${shots.length ? `<div class="tags">${shots.map((s) => `<a href="${esc(s.url)}" target="_blank"><img src="${esc(s.url)}" alt="evidence" style="max-height:120px;border-radius:6px;border:1px solid var(--line)"></a>`).join('')}</div>` : ''}
+      </div></div>`;
+    }).join('');
+  } catch (err) {
+    el('detailBody').innerHTML = `<p class="muted">${esc(err.message)}</p>`;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Running                                                                 */
+/* ---------------------------------------------------------------------- */
+async function runCases(ids, label) {
+  if (!ids.length) return;
+  if (!state.envId) { toast('No environment available to run against.'); return; }
+  try {
+    const res = await api('/api/v1/executions', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ test_case_ids: ids, environment_id: state.envId, trigger_source: 'manual' }),
+    });
+    toast(`Queued ${label} — ${res.data.key}`);
+    trackExecution(res.data.id);
+  } catch (err) {
+    toast(`Run failed: ${err.message}`);
+  }
+}
+
+async function runSuite(suiteId, fallbackIds) {
+  try {
+    const res = await api('/api/v1/executions', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ test_suite_id: suiteId, test_case_ids: fallbackIds, environment_id: state.envId, trigger_source: 'manual' }),
+    });
+    toast(`Queued category run — ${res.data.key}`);
+    trackExecution(res.data.id);
+  } catch (err) {
+    toast(`Run failed: ${err.message}`);
+  }
+}
+
+function trackExecution(id) {
+  state.trackedExecutions.add(id);
+  pollTracked();
+}
+
+async function pollTracked() {
+  if (!state.trackedExecutions.size) return;
+  for (const id of [...state.trackedExecutions]) {
+    try {
+      const res = await api(`/api/v1/executions/${encodeURIComponent(id)}`);
+      if (TERMINAL_STATUSES.has(res.data.status)) {
+        state.trackedExecutions.delete(id);
+        toast(`${res.data.key} finished: ${res.data.status}`);
+      }
+    } catch { state.trackedExecutions.delete(id); }
+  }
+  await loadDynamic();
+  renderWorkerPill();
+  renderSideNav();
+  renderCurrentView();
+  if (state.trackedExecutions.size) setTimeout(pollTracked, 2000);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Router                                                                  */
+/* ---------------------------------------------------------------------- */
+function renderCurrentView() {
+  if (state.view === 'overview') renderOverview();
+  else if (state.view === 'all') renderAllView();
+  else if (state.view === 'history') renderHistoryView();
+  else if (state.view === 'specs') renderSpecsView();
+  else if (state.view === 'suite') renderSuiteView(state.suiteId);
+}
+
+function parseHash() {
+  const parts = (location.hash || '#/overview').replace(/^#\//, '').split('/');
+  const view = parts[0] || 'overview';
+  if (view === 'suite') { state.view = 'suite'; state.suiteId = decodeURIComponent(parts[1] || ''); }
+  else { state.view = view; state.suiteId = null; }
+  state.selected = new Set();
+  state.search = '';
+}
+
+function onRoute() {
+  parseHash();
+  if (state.view === 'specs' && state.specs === null) loadSpecs().then(() => { renderSideNav(); if (state.view === 'specs') renderSpecsView(); });
+  renderSideNav();
+  renderCurrentView();
+}
+
+/* ---------------------------------------------------------------------- */
+/* Init                                                                    */
+/* ---------------------------------------------------------------------- */
+async function refreshAll(full) {
+  try {
+    if (full) await loadStatic();
+    await loadDynamic();
+    renderWorkerPill();
+    renderSideNav();
+    renderCurrentView();
+    banner(state.workers.some((w) => w.status === 'online') ? null : 'No worker is currently online — runs will queue until one connects. See docs/SELENIUM-WORKER.md.');
+  } catch (err) {
+    banner(`Failed to load catalog: ${err.message}`);
+  }
+}
+
+el('menuToggle').onclick = () => el('sidebar').classList.toggle('open');
+el('refreshBtn').onclick = () => refreshAll(true);
+el('detailClose').onclick = () => el('detail').close();
+el('globalSearch').oninput = (e) => {
+  state.search = e.target.value;
+  if (state.view !== 'all' && state.view !== 'suite') { location.hash = '#/all'; }
+  else renderCurrentView();
+};
+
+window.addEventListener('hashchange', onRoute);
+
+(async function init() {
+  await loadHealth();
+  parseHash();
+  await refreshAll(true);
+  onRoute();
+  setInterval(() => refreshAll(false), 20000);
+  setInterval(loadHealth, 20000);
+})();
+</script>
+</body>
+</html>

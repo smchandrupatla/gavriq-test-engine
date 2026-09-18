@@ -42,8 +42,7 @@ export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<
 }
 
 export async function migrate() {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const schemaPath = path.join(root, 'apps/api/src/db/schema.sql');
+  const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema.sql');
   const sql = readFileSync(schemaPath, 'utf8');
   await pool.query(sql);
   console.log('[migrate] schema applied successfully');

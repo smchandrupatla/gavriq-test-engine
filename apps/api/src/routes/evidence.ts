@@ -32,7 +32,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
     '/api/v1/executions/:id/evidence',
     async (req, reply) => {
       const exec = await query(
-        `SELECT id FROM executions WHERE id = $1 OR key = $1`,
+        `SELECT id FROM executions WHERE id::text = $1 OR key = $1`,
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });

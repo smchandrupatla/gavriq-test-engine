@@ -28,6 +28,13 @@ export async function suitePlanRoutes(app: FastifyInstance) {
     return reply.status(201).send({ data: rows[0] });
   });
 
+  // Bulk suite membership (test_case_id -> test_suite_id), for building a
+  // consolidated categorized catalog view without an N+1 fetch per suite.
+  app.get('/api/v1/test-case-suites', async (_req, reply) => {
+    const { rows } = await query('SELECT test_case_id, test_suite_id FROM test_case_suites');
+    return reply.send({ data: rows });
+  });
+
   app.post<{ Params: { id: string }; Body: { test_case_ids: string[] } }>(
     '/api/v1/suites/:id/cases',
     async (req, reply) => {

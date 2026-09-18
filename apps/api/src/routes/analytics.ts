@@ -3,13 +3,13 @@ import { query } from '../db/client.js';
 
 /** Prompt 8 — Search, Dashboard, Reporting */
 export async function analyticsRoutes(app: FastifyInstance) {
-  // Global search
+  // Global search — first-class capability across test repository
   app.get('/api/v1/search', async (req, reply) => {
     const q = (req.query as any).q || '';
     if (!q || q.length < 2) return reply.status(400).send({ error: 'q must be at least 2 characters' });
     const pattern = `%${q}%`;
 
-    const [cases, apps, suites, envs] = await Promise.all([
+    const [cases, apps, suites, envs, defects] = await Promise.all([
       query(
         `SELECT id, key, name, 'test_case' AS resource_type, lifecycle, test_type
          FROM test_cases WHERE name ILIKE $1 OR key ILIKE $1 OR description ILIKE $1 LIMIT 20`,
@@ -30,6 +30,11 @@ export async function analyticsRoutes(app: FastifyInstance) {
          WHERE name ILIKE $1 OR key ILIKE $1 LIMIT 10`,
         [pattern]
       ),
+      query(
+        `SELECT id, external_id, status, 'defect' AS resource_type FROM defect_links
+         WHERE external_id ILIKE $1 OR status ILIKE $1 LIMIT 10`,
+        [pattern]
+      ),
     ]);
 
     return reply.send({
@@ -38,11 +43,12 @@ export async function analyticsRoutes(app: FastifyInstance) {
         applications: apps.rows,
         suites: suites.rows,
         environments: envs.rows,
+        defects: defects.rows,
       },
     });
   });
 
-  // Dashboard summary
+  // Dashboard summary — executive-quality test dashboard
   app.get('/api/v1/dashboard', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appFilter = q.application_id ? 'AND application_id = $1' : '';
@@ -74,6 +80,10 @@ export async function analyticsRoutes(app: FastifyInstance) {
       params
     );
 
+    const [envTotals] = await Promise.all([
+      query(`SELECT count(*)::int AS total FROM environments`),
+    ]);
+
     return reply.send({
       data: {
         total_tests: totals.rows[0]?.total ?? 0,
@@ -82,6 +92,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
         by_type: byType.rows,
         executions_last_7d: recentExec.rows,
         failed_last_7d: failed.rows[0]?.failed ?? 0,
+        total_environments: envTotals.rows[0]?.total ?? 0,
       },
     });
   });
@@ -89,7 +100,7 @@ export async function analyticsRoutes(app: FastifyInstance) {
   // Test Summary Report for an execution
   app.get<{ Params: { id: string } }>('/api/v1/reports/summary/:id', async (req, reply) => {
     const exec = await query(
-      'SELECT * FROM executions WHERE id = $1 OR key = $1',
+      'SELECT * FROM executions WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });

@@ -5,13 +5,12 @@
 | Service | Port | Profile | Purpose |
 |---------|------|---------|--------|
 | `sit-console-db` | — | default | Postgres |
-| `test-engine-api` | 8787 | default | Control plane |
+| `test-engine` | 8787 | default | Control plane + dashboard at `/`, SIT console at `/sit/` (one container, two supervised processes — see `scripts/consolidated-entrypoint.mjs`) |
 | `test-engine-worker` | — | `workers` | Selenium/HTTP/perf runner |
-| `sit-console` | 8098 | default | Existing SIT console UI |
 | `sit` | — | `sit` | One-shot SIT runner |
 
 ```bash
-# API + DB + SIT console
+# API + DB + SIT console (one service)
 docker compose up -d --build
 
 # Also start workers (needs Chrome/Playwright deps on host or custom image)
@@ -21,10 +20,10 @@ docker compose --profile workers up -d --build
 TARGET_BASE_URL=http://host.docker.internal:8001 docker compose --profile workers up -d
 ```
 
-After API is healthy:
+After it's healthy:
 
 ```bash
-docker compose exec test-engine-api npx tsx apps/api/src/seed.ts
+docker compose exec test-engine npx tsx apps/api/src/seed.ts
 ```
 
 ## In-container / build test status

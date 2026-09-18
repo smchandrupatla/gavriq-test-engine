@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>Sand Bench Test Engine</h1><nav aria-label="Main"><button data-nav="dashboard">Dashboard</button><button data-nav="cases">Test Cases</button><button data-nav="runs">Test Runs</button></nav><span id="run-status">idle</span><span id="targets"></span></header>
+<header><h1>Sand Bench Test Engine</h1><nav aria-label="Main"><button data-nav="dashboard">Dashboard</button><button data-nav="cases">Test Cases</button><button data-nav="runs">Test Runs</button></nav><span id="run-status">idle</span><span id="targets"></span><a href="/catalog" title="Consolidated, categorized test-case catalog">Test Catalog</a><a href="/" title="Test Engine control-plane dashboard">Test Engine dashboard</a></header>
 <main><p id="error" role="alert"></p><div id="page-body"></div><details><summary>Execution log</summary><pre id="log"></pre></details></main>
 <dialog id="detail"><div class="dialog-head"><h2 id="detail-title"></h2><button id="close-detail" aria-label="Close detail">Close</button></div><div id="detail-body"></div></dialog>
 <script>
@@ -23,10 +23,10 @@ const cases=()=>[...state.catalog.flatMap(f=>f.cases),...state.specifications];
 function outcome(row){return row.status||(row.passed?'passed':'failed')}
 function lastResult(id){return state.status.lastRun?.results?.find(r=>r.id===id)}
 function badge(row){const status=row?outcome(row):'not run';return '<span class="status '+esc(status)+'">'+esc(status)+'</span>'}
-function useCaseLink(row){return row.useCaseId?'<a href="/api/use-cases/'+encodeURIComponent(row.useCaseId)+'" target="_blank" rel="noopener">'+esc(row.useCaseId)+' - '+esc(row.useCaseName)+'</a>':'<span class="muted">Not mapped</span>'}
+function useCaseLink(row){return row.useCaseId?'<a href="/sit/api/use-cases/'+encodeURIComponent(row.useCaseId)+'" target="_blank" rel="noopener">'+esc(row.useCaseId)+' - '+esc(row.useCaseName)+'</a>':'<span class="muted">Not mapped</span>'}
 function error(err){el('error').textContent=err.message||String(err)}
 async function runFilter(filter){
- try{await request('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(filter)});await refresh()}catch(err){error(err)}
+ try{await request('/sit/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(filter)});await refresh()}catch(err){error(err)}
 }
 window.runFilter=runFilter;
 function filteredCases(){const f=state.filter,q=f.q.toLowerCase();return cases().filter(c=>(!f.useCase||c.useCaseId===f.useCase)&&(f.kind==='all'||(f.kind==='executable'?c.executable:c.executable===false))&&(!q||[c.name,c.useCaseId,c.useCaseName,c.file].join(' ').toLowerCase().includes(q)))}
@@ -72,7 +72,7 @@ function showRun(run){
 }
 async function refresh(){
  try{
- const [status,catalog,specifications,useCases,runs]=await Promise.all(['/api/status','/api/cases','/api/specifications','/api/use-cases','/api/runs'].map(p=>request(p)));
+ const [status,catalog,specifications,useCases,runs]=await Promise.all(['/sit/api/status','/sit/api/cases','/sit/api/specifications','/sit/api/use-cases','/sit/api/runs'].map(p=>request(p)));
  state.status=status;state.catalog=catalog.data;state.specifications=specifications.data;state.useCases=useCases.data;state.runs=runs.data;
  el('run-status').textContent=status.running?'running: '+(status.currentFile||'starting'):'idle';
  el('log').textContent=(status.log||[]).join('\n');
@@ -82,7 +82,7 @@ async function refresh(){
 document.querySelectorAll('[data-nav]').forEach(b=>b.onclick=()=>{state.page=b.dataset.nav;render()});
 el('close-detail').onclick=()=>el('detail').close();
 refresh();setInterval(refresh,4000);
-request('/api/targets').then(r=>el('targets').textContent=r.data.map(t=>t.name.split(' ')[0]+': '+(t.reachable?'up':'down')).join(' | ')).catch(error);
+request('/sit/api/targets').then(r=>el('targets').textContent=r.data.map(t=>t.name.split(' ')[0]+': '+(t.reachable?'up':'down')).join(' | ')).catch(error);
 </script>
 </body>
 </html>
