@@ -20,12 +20,16 @@ import { scheduleRoutes } from './routes/schedules.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
+import { sitCatalogRoutes } from './routes/sit-catalog.js';
+import { sitRunRoutes } from './routes/sit-runs.js';
+import { opsRoutes } from './routes/ops.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
-const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const publicDir = path.join(root, 'apps/api/public');
 
 async function main() {
   try {
@@ -43,6 +47,7 @@ async function main() {
   const app = Fastify({
     logger: true,
     requestTimeout: 120_000,
+    bodyLimit: 8 * 1024 * 1024,
   });
 
   app.addHook('onRequest', async (req) => {
@@ -52,7 +57,7 @@ async function main() {
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
-    version: '0.2.3',
+    version: packageVersion(),
     prompts: '1-10',
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
@@ -69,33 +74,21 @@ async function main() {
     return reply.type('text/html').send(readFileSync(index, 'utf8'));
   });
 
-  // Consolidated, categorized test-case catalog: one portal listing every test
-  // case in the repository (including cases imported from sit/cases/*.sit.ts)
-  // with search/filter/run-on-demand and last-run visibility.
-  app.get('/catalog', async (_req, reply) => {
-    const index = path.join(publicDir, 'catalog', 'index.html');
-    if (!existsSync(index)) {
-      return reply.type('text/plain').send('Catalog not found. Expected apps/api/public/catalog/index.html');
-    }
-    return reply.type('text/html').send(readFileSync(index, 'utf8'));
-  });
-  app.get('/catalog/', async (_req, reply) => reply.redirect('/catalog'));
-
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
       const pathName = req.url.split('?')[0];
       const method = req.method;
 
-      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/catalog' || pathName === '/catalog/' || pathName === '/api/v1/meta') return;
+      if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
       if (pathName.startsWith('/api/v1/evidence')) return;
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/test-case-suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && pathName === '/api/v1/executions') {
+      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
         return requirePermission('executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
@@ -108,6 +101,8 @@ async function main() {
   }
 
   await app.register(metaRoutes);
+  await app.register(sitCatalogRoutes);
+  await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
   await app.register(environmentRoutes);
@@ -119,6 +114,7 @@ async function main() {
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
   await app.register(buildStatusRoutes);
+  await app.register(opsRoutes);
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
