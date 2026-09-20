@@ -1,15 +1,14 @@
 # Render Blueprint — GAVRIQ Test Engine (FREE tier)
 #
 # ONE free Postgres instance for the whole workspace:
-#   - Sand Bench web  → schema `app` (or `public`)  [configure on that service]
-#   - Test Engine     → schema `test_engine`         [PG_SCHEMA below]
+#   - Sand Bench web  → schema `app` (or `public`)
+#   - Test Engine     → schema `test_engine`
 #
-# Do NOT create a second free database. Set DATABASE_URL to the existing
-# free Postgres Internal Database URL (same URL Sand Bench uses).
-#
+# Set DATABASE_URL to the existing free Postgres External/Internal URL.
 # After deploy: https://gavriq-test-engine.onrender.com
-#
-# Free limits: web sleeps ~15 min idle; free Postgres expires after 30 days.
+#   /          dashboard (+ SIT Console menu → /sit/)
+#   /catalog/  Sand Bench taxonomy UI
+#   /sit/      SIT Console (run file-based sit/cases)
 
 services:
   - type: web
@@ -23,10 +22,8 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Same free Postgres instance as Sand Bench web (Internal Database URL).
       - key: DATABASE_URL
         sync: false
-      # All Test Engine tables/enums live under this schema (not public/app).
       - key: PG_SCHEMA
         value: test_engine
       - key: HOST
@@ -36,6 +33,8 @@ services:
       - key: AUTO_SEED
         value: "true"
       - key: SEED_SANDBENCH
+        value: "true"
+      - key: IMPORT_SIT
         value: "true"
       - key: RBAC_ENABLED
         value: "false"
