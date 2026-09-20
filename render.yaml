@@ -1,14 +1,19 @@
 # Render Blueprint — GAVRIQ Test Engine (FREE tier)
 #
-# BEFORE deploy succeeds you MUST set DATABASE_URL in the service Environment:
-#   Dashboard → gavriq-test-engine → Environment → DATABASE_URL
-#   = Internal Database URL from your existing free Postgres
+# Resources:
+#   - Web: gavriq-test-engine  (plan: free)
+#   - DB:  gavriq-test-engine-db (plan: free)
 #
-# Then: Manual Deploy → Deploy latest commit
-# URL: https://gavriq-test-engine.onrender.com
+# IMPORTANT — Render allows only ONE free Postgres per workspace.
+# If sync fails with "cannot have more than one active free tier database":
+#   1. Dashboard → delete or upgrade your other free Postgres, OR
+#   2. Keep that DB and set DATABASE_URL manually (remove databases: below).
 #
-# Free limits: sleeps after ~15 min idle; cold start ~30–60s.
-# First Docker build can take 10–20+ minutes (Playwright base image).
+# After successful sync:
+#   https://gavriq-test-engine.onrender.com
+#   /health  /catalog/  /api/v1/ops/catalog-counts
+#
+# Free limits: web sleeps ~15 min idle; free Postgres expires after 30 days.
 
 services:
   - type: web
@@ -22,10 +27,10 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Required — set in Dashboard (Internal URL from existing free Postgres).
       - key: DATABASE_URL
-        sync: false
-      # Do NOT set PORT — Render injects it; app listens on process.env.PORT.
+        fromDatabase:
+          name: gavriq-test-engine-db
+          property: connectionString
       - key: HOST
         value: "0.0.0.0"
       - key: NODE_ENV
@@ -38,3 +43,9 @@ services:
         value: "false"
       - key: TARGET_BASE_URL
         value: "https://sandbench-web.onrender.com"
+
+databases:
+  - name: gavriq-test-engine-db
+    plan: free
+    databaseName: sitconsole
+    user: sitconsole
