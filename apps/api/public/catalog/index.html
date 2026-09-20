@@ -1,1 +1,130 @@
-PLACEHOLDER
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sand Bench — Test Catalog</title>
+<style>
+:root{
+  --bg:#0c1420; --panel:#101a29; --panel2:#0e1826; --line:#1f2b3d; --line-soft:#1a2434;
+  --text:#eef1f5; --muted:#7c8aa0; --muted2:#5a6a80;
+  --gold:#e0ab52; --gold-soft:#2a2214; --gold-text:#f0c96a;
+  --green:#2dd4bf; --green-soft:#0d2a28; --red:#ff6b6b; --red-soft:#3a1a1a;
+  --amber:#e8b84b; --amber-soft:#3a2c11; --blue:#6fb3e0;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,Segoe UI,system-ui,sans-serif}
+a{color:var(--gold-text);text-decoration:none}
+a:hover{text-decoration:underline}
+button,select,input{font:inherit;color:inherit}
+.shell{display:flex;min-height:100vh}
+.sidebar{width:280px;flex:0 0 280px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
+.brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--gold),#a97c1f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#1b1608;flex:0 0 auto}
+.brand-title{font-weight:600;font-size:15px}
+.brand-sub{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.side-nav{flex:1;padding:10px 8px}
+.nav-section{margin:14px 6px 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted2)}
+.nav-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:6px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px}
+.nav-item:hover{background:var(--panel2)}
+.nav-item.active{background:var(--gold-soft);color:var(--gold-text)}
+.nav-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--muted2)}
+.nav-dot.green{background:var(--green)}
+.nav-dot.red{background:var(--red)}
+.nav-dot.amber{background:var(--amber)}
+.nav-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-count{font-size:11px;color:var(--muted);background:var(--panel2);border-radius:10px;padding:1px 7px}
+.sidebar-foot{padding:12px 16px;border-top:1px solid var(--line);font-size:12px;display:flex;flex-direction:column;gap:6px;color:var(--muted)}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+.topbar h1{font-size:18px;margin:0;flex:0 0 auto}
+.icon-btn{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:6px;width:34px;height:34px;cursor:pointer;display:none}
+.topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
+input[type=search],input[type=text],select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px;min-width:0}
+#globalSearch{width:220px}
+.pill{font-size:11px;padding:4px 9px;border-radius:12px;background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+.pill.ok{color:var(--green);border-color:var(--green-soft)}
+.pill.bad{color:var(--red);border-color:var(--red-soft)}
+.banner{margin:0 22px;padding:10px 14px;border-radius:8px;background:var(--amber-soft);border:1px solid #5a431a;color:var(--amber);font-size:13px}
+.content{padding:22px;flex:1}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.kpi-value{font-size:24px;font-weight:600;margin-top:4px}
+.kpi-value.green{color:var(--green)}.kpi-value.red{color:var(--red)}.kpi-value.amber{color:var(--amber)}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.card-head h2{font-size:14px;margin:0;font-weight:600}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--gold)}.btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--gold);color:#1b1608;border-color:var(--gold);font-weight:600}
+.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;font-size:13px}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--panel)}
+tbody tr:hover{background:var(--panel2)}
+td.key{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--muted)}
+.case-name{background:none;border:none;color:var(--gold-text);cursor:pointer;font:inherit;text-align:left;padding:0}
+.case-name:hover{text-decoration:underline}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge.passed{background:var(--green-soft);color:var(--green)}
+.badge.failed,.badge.error,.badge.timed_out{background:var(--red-soft);color:var(--red)}
+.badge.running,.badge.queued,.badge.preparing{background:var(--amber-soft);color:var(--amber)}
+.badge.skipped,.badge.blocked,.badge.cancelled,.badge.never{background:var(--panel2);color:var(--muted)}
+.tag{font-size:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:1px 6px;color:var(--muted)}
+.empty{padding:28px;text-align:center;color:var(--muted)}.muted{color:var(--muted)}.small{font-size:12px}
+dialog{width:min(760px,94vw);max-height:88vh;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:0}
+dialog::backdrop{background:#000a}
+.dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dialog-head h2{font-size:16px;margin:0}
+.dialog-body{padding:16px 18px;overflow-y:auto;max-height:calc(88vh - 60px)}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;margin-bottom:12px;font-size:13px}.kv dt{color:var(--muted)}.kv dd{margin:0}
+.toast-wrap{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--panel2);border:1px solid var(--gold);color:var(--text);padding:10px 14px;border-radius:8px;font-size:13px;max-width:340px;box-shadow:0 6px 20px #0008}
+@media(max-width:860px){.icon-btn{display:inline-block}.sidebar{position:fixed;left:0;top:0;bottom:0;z-index:20;transform:translateX(-100%);transition:transform .18s ease}.sidebar.open{transform:translateX(0)}#globalSearch{width:140px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">SB</div>
+      <div>
+        <div class="brand-title">Sand Bench</div>
+        <div class="brand-sub">Test Intelligence</div>
+      </div>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="sidebar-foot">
+      <a href="/">Test Engine dashboard</a>
+      <a href="/sit/">SIT console</a>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="menuToggle" aria-label="Toggle menu">&#9776;</button>
+      <h1 id="viewTitle">Overview</h1>
+      <div class="topbar-actions">
+        <input id="globalSearch" type="search" placeholder="Search test cases…" aria-label="Search test cases">
+        <select id="envSelect" aria-label="Target environment"></select>
+        <span id="workerPill" class="pill">workers —</span>
+        <span id="healthPill" class="pill">checking…</span>
+        <button class="btn" id="refreshBtn" title="Reload catalog">Refresh</button>
+      </div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+<dialog id="detail">
+  <div class="dialog-head">
+    <h2 id="detailTitle"></h2>
+    <button class="icon-btn" id="detailClose" aria-label="Close" style="display:inline-block">&#10005;</button>
+  </div>
+  <div class="dialog-body" id="detailBody"></div>
+</dialog>
+<div class="toast-wrap" id="toastWrap"></div>
+<script src="/catalog/app.js"></script>
+</body>
+</html>
