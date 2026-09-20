@@ -1,18 +1,17 @@
 #!/usr/bin/env tsx
 /**
  * Seed Sand Bench taxonomy (test types → suites → cases) into Postgres.
- * Source: data/sandbench-catalog.json (parsed from design reference — NOT the HTML artifact).
+ * Source: data/sandbench-catalog.json (+ optional part files). Design HTML is NOT in the repo.
  * UI must read only from the database / API — no dummy data on screen.
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, migrate } from './db/client.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const catalogPath = path.join(root, 'data/sandbench-catalog.json');
+const dataDir = path.join(root, 'data');
 
-/** Map design type keys to schema test_type enum values */
 const TYPE_TO_ENUM: Record<string, string> = {
   unit: 'unit',
   integration: 'integration',
@@ -33,44 +32,46 @@ const TYPE_TO_ENUM: Record<string, string> = {
   drRecovery: 'resilience',
 };
 
+type CaseDef = { name: string; status: string; tone: string; duration: string; tested: string };
+type SuiteDef = {
+  id: string; name: string; desc: string; target: string; owner: string; env: string;
+  lastRun: string; tone: string; statusLabel: string; cases: CaseDef[];
+};
+type TypeDef = {
+  key: string; label: string; kicker: string; icon: string; subtitle: string; category: string; suites: SuiteDef[];
+};
+
 function slug(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 50);
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);
+}
+
+function loadCatalog(): TypeDef[] {
+  const files = existsSync(dataDir)
+    ? readdirSync(dataDir)
+        .filter((f) => f === 'sandbench-catalog.json' || /^sandbench-catalog-part\d+\.json$/.test(f))
+        .sort()
+    : [];
+  if (!files.length) {
+    console.error('Missing data/sandbench-catalog.json (and optional part files)');
+    process.exit(1);
+  }
+  const types: TypeDef[] = [];
+  const seen = new Set<string>();
+  for (const f of files) {
+    const part = JSON.parse(readFileSync(path.join(dataDir, f), 'utf8')) as { types: TypeDef[] };
+    for (const t of part.types || []) {
+      if (seen.has(t.key)) continue;
+      seen.add(t.key);
+      types.push(t);
+    }
+  }
+  return types;
 }
 
 async function main() {
-  if (!existsSync(catalogPath)) {
-    console.error('Missing', catalogPath);
-    process.exit(1);
-  }
-
   await migrate();
-
-  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8')) as {
-    types: Array<{
-      key: string;
-      label: string;
-      kicker: string;
-      icon: string;
-      subtitle: string;
-      category: string;
-      suites: Array<{
-        id: string;
-        name: string;
-        desc: string;
-        target: string;
-        owner: string;
-        env: string;
-        lastRun: string;
-        tone: string;
-        statusLabel: string;
-        cases: Array<{ name: string; status: string; tone: string; duration: string; tested: string }>;
-      }>;
-    }>;
-  };
+  const types = loadCatalog();
+  const catalog = { types };
 
   const appRes = await query(
     `INSERT INTO applications (key, name, description, status, metadata)
@@ -123,16 +124,9 @@ async function main() {
           suiteKey,
           s.name,
           JSON.stringify({
-            desc: s.desc,
-            target: s.target,
-            owner: s.owner,
-            env: s.env,
-            tone: s.tone,
-            statusLabel: s.statusLabel,
-            typeKey: t.key,
-            category: t.category,
-            icon: t.icon,
-            kicker: t.kicker,
+            desc: s.desc, target: s.target, owner: s.owner, env: s.env,
+            tone: s.tone, statusLabel: s.statusLabel, typeKey: t.key,
+            category: t.category, icon: t.icon, kicker: t.kicker,
           }),
           appId,
           t.key,
@@ -150,25 +144,16 @@ async function main() {
              expected_results
            ) VALUES (
              $1, $2, $3, $4, COALESCE($5::test_type, 'other'), 'http',
-             'automated', 'active', $6, 'medium', 'p2', $7, 'sandbench-seed',
-             $8
+             'automated', 'active', $6, 'medium', 'p2', $7, 'sandbench-seed', $8
            )
            ON CONFLICT (key) DO UPDATE SET
-             name = EXCLUDED.name,
-             description = EXCLUDED.description,
-             tags = EXCLUDED.tags,
-             expected_results = EXCLUDED.expected_results,
-             updated_at = now()
+             name = EXCLUDED.name, description = EXCLUDED.description, tags = EXCLUDED.tags,
+             expected_results = EXCLUDED.expected_results, updated_at = now()
            RETURNING id`,
           [
-            caseKey,
-            c.name,
-            `${s.name}: ${s.desc}`,
-            appId,
-            typeEnum,
+            caseKey, c.name, `${s.name}: ${s.desc}`, appId, typeEnum,
             ['sandbench', 'seeded', t.key, t.category, s.id, `tone:${c.tone}`, `status:${c.status}`],
-            s.owner,
-            `Duration ref: ${c.duration}; last tested: ${c.tested}`,
+            s.owner, `Duration ref: ${c.duration}; last tested: ${c.tested}`,
           ]
         );
         await query(
@@ -189,12 +174,8 @@ async function main() {
     [
       JSON.stringify({
         sandbench_types: catalog.types.map((t) => ({
-          key: t.key,
-          label: t.label,
-          kicker: t.kicker,
-          icon: t.icon,
-          subtitle: t.subtitle,
-          category: t.category,
+          key: t.key, label: t.label, kicker: t.kicker, icon: t.icon,
+          subtitle: t.subtitle, category: t.category,
           suiteCount: t.suites.length,
           caseCount: t.suites.reduce((n, s) => n + s.cases.length, 0),
         })),
