@@ -1,13 +1,14 @@
 # Render Blueprint — GAVRIQ Test Engine (FREE tier)
 #
-# Workspace free-Postgres limit: only ONE free database allowed.
-# This Blueprint does NOT create a database. Wire DATABASE_URL to your
-# existing free Postgres (Dashboard → that DB → Internal Database URL).
+# BEFORE deploy succeeds you MUST set DATABASE_URL in the service Environment:
+#   Dashboard → gavriq-test-engine → Environment → DATABASE_URL
+#   = Internal Database URL from your existing free Postgres
 #
-# Deploy: Blueprint → Manual sync after this commit, or re-sync.
+# Then: Manual Deploy → Deploy latest commit
 # URL: https://gavriq-test-engine.onrender.com
 #
-# Free web limits: sleeps after ~15 min idle; cold start ~30–60s.
+# Free limits: sleeps after ~15 min idle; cold start ~30–60s.
+# First Docker build can take 10–20+ minutes (Playwright base image).
 
 services:
   - type: web
@@ -21,11 +22,10 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Paste Internal Database URL from your existing free Postgres in Render.
+      # Required — set in Dashboard (Internal URL from existing free Postgres).
       - key: DATABASE_URL
         sync: false
-      - key: PORT
-        value: "8787"
+      # Do NOT set PORT — Render injects it; app listens on process.env.PORT.
       - key: HOST
         value: "0.0.0.0"
       - key: NODE_ENV
