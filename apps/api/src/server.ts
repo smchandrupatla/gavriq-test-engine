@@ -45,6 +45,25 @@ function packageVersion(): string {
   return process.env.npm_package_version || '0.3.3';
 }
 
+function mimeFor(file: string): string {
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js') return 'application/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.ico') return 'image/x-icon';
+  return 'application/octet-stream';
+}
+
+/** Safe read under publicDir (no path traversal). */
+function readPublic(rel: string): { body: Buffer; type: string } | null {
+  const file = path.normalize(path.join(publicDir, rel));
+  if (!file.startsWith(publicDir) || !existsSync(file)) return null;
+  return { body: readFileSync(file), type: mimeFor(file) };
+}
+
 async function main() {
   try {
     await migrate();
@@ -82,32 +101,42 @@ async function main() {
   app.get('/ready', async () => ({ status: 'ready' }));
 
   app.get('/', async (_req, reply) => {
-    const index = path.join(publicDir, 'index.html');
-    if (!existsSync(index)) {
+    const file = readPublic('index.html');
+    if (!file) {
       return reply.type('text/plain').send('Dashboard not found. Expected apps/api/public/index.html');
     }
-    return reply.type('text/html').send(readFileSync(index, 'utf8'));
+    return reply.type(file.type).send(file.body);
   });
 
-  // Static catalog UI (and other public assets)
+  // Dashboard scripts (console.js, console-ui.js, …) at public root
+  app.get('/console.js', async (_req, reply) => {
+    const file = readPublic('console.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+  app.get('/console-ui.js', async (_req, reply) => {
+    const file = readPublic('console-ui.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+  app.get('/console-pages.js', async (_req, reply) => {
+    const file = readPublic('console-pages.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+
+  // Sand Bench catalog UI
   app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
   app.get('/catalog/', async (_req, reply) => {
-    const index = path.join(publicDir, 'catalog/index.html');
-    if (!existsSync(index)) {
-      return reply.code(404).type('text/plain').send('Catalog UI not found');
-    }
-    return reply.type('text/html').send(readFileSync(index, 'utf8'));
+    const file = readPublic('catalog/index.html');
+    if (!file) return reply.code(404).type('text/plain').send('Catalog UI not found');
+    return reply.type(file.type).send(file.body);
   });
   app.get('/catalog/*', async (req, reply) => {
     const rel = String((req.params as { '*': string })['*'] || '').replace(/\.\./g, '');
-    const file = path.join(publicDir, 'catalog', rel);
-    if (!existsSync(file) || !file.startsWith(path.join(publicDir, 'catalog'))) {
-      return reply.code(404).send('Not found');
-    }
-    const ext = path.extname(file);
-    const type =
-      ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
-    return reply.type(type).send(readFileSync(file));
+    const file = readPublic(path.join('catalog', rel));
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
   });
 
   if (rbacEnabled) {
@@ -154,6 +183,7 @@ async function main() {
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
+  console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
 }
 
 main().catch((err) => {
