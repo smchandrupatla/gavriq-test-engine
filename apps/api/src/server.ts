@@ -28,8 +28,22 @@ import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const here = path.dirname(fileURLToPath(import.meta.url));
+// apps/api/src → repo root is three levels up in the Docker image (/app)
+const root = path.resolve(here, '../../..');
 const publicDir = path.join(root, 'apps/api/public');
+
+function packageVersion(): string {
+  try {
+    const pkgPath = path.join(root, 'package.json');
+    if (existsSync(pkgPath)) {
+      return String(JSON.parse(readFileSync(pkgPath, 'utf8')).version || '0.0.0');
+    }
+  } catch {
+    /* ignore */
+  }
+  return process.env.npm_package_version || '0.3.3';
+}
 
 async function main() {
   try {
@@ -62,6 +76,7 @@ async function main() {
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
     ui: true,
+    schema: process.env.PG_SCHEMA || 'test_engine',
   }));
 
   app.get('/ready', async () => ({ status: 'ready' }));
@@ -72,6 +87,27 @@ async function main() {
       return reply.type('text/plain').send('Dashboard not found. Expected apps/api/public/index.html');
     }
     return reply.type('text/html').send(readFileSync(index, 'utf8'));
+  });
+
+  // Static catalog UI (and other public assets)
+  app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
+  app.get('/catalog/', async (_req, reply) => {
+    const index = path.join(publicDir, 'catalog/index.html');
+    if (!existsSync(index)) {
+      return reply.code(404).type('text/plain').send('Catalog UI not found');
+    }
+    return reply.type('text/html').send(readFileSync(index, 'utf8'));
+  });
+  app.get('/catalog/*', async (req, reply) => {
+    const rel = String((req.params as { '*': string })['*'] || '').replace(/\.\./g, '');
+    const file = path.join(publicDir, 'catalog', rel);
+    if (!existsSync(file) || !file.startsWith(path.join(publicDir, 'catalog'))) {
+      return reply.code(404).send('Not found');
+    }
+    const ext = path.extname(file);
+    const type =
+      ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
+    return reply.type(type).send(readFileSync(file));
   });
 
   if (rbacEnabled) {
