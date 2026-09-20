@@ -5,12 +5,18 @@ import { newDriver, openConsole, openNav, pageTitle } from "../lib/selenium.ts";
 import { ENV } from "../lib/env.ts";
 
 // 50 Selenium screen tests for the deployed Sand Bench web console (apps/web, published
-// on Render as sandbench-web). This file targets the *current* nav/page inventory read
-// straight from apps/web/public/js/ops-console-preview.js's CONFIG.nav / CONFIG.pages —
-// which has grown since sit/cases/70-ui-pages.sit.ts was written (a "Message Schemes"
-// nav group, an "Application Events" page, and a full Configuration sub-menu now exist
-// that 70-ui-pages.sit.ts never asserts on) — so this is additive screen coverage, not a
-// duplicate of it.
+// on Render as sandbench-web), covering every screen in the *current* nav/page inventory
+// read straight from apps/web/public/js/ops-console-preview.js's CONFIG.nav / CONFIG.pages.
+//
+// That inventory has grown since sit/cases/70-ui-pages.sit.ts was written: a "Message
+// Schemes" nav group, an "Application Events" page, a full Configuration sub-menu, and a
+// "Browse test cases" / "New test case" split under Test Cases all exist now that
+// 70-ui-pages.sit.ts never asserts on — those are new coverage here. Where a page is
+// already asserted in 70-ui-pages.sit.ts (Overview, Rule Bench, Datasets, ...), the
+// assertion below is intentionally re-declared rather than skipped, since this file is
+// meant to stand on its own as the current, complete screen inventory; the one place the
+// two files would otherwise disagree is Message Designer → Import schema, which moved
+// under the new Message Schemes group and is asserted that way here.
 //
 // Two nav items are deliberately left out of the 50: the "Test Cases" and "Configuration"
 // top-level sidebar entries now declare both their own `page` AND `children`, and
