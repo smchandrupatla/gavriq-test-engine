@@ -20,7 +20,7 @@ button,select,input{font:inherit;color:inherit}
 .shell{display:flex;min-height:100vh}
 
 /* Sidebar */
-.sidebar{width:270px;flex:0 0 270px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.sidebar{width:280px;flex:0 0 280px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
 .brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--gold),#a97c1f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#1b1608;flex:0 0 auto}
 .brand-title{font-weight:600;font-size:15px}
@@ -30,6 +30,7 @@ button,select,input{font:inherit;color:inherit}
 .nav-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:6px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px}
 .nav-item:hover{background:var(--panel2)}
 .nav-item.active{background:var(--gold-soft);color:var(--gold-text)}
+.nav-item.indent{padding-left:22px;font-size:12px}
 .nav-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--muted2)}
 .nav-dot.green{background:var(--green)}
 .nav-dot.red{background:var(--red)}
@@ -54,13 +55,26 @@ input[type=search],input[type=text],select{background:var(--panel2);border:1px s
 .content{padding:22px;flex:1}
 
 /* Cards / KPIs */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .kpi-value{font-size:24px;font-weight:600;margin-top:4px}
 .kpi-value.green{color:var(--green)}
 .kpi-value.red{color:var(--red)}
 .kpi-value.amber{color:var(--amber)}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+
+.type-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.type-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;cursor:pointer;transition:border-color .15s}
+.type-card:hover{border-color:var(--gold)}
+.type-card .type-title{font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+.type-card .type-meta{font-size:12px;color:var(--muted);margin-top:6px}
+.type-card .type-bar{height:4px;border-radius:2px;background:var(--panel2);margin-top:10px;overflow:hidden}
+.type-card .type-bar > span{display:block;height:100%;border-radius:2px}
+.type-card .type-bar > span.green{background:var(--green)}
+.type-card .type-bar > span.amber{background:var(--amber)}
+.type-card .type-bar > span.red{background:var(--red)}
+.type-card .type-bar > span.muted{background:var(--muted2)}
 
 .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
 @media(max-width:900px){.grid2{grid-template-columns:1fr}}
@@ -168,12 +182,44 @@ ol.steps{padding-left:18px;font-size:13px}
 <script>
 'use strict';
 
-/* ---------------------------------------------------------------------- */
-/* Friendly labels for suites created by the SIT importer / seed script.  */
-/* Falls back to the suite's own name when a key isn't recognised, so a   */
-/* newly added suite still shows up (just less prettily) instead of      */
-/* silently vanishing from the nav.                                      */
-/* ---------------------------------------------------------------------- */
+const TYPES = [
+  { id: 'health',      title: 'Health',       summary: 'Process & dependency reachability after deploy' },
+  { id: 'integration', title: 'Integration',  summary: 'MQ, Kafka, API, worker, DB round-trips' },
+  { id: 'gui',         title: 'GUI / Screens', summary: 'Console pages, Selenium screens, fields, workflows' },
+  { id: 'e2e',         title: 'E2E / Use-case', summary: 'First-run path & use-case driven coverage' },
+  { id: 'security',    title: 'Security',     summary: 'ASVS, API Top 10, vuln scan, SAST/DAST' },
+  { id: 'agents',      title: 'Agents',       summary: 'Agent Desk / workers portal' },
+  { id: 'performance', title: 'Performance',  summary: 'Bounded soak & burst concurrency checks' },
+  { id: 'other',       title: 'Other',        summary: 'Unmapped or miscellaneous cases' },
+];
+
+const SUITE_TO_TYPE = {
+  'smoke-main-flows': 'health',
+  'sit-health': 'health',
+  'sit-mq': 'integration',
+  'sit-kafka': 'integration',
+  'sit-api': 'integration',
+  'sit-worker': 'integration',
+  'sit-db': 'integration',
+  'sit-use-case-api': 'e2e',
+  'sit-gui-smoke': 'gui',
+  'sit-ui-eventing': 'gui',
+  'sit-selenium-screens': 'gui',
+  'sit-selenium-fields': 'gui',
+  'sit-selenium-workflows': 'gui',
+  'sit-use-case-ui': 'e2e',
+  'sit-official-clicks': 'gui',
+  'sit-feature-access': 'gui',
+  'sit-console-chrome': 'gui',
+  'sit-e2e-ux': 'e2e',
+  'sit-ui-pages': 'gui',
+  'sit-security': 'security',
+  'sit-ui-workflows': 'gui',
+  'sit-agents': 'agents',
+  'sit-performance-soak': 'performance',
+  'sit-performance-burst': 'performance',
+};
+
 const SUITE_LABELS = {
   'smoke-main-flows': 'Smoke / Main Flows',
   'sit-health': 'Deployment Health & Readiness',
@@ -197,6 +243,8 @@ const SUITE_LABELS = {
   'sit-security': 'Security',
   'sit-ui-workflows': 'UI — Workflow & Data Integrity (Selenium)',
   'sit-agents': 'Agent Desk / Workers',
+  'sit-performance-soak': 'Performance Soak',
+  'sit-performance-burst': 'Performance Burst',
 };
 function suiteLabel(suite) {
   return SUITE_LABELS[suite.key] || suite.name || suite.key;
@@ -207,6 +255,7 @@ const TERMINAL_STATUSES = new Set(['passed', 'failed', 'skipped', 'blocked', 'ca
 const state = {
   view: 'overview',
   suiteId: null,
+  typeId: null,
   suites: [],
   membership: [],
   cases: [],
@@ -217,7 +266,7 @@ const state = {
   executions: [],
   dashboard: {},
   readiness: {},
-  specs: null,       // null = not yet fetched, 'unavailable' = SIT unreachable, [] / [...] = data
+  specs: null,
   useCaseNames: new Map(),
   search: '',
   filterStatus: 'all',
@@ -227,7 +276,7 @@ const state = {
 };
 
 const el = (id) => document.getElementById(id);
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -252,9 +301,6 @@ function banner(msg) {
   b.textContent = msg;
 }
 
-/* ---------------------------------------------------------------------- */
-/* Loading                                                                 */
-/* ---------------------------------------------------------------------- */
 async function fetchAllCases() {
   const limit = 200;
   let offset = 0;
@@ -326,9 +372,6 @@ async function loadHealth() {
   }
 }
 
-/* ---------------------------------------------------------------------- */
-/* Derived data                                                           */
-/* ---------------------------------------------------------------------- */
 function casesInSuite(suiteId) {
   if (suiteId === 'uncategorized') return uncategorizedCases();
   const ids = new Set(state.membership.filter((m) => m.test_suite_id === suiteId).map((m) => m.test_case_id));
@@ -350,6 +393,50 @@ function suiteDot(suiteId) {
   return 'amber';
 }
 
+function typeOfCase(c) {
+  const suiteIds = state.membership.filter((m) => m.test_case_id === c.id).map((m) => m.test_suite_id);
+  for (const sid of suiteIds) {
+    const suite = state.suites.find((s) => s.id === sid);
+    if (suite && SUITE_TO_TYPE[suite.key]) return SUITE_TO_TYPE[suite.key];
+  }
+  const tt = String(c.test_type || '').toLowerCase();
+  const tags = (c.tags || []).map((t) => String(t).toLowerCase());
+  const key = String(c.key || '').toLowerCase();
+  if (tt === 'smoke' || tags.includes('health') || key.includes('health') || key.includes('00-health')) return 'health';
+  if (tt === 'security' || tags.includes('security') || key.includes('security')) return 'security';
+  if (tt === 'e2e' || tags.includes('e2e') || key.includes('e2e') || key.includes('use-case')) return 'e2e';
+  if (tt === 'ui' || tags.includes('gui') || key.includes('selenium') || key.includes('gui') || key.includes('ui-')) return 'gui';
+  if (tags.includes('agents') || key.includes('agents') || key.includes('90-agents')) return 'agents';
+  if (tt === 'performance' || tags.includes('performance') || key.includes('soak') || key.includes('burst') || key.includes('91-') || key.includes('92-')) return 'performance';
+  if (tt === 'integration' || tt === 'api' || tt === 'database' || tags.includes('integration') || key.includes('mq') || key.includes('kafka') || key.includes('api')) return 'integration';
+  return 'other';
+}
+
+function casesInType(typeId) {
+  return state.cases.filter((c) => typeOfCase(c) === typeId);
+}
+
+function typeStats(typeId) {
+  const cases = casesInType(typeId);
+  let passed = 0, failed = 0, never = 0, other = 0;
+  for (const c of cases) {
+    const r = statusOf(c.id);
+    if (!r) never++;
+    else if (r.status === 'passed') passed++;
+    else if (['failed', 'error', 'timed_out'].includes(r.status)) failed++;
+    else other++;
+  }
+  let dot = '';
+  if (cases.length && failed) dot = 'red';
+  else if (cases.length && passed === cases.length) dot = 'green';
+  else if (cases.length && (passed || other)) dot = 'amber';
+  return { total: cases.length, passed, failed, never, other, dot };
+}
+
+function typeDot(typeId) {
+  return typeStats(typeId).dot;
+}
+
 function passthroughFilter(list) {
   const q = state.search.trim().toLowerCase();
   return list.filter((c) => {
@@ -367,15 +454,12 @@ function passthroughFilter(list) {
   });
 }
 
-/* ---------------------------------------------------------------------- */
-/* Sidebar                                                                 */
-/* ---------------------------------------------------------------------- */
 function renderSideNav() {
   const suites = [...state.suites].sort((a, b) => suiteLabel(a).localeCompare(suiteLabel(b)));
   const uncategorized = uncategorizedCases();
 
-  const item = (view, id, label, count, dot) => `
-    <button class="nav-item ${state.view === view && state.suiteId === id ? 'active' : ''}" data-view="${view}" data-id="${id ?? ''}">
+  const item = (view, id, label, count, dot, indent) => `
+    <button class="nav-item ${indent ? 'indent' : ''} ${state.view === view && ((view === 'suite' && state.suiteId === id) || (view === 'type' && state.typeId === id) || (view !== 'suite' && view !== 'type' && !id)) ? 'active' : ''}" data-view="${view}" data-id="${id ?? ''}">
       <span class="nav-dot ${dot || ''}"></span>
       <span class="nav-label">${esc(label)}</span>
       ${count != null ? `<span class="nav-count">${count}</span>` : ''}
@@ -390,12 +474,19 @@ function renderSideNav() {
   html += `<div class="nav-section">All cases</div>`;
   html += item('all', null, 'Every test case', state.cases.length || null);
 
-  html += `<div class="nav-section">Categories</div>`;
+  html += `<div class="nav-section">Layers</div>`;
+  for (const t of TYPES) {
+    const st = typeStats(t.id);
+    if (t.id === 'other' && st.total === 0) continue;
+    html += item('type', t.id, t.title, st.total, st.dot);
+  }
+
+  html += `<div class="nav-section">Suites</div>`;
   for (const s of suites) {
-    html += item('suite', s.id, suiteLabel(s), casesInSuite(s.id).length, suiteDot(s.id));
+    html += item('suite', s.id, suiteLabel(s), casesInSuite(s.id).length, suiteDot(s.id), true);
   }
   if (uncategorized.length) {
-    html += item('suite', 'uncategorized', 'Uncategorized', uncategorized.length, suiteDot('uncategorized'));
+    html += item('suite', 'uncategorized', 'Uncategorized', uncategorized.length, suiteDot('uncategorized'), true);
   }
 
   el('sideNav').innerHTML = html;
@@ -403,7 +494,9 @@ function renderSideNav() {
     btn.onclick = () => {
       const view = btn.dataset.view;
       const id = btn.dataset.id || null;
-      location.hash = view === 'suite' ? `#/suite/${encodeURIComponent(id)}` : `#/${view}`;
+      if (view === 'suite') location.hash = `#/suite/${encodeURIComponent(id)}`;
+      else if (view === 'type') location.hash = `#/type/${encodeURIComponent(id)}`;
+      else location.hash = `#/${view}`;
     };
   });
   el('sidebar').classList.remove('open');
@@ -427,9 +520,6 @@ function renderWorkerPill() {
   }
 }
 
-/* ---------------------------------------------------------------------- */
-/* Badges & rows                                                          */
-/* ---------------------------------------------------------------------- */
 function badgeFor(caseId) {
   const r = statusOf(caseId);
   if (!r) return '<span class="badge never">never run</span>';
@@ -500,21 +590,35 @@ function wireToolbar(root, cases, onFilterChange) {
   if (runSel) runSel.onclick = () => runCases([...state.selected], `${state.selected.size} selected case(s)`);
   const runCat = root.querySelector('[data-run-category]');
   if (runCat) runCat.onclick = () => {
-    if (state.suiteId === 'uncategorized') runCases(cases.map((c) => c.id), 'uncategorized cases');
-    else runSuite(state.suiteId, cases.map((c) => c.id));
+    if (state.view === 'type') {
+      runCases(cases.map((c) => c.id), `layer: ${state.typeId}`);
+    } else if (state.suiteId === 'uncategorized') {
+      runCases(cases.map((c) => c.id), 'uncategorized cases');
+    } else {
+      runSuite(state.suiteId, cases.map((c) => c.id));
+    }
   };
   updateSelectionUI(root);
 }
 
-/* ---------------------------------------------------------------------- */
-/* Views                                                                   */
-/* ---------------------------------------------------------------------- */
 function renderOverview() {
   el('viewTitle').textContent = 'Overview';
   const d = state.dashboard;
   const ready = state.readiness.readiness || '—';
-  const readyClass = ready === 'READY' ? 'green' : ready.includes('CONDITIONS') ? 'amber' : 'red';
+  const readyClass = ready === 'READY' ? 'green' : String(ready).includes('CONDITIONS') ? 'amber' : 'red';
   const online = state.workers.filter((w) => w.status === 'online' || w.status === 'busy').length;
+
+  const typeCards = TYPES.filter((t) => t.id !== 'other' || typeStats(t.id).total > 0).map((t) => {
+    const st = typeStats(t.id);
+    const barClass = st.dot || 'muted';
+    const pct = st.total ? Math.round((st.passed / st.total) * 100) : 0;
+    return `
+      <div class="type-card" data-type="${esc(t.id)}">
+        <div class="type-title"><span class="nav-dot ${st.dot}"></span>${esc(t.title)}</div>
+        <div class="type-meta">${st.total} case(s) · ${st.passed} passed · ${st.failed} failed · ${st.never} never</div>
+        <div class="type-bar"><span class="${barClass}" style="width:${st.total ? Math.max(pct, st.failed ? 100 : pct) : 8}%"></span></div>
+      </div>`;
+  }).join('');
 
   const topSuites = [...state.suites]
     .map((s) => ({ s, count: casesInSuite(s.id).length, dot: suiteDot(s.id) }))
@@ -526,21 +630,29 @@ function renderOverview() {
       <div class="kpi"><div class="kpi-label">Total test cases</div><div class="kpi-value">${d.total_tests ?? state.cases.length}</div></div>
       <div class="kpi"><div class="kpi-label">Automated</div><div class="kpi-value">${d.automated ?? '—'}</div></div>
       <div class="kpi"><div class="kpi-label">Failed (7d)</div><div class="kpi-value ${d.failed_last_7d ? 'red' : ''}">${d.failed_last_7d ?? 0}</div></div>
-      <div class="kpi"><div class="kpi-label">Categories</div><div class="kpi-value">${state.suites.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Layers</div><div class="kpi-value">${TYPES.filter((t) => typeStats(t.id).total > 0).length}</div></div>
       <div class="kpi"><div class="kpi-label">Workers online</div><div class="kpi-value ${online ? 'green' : 'amber'}">${online}/${state.workers.length}</div></div>
       <div class="kpi"><div class="kpi-label">Release readiness</div><div class="kpi-value ${readyClass}">${esc(ready)}</div></div>
     </div>
+
+    <section class="card" style="margin-bottom:20px">
+      <div class="card-head"><h2>Layer status</h2><span class="small muted">Health · Integration · GUI · E2E · Security · Agents · Performance</span></div>
+      <div class="card-body">
+        <div class="type-status-grid">${typeCards || '<p class="empty">No cases registered yet — run npm run seed / npm run import:sit</p>'}</div>
+      </div>
+    </section>
+
     <div class="grid2">
       <section class="card">
-        <div class="card-head"><h2>Categories</h2><span class="small muted">click to open</span></div>
+        <div class="card-head"><h2>Suites</h2><span class="small muted">click to open</span></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Category</th><th>Cases</th><th>Status</th></tr></thead>
+          <thead><tr><th>Suite</th><th>Cases</th><th>Status</th></tr></thead>
           <tbody>${topSuites.map(({ s, count, dot }) => `
             <tr class="clickable" data-suite="${esc(s.id)}" style="cursor:pointer">
               <td>${esc(suiteLabel(s))}</td>
               <td>${count}</td>
               <td><span class="nav-dot ${dot}" style="display:inline-block"></span></td>
-            </tr>`).join('') || '<tr><td colspan="3" class="empty">No categories yet — run <code>npm run seed</code> / <code>npm run import:sit</code>.</td></tr>'}
+            </tr>`).join('') || '<tr><td colspan="3" class="empty">No suites yet — run <code>npm run seed</code> / <code>npm run import:sit</code>.</td></tr>'}
           </tbody>
         </table></div>
       </section>
@@ -559,12 +671,39 @@ function renderOverview() {
       </section>
     </div>`;
 
+  el('content').querySelectorAll('[data-type]').forEach((r) => (r.onclick = () => { location.hash = `#/type/${encodeURIComponent(r.dataset.type)}`; }));
   el('content').querySelectorAll('[data-suite]').forEach((r) => (r.onclick = () => { location.hash = `#/suite/${encodeURIComponent(r.dataset.suite)}`; }));
   el('content').querySelectorAll('[data-exec]').forEach((r) => (r.onclick = () => showExecutionDetail(r.dataset.exec)));
 }
 
 function badgeShell(status) {
   return `<span class="badge ${esc(status)}">${esc(status)}</span>`;
+}
+
+function renderTypeView(typeId) {
+  const t = TYPES.find((x) => x.id === typeId) || { id: typeId, title: typeId, summary: '' };
+  el('viewTitle').textContent = t.title;
+  const all = casesInType(typeId);
+  const filtered = passthroughFilter(all);
+  const st = typeStats(typeId);
+
+  el('content').innerHTML = `
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="nav-dot ${st.dot}" style="display:inline-block;margin-right:8px"></span>${esc(t.title)}</h2>
+        <span class="small muted">${filtered.length} of ${all.length} case(s) · ${st.passed} passed · ${st.failed} failed · ${st.never} never</span>
+      </div>
+      <div class="card-body" style="padding-bottom:0"><p class="small muted">${esc(t.summary)}</p></div>
+      ${filterToolbar(true)}
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Test case</th><th>Type / method</th><th>Priority / severity</th><th>Tags</th><th>Last result</th><th></th></tr></thead>
+        <tbody>${caseTableRows(filtered)}</tbody>
+      </table></div>
+    </section>`;
+
+  const root = el('content');
+  wireToolbar(root, filtered, () => renderTypeView(typeId));
+  wireCaseTable(root);
 }
 
 function renderSuiteView(suiteId) {
@@ -633,7 +772,7 @@ function renderSpecsView() {
     el('content').innerHTML = `
       <section class="card"><div class="card-body">
         <p>The SIT console (<code>/sit/</code>) is unreachable, so specification-only acceptance criteria can't be shown here right now.</p>
-        <p class="muted small">This does not affect the executable test cases in the categories on the left — those come from the Test Repository directly.</p>
+        <p class="muted small">This does not affect the executable test cases in the layers on the left — those come from the Test Repository directly.</p>
       </div></section>`;
     return;
   }
@@ -653,22 +792,21 @@ function renderSpecsView() {
     </section>`;
 }
 
-/* ---------------------------------------------------------------------- */
-/* Detail dialogs                                                         */
-/* ---------------------------------------------------------------------- */
 function showCaseDetail(id) {
   const c = state.cases.find((x) => x.id === id);
   if (!c) return;
   const suites = state.membership.filter((m) => m.test_case_id === id).map((m) => state.suites.find((s) => s.id === m.test_suite_id)).filter(Boolean);
   const r = statusOf(id);
+  const layer = TYPES.find((t) => t.id === typeOfCase(c));
   el('detailTitle').textContent = c.name;
   el('detailBody').innerHTML = `
     <dl class="kv">
       <dt>Key</dt><dd class="key">${esc(c.key)}</dd>
+      <dt>Layer</dt><dd>${esc(layer ? layer.title : 'Other')}</dd>
       <dt>Type</dt><dd>${esc(c.test_type || '—')} / ${esc(c.execution_method || '—')}</dd>
       <dt>Priority</dt><dd>${esc(c.priority || '—')} · ${esc(c.severity || '—')}</dd>
       <dt>Lifecycle</dt><dd>${esc(c.lifecycle || '—')} · ${esc(c.automation_status || '—')}</dd>
-      <dt>Categories</dt><dd>${suites.map((s) => esc(suiteLabel(s))).join(', ') || '<span class="muted">Uncategorized</span>'}</dd>
+      <dt>Suites</dt><dd>${suites.map((s) => esc(suiteLabel(s))).join(', ') || '<span class="muted">Uncategorized</span>'}</dd>
       <dt>Tags</dt><dd><div class="tags">${(c.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('') || '<span class="muted">—</span>'}</div></dd>
       <dt>Last result</dt><dd>${r ? `${badgeFor(id)} ${esc(r.message || '')} <span class="muted small">(${r.created_at ? new Date(r.created_at).toLocaleString() : ''})</span>` : '<span class="muted">Never run</span>'}</dd>
     </dl>
@@ -706,9 +844,6 @@ async function showExecutionDetail(id) {
   }
 }
 
-/* ---------------------------------------------------------------------- */
-/* Running                                                                 */
-/* ---------------------------------------------------------------------- */
 async function runCases(ids, label) {
   if (!ids.length) return;
   if (!state.envId) { toast('No environment available to run against.'); return; }
@@ -760,22 +895,21 @@ async function pollTracked() {
   if (state.trackedExecutions.size) setTimeout(pollTracked, 2000);
 }
 
-/* ---------------------------------------------------------------------- */
-/* Router                                                                  */
-/* ---------------------------------------------------------------------- */
 function renderCurrentView() {
   if (state.view === 'overview') renderOverview();
   else if (state.view === 'all') renderAllView();
   else if (state.view === 'history') renderHistoryView();
   else if (state.view === 'specs') renderSpecsView();
+  else if (state.view === 'type') renderTypeView(state.typeId);
   else if (state.view === 'suite') renderSuiteView(state.suiteId);
 }
 
 function parseHash() {
   const parts = (location.hash || '#/overview').replace(/^#\//, '').split('/');
   const view = parts[0] || 'overview';
-  if (view === 'suite') { state.view = 'suite'; state.suiteId = decodeURIComponent(parts[1] || ''); }
-  else { state.view = view; state.suiteId = null; }
+  if (view === 'suite') { state.view = 'suite'; state.suiteId = decodeURIComponent(parts[1] || ''); state.typeId = null; }
+  else if (view === 'type') { state.view = 'type'; state.typeId = decodeURIComponent(parts[1] || ''); state.suiteId = null; }
+  else { state.view = view; state.suiteId = null; state.typeId = null; }
   state.selected = new Set();
   state.search = '';
 }
@@ -787,9 +921,6 @@ function onRoute() {
   renderCurrentView();
 }
 
-/* ---------------------------------------------------------------------- */
-/* Init                                                                    */
-/* ---------------------------------------------------------------------- */
 async function refreshAll(full) {
   try {
     if (full) await loadStatic();
@@ -808,7 +939,7 @@ el('refreshBtn').onclick = () => refreshAll(true);
 el('detailClose').onclick = () => el('detail').close();
 el('globalSearch').oninput = (e) => {
   state.search = e.target.value;
-  if (state.view !== 'all' && state.view !== 'suite') { location.hash = '#/all'; }
+  if (state.view !== 'all' && state.view !== 'suite' && state.view !== 'type') { location.hash = '#/all'; }
   else renderCurrentView();
 };
 
