@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * GAVRIQ Test Engine — Control Plane API + Dashboard UI
+ * GAVRIQ Test Engine — Control Plane API + Unified UI
  */
 import Fastify from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';
@@ -29,7 +29,6 @@ const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
 const here = path.dirname(fileURLToPath(import.meta.url));
-// apps/api/src → repo root is three levels up in the Docker image (/app)
 const root = path.resolve(here, '../../..');
 const publicDir = path.join(root, 'apps/api/public');
 
@@ -57,7 +56,6 @@ function mimeFor(file: string): string {
   return 'application/octet-stream';
 }
 
-/** Safe read under publicDir (no path traversal). */
 function readPublic(rel: string): { body: Buffer; type: string } | null {
   const file = path.normalize(path.join(publicDir, rel));
   if (!file.startsWith(publicDir) || !existsSync(file)) return null;
@@ -100,15 +98,15 @@ async function main() {
 
   app.get('/ready', async () => ({ status: 'ready' }));
 
+  // Unified shell at / (Overview · SIT · Catalog QA/QC)
   app.get('/', async (_req, reply) => {
-    const file = readPublic('index.html');
+    const file = readPublic('catalog/index.html');
     if (!file) {
-      return reply.type('text/plain').send('Dashboard not found. Expected apps/api/public/index.html');
+      return reply.type('text/plain').send('Unified UI not found');
     }
     return reply.type(file.type).send(file.body);
   });
 
-  // Dashboard scripts (console.js, console-ui.js, …) at public root
   app.get('/console.js', async (_req, reply) => {
     const file = readPublic('console.js');
     if (!file) return reply.code(404).send('Not found');
@@ -125,7 +123,7 @@ async function main() {
     return reply.type(file.type).send(file.body);
   });
 
-  // Sand Bench catalog UI
+  // Same shell also at /catalog/
   app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
   app.get('/catalog/', async (_req, reply) => {
     const file = readPublic('catalog/index.html');
