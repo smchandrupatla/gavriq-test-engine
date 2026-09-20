@@ -1,17 +1,13 @@
 # Render Blueprint — GAVRIQ Test Engine (FREE tier)
 #
-# Resources:
-#   - Web: gavriq-test-engine  (plan: free)
-#   - DB:  gavriq-test-engine-db (plan: free)
+# ONE free Postgres instance for the whole workspace:
+#   - Sand Bench web  → schema `app` (or `public`)  [configure on that service]
+#   - Test Engine     → schema `test_engine`         [PG_SCHEMA below]
 #
-# IMPORTANT — Render allows only ONE free Postgres per workspace.
-# If sync fails with "cannot have more than one active free tier database":
-#   1. Dashboard → delete or upgrade your other free Postgres, OR
-#   2. Keep that DB and set DATABASE_URL manually (remove databases: below).
+# Do NOT create a second free database. Set DATABASE_URL to the existing
+# free Postgres Internal Database URL (same URL Sand Bench uses).
 #
-# After successful sync:
-#   https://gavriq-test-engine.onrender.com
-#   /health  /catalog/  /api/v1/ops/catalog-counts
+# After deploy: https://gavriq-test-engine.onrender.com
 #
 # Free limits: web sleeps ~15 min idle; free Postgres expires after 30 days.
 
@@ -27,10 +23,12 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Same free Postgres instance as Sand Bench web (Internal Database URL).
       - key: DATABASE_URL
-        fromDatabase:
-          name: gavriq-test-engine-db
-          property: connectionString
+        sync: false
+      # All Test Engine tables/enums live under this schema (not public/app).
+      - key: PG_SCHEMA
+        value: test_engine
       - key: HOST
         value: "0.0.0.0"
       - key: NODE_ENV
@@ -43,9 +41,3 @@ services:
         value: "false"
       - key: TARGET_BASE_URL
         value: "https://sandbench-web.onrender.com"
-
-databases:
-  - name: gavriq-test-engine-db
-    plan: free
-    databaseName: sitconsole
-    user: sitconsole
