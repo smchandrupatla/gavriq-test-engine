@@ -38,7 +38,8 @@ function runTsx(scriptPath: string): Promise<void> {
 export async function maybeAutoSeed() {
   const auto = process.env.AUTO_SEED === 'true';
   const forceSandbench = process.env.SEED_SANDBENCH === 'true';
-  if (!auto && !forceSandbench) return;
+  const forceSit = process.env.IMPORT_SIT === 'true';
+  if (!auto && !forceSandbench && !forceSit) return;
 
   const dbReady = await waitForDatabase();
   if (!dbReady) {
@@ -57,7 +58,7 @@ export async function maybeAutoSeed() {
       }
     }
 
-    // Sand Bench taxonomy: seed when forced, or when AUTO_SEED and no sandbench-tagged cases yet
+    // Sand Bench taxonomy
     if (forceSandbench || auto) {
       const { rows } = await query(
         `SELECT count(*)::int AS c FROM test_cases WHERE 'sandbench' = ANY(tags)`
@@ -72,6 +73,24 @@ export async function maybeAutoSeed() {
         await runTsx('apps/api/src/seed-sandbench-catalog.ts');
       } else {
         console.log(`[auto-seed] sandbench cases already present (${count}), skipping`);
+      }
+    }
+
+    // SIT file-based cases → test repository (definitions only; run via /sit/ console)
+    if (forceSit || auto) {
+      const { rows } = await query(
+        `SELECT count(*)::int AS c FROM test_cases WHERE 'sit' = ANY(tags) OR key LIKE 'SIT-%'`
+      );
+      const count = rows[0]?.c || 0;
+      if (forceSit || count === 0) {
+        console.log(
+          forceSit
+            ? '[auto-seed] IMPORT_SIT=true — importing sit/cases into repository...'
+            : '[auto-seed] no SIT-tagged cases — importing sit/cases...'
+        );
+        await runTsx('apps/api/src/import-sit-catalog.ts');
+      } else {
+        console.log(`[auto-seed] SIT cases already present (${count}), skipping import`);
       }
     }
   } catch (err) {
