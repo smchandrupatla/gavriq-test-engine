@@ -21,6 +21,8 @@
     "test:e2e": "tsx --test tests/e2e-api-flow.test.ts",
     "test:unit": "tsx --test tests/enterprise-api-smoke.test.ts tests/classify.test.ts",
     "parse:junit": "node scripts/parse-junit.mjs",
+    "report:build": "bash scripts/post-build-results.sh",
+    "report:unit-container": "node scripts/in-container-unit-report.mjs",
     "sit": "node sit/run.mjs",
     "sit:console": "PORT=8098 node sit/console.mjs",
     "typecheck": "tsc --noEmit"
