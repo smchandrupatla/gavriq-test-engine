@@ -14,6 +14,7 @@
     "start:scheduler": "tsx apps/api/src/scheduler.ts",
     "migrate": "tsx apps/api/src/db/migrate.ts",
     "seed": "tsx apps/api/src/seed.ts",
+    "seed:sandbench": "tsx apps/api/src/seed-sandbench-catalog.ts",
     "import:sit": "tsx apps/api/src/import-sit-catalog.ts",
     "mint-token": "tsx apps/api/src/scripts/mint-token.ts",
     "test": "tsx --test tests/*.test.ts",
