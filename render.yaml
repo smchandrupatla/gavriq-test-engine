@@ -1,12 +1,13 @@
 # Render Blueprint — GAVRIQ Test Engine (FREE tier)
-# Deploy: Dashboard → New → Blueprint → connect this repo → Deploy Blueprint
-# Expected URL: https://gavriq-test-engine.onrender.com
 #
-# Free limits (Render):
-#   - Web service spins down after ~15 min idle (cold start ~30–60s)
-#   - Free Postgres expires after 30 days unless upgraded
-#   - One free Postgres per workspace
-# Docs: https://render.com/docs/free
+# Workspace free-Postgres limit: only ONE free database allowed.
+# This Blueprint does NOT create a database. Wire DATABASE_URL to your
+# existing free Postgres (Dashboard → that DB → Internal Database URL).
+#
+# Deploy: Blueprint → Manual sync after this commit, or re-sync.
+# URL: https://gavriq-test-engine.onrender.com
+#
+# Free web limits: sleeps after ~15 min idle; cold start ~30–60s.
 
 services:
   - type: web
@@ -20,10 +21,9 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Paste Internal Database URL from your existing free Postgres in Render.
       - key: DATABASE_URL
-        fromDatabase:
-          name: gavriq-test-engine-db
-          property: connectionString
+        sync: false
       - key: PORT
         value: "8787"
       - key: HOST
@@ -38,9 +38,3 @@ services:
         value: "false"
       - key: TARGET_BASE_URL
         value: "https://sandbench-web.onrender.com"
-
-databases:
-  - name: gavriq-test-engine-db
-    plan: free
-    databaseName: sitconsole
-    user: sitconsole
