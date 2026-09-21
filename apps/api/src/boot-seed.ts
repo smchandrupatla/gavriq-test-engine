@@ -15,37 +15,84 @@ export async function waitForDatabase(maxRetries = 30, baseDelayMs = 2000) {
       }
       const delay = baseDelayMs * Math.pow(1.5, attempt - 1);
       console.log(`[db-retry] Attempt ${attempt}/${maxRetries} failed: ${error.message}. Retrying in ${delay}ms...`);
-      await new Promise(r => setTimeout(r, delay));
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   return false;
 }
 
-/** Optional seed when AUTO_SEED=true (e.g. first Docker boot). */
+function runTsx(scriptPath: string): Promise<void> {
+  return new Promise(async (resolve, reject) => {
+    const { spawn } = await import('node:child_process');
+    const child = spawn('npx', ['tsx', scriptPath], {
+      stdio: 'inherit',
+      env: process.env,
+    });
+    child.on('exit', (code) =>
+      code === 0 ? resolve() : reject(new Error(`${scriptPath} exit ${code}`))
+    );
+  });
+}
+
+/** Optional seed when AUTO_SEED=true (e.g. first Docker / Render boot). */
 export async function maybeAutoSeed() {
-  if (process.env.AUTO_SEED !== 'true') return;
-  // Wait for database to be ready before attempting any operations
+  const auto = process.env.AUTO_SEED === 'true';
+  const forceSandbench = process.env.SEED_SANDBENCH === 'true';
+  const forceSit = process.env.IMPORT_SIT === 'true';
+  if (!auto && !forceSandbench && !forceSit) return;
+
   const dbReady = await waitForDatabase();
   if (!dbReady) {
     console.warn('[auto-seed] Database not available, skipping auto-seed');
     return;
   }
+
   try {
-    const { rows } = await query(`SELECT count(*)::int AS c FROM test_cases`);
-    if ((rows[0]?.c || 0) > 0) {
-      console.log('[auto-seed] test cases already present, skipping');
-      return;
+    if (auto) {
+      const { rows } = await query(`SELECT count(*)::int AS c FROM test_cases`);
+      if ((rows[0]?.c || 0) === 0) {
+        console.log('[auto-seed] empty repository — seeding base smoke pack...');
+        await runTsx('apps/api/src/seed.ts');
+      } else {
+        console.log('[auto-seed] test cases already present, skipping base seed');
+      }
     }
-    console.log('[auto-seed] empty repository — seeding Sand Bench smoke pack...');
-    // Dynamic import so migrate path stays light when AUTO_SEED is off
-    const { spawn } = await import('node:child_process');
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn('npx', ['tsx', 'apps/api/src/seed.ts'], {
-        stdio: 'inherit',
-        env: process.env,
-      });
-      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`seed exit ${code}`))));
-    });
+
+    // Sand Bench taxonomy
+    if (forceSandbench || auto) {
+      const { rows } = await query(
+        `SELECT count(*)::int AS c FROM test_cases WHERE 'sandbench' = ANY(tags)`
+      );
+      const count = rows[0]?.c || 0;
+      if (forceSandbench || count === 0) {
+        console.log(
+          forceSandbench
+            ? '[auto-seed] SEED_SANDBENCH=true — loading Sand Bench catalog...'
+            : '[auto-seed] no sandbench-tagged cases — loading Sand Bench catalog...'
+        );
+        await runTsx('apps/api/src/seed-sandbench-catalog.ts');
+      } else {
+        console.log(`[auto-seed] sandbench cases already present (${count}), skipping`);
+      }
+    }
+
+    // SIT file-based cases → test repository (definitions only; run via /sit/ console)
+    if (forceSit || auto) {
+      const { rows } = await query(
+        `SELECT count(*)::int AS c FROM test_cases WHERE 'sit' = ANY(tags) OR key LIKE 'SIT-%'`
+      );
+      const count = rows[0]?.c || 0;
+      if (forceSit || count === 0) {
+        console.log(
+          forceSit
+            ? '[auto-seed] IMPORT_SIT=true — importing sit/cases into repository...'
+            : '[auto-seed] no SIT-tagged cases — importing sit/cases...'
+        );
+        await runTsx('apps/api/src/import-sit-catalog.ts');
+      } else {
+        console.log(`[auto-seed] SIT cases already present (${count}), skipping import`);
+      }
+    }
   } catch (err) {
     console.warn('[auto-seed] skipped:', (err as Error).message);
   }

@@ -1,0 +1,42 @@
+# Render Blueprint — GAVRIQ Test Engine (FREE tier)
+#
+# ONE free Postgres instance for the whole workspace:
+#   - Sand Bench web  → schema `app` (or `public`)
+#   - Test Engine     → schema `test_engine`
+#
+# Set DATABASE_URL to the existing free Postgres External/Internal URL.
+# After deploy: https://gavriq-test-engine.onrender.com
+#   /          dashboard (+ SIT Console menu → /sit/)
+#   /catalog/  Sand Bench taxonomy UI
+#   /sit/      SIT Console (run file-based sit/cases)
+
+services:
+  - type: web
+    name: gavriq-test-engine
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PG_SCHEMA
+        value: test_engine
+      - key: HOST
+        value: "0.0.0.0"
+      - key: NODE_ENV
+        value: production
+      - key: AUTO_SEED
+        value: "true"
+      - key: SEED_SANDBENCH
+        value: "true"
+      - key: IMPORT_SIT
+        value: "true"
+      - key: RBAC_ENABLED
+        value: "false"
+      - key: TARGET_BASE_URL
+        value: "https://sandbench-web.onrender.com"

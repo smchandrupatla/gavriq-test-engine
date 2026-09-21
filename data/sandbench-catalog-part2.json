@@ -1,0 +1,256 @@
+{
+  "types": [
+    {
+      "key": "rollingUpgrade",
+      "label": "Rolling upgrade tests",
+      "kicker": "ROLLING UPGRADE TESTS",
+      "icon": "RefreshCw",
+      "subtitle": "Compatibility checks across sequential rule and schema versions.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "r1",
+          "name": "Rule version compatibility",
+          "desc": "Sequential rule versions tested against the same fixture set.",
+          "target": "Rule Engine",
+          "owner": "Priya N.",
+          "env": "Staging",
+          "lastRun": "Today",
+          "tone": "red",
+          "statusLabel": "Failing",
+          "cases": [
+            {"name": "v2.3 to v2.4 rule migration", "status": "Failed", "tone": "red", "duration": "1m 40s", "tested": "Today"},
+            {"name": "Deprecated condition kind rejected", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Today"},
+            {"name": "Backward-compatible rule import", "status": "Passed", "tone": "teal", "duration": "0.6s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "r2",
+          "name": "Schema version compatibility",
+          "desc": "XSD version transitions across a scheme upgrade window.",
+          "target": "Schema Validator",
+          "owner": "Priya N.",
+          "env": "Staging",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "pacs.008.001.13 to .14 transition", "status": "Passed", "tone": "teal", "duration": "0.9s", "tested": "Yesterday"},
+            {"name": "Mixed-version traffic during cutover", "status": "Passed", "tone": "teal", "duration": "5m 00s", "tested": "Yesterday"},
+            {"name": "Rollback to prior schema version", "status": "Passed", "tone": "teal", "duration": "0.7s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "nonFunctional",
+      "label": "Non-functional tests",
+      "kicker": "NON-FUNCTIONAL TESTS",
+      "icon": "ShieldAlert",
+      "subtitle": "Security, resilience and compliance checks outside functional scope.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "f1",
+          "name": "Security and resilience",
+          "desc": "Access control, failure handling, data isolation.",
+          "target": "Ops Console",
+          "owner": "Dana K.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "RBAC boundary on evidence export", "status": "Passed", "tone": "teal", "duration": "0.4s", "tested": "Today"},
+            {"name": "Target timeout does not crash run", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Today"},
+            {"name": "Synthetic data never touches production", "status": "Passed", "tone": "teal", "duration": "0.3s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "f2",
+          "name": "Compliance and audit",
+          "desc": "Evidence integrity and audit-trail checks for the control pack.",
+          "target": "Evidence Export Service",
+          "owner": "Dana K.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Evidence pack checksum matches manifest", "status": "Passed", "tone": "teal", "duration": "0.5s", "tested": "Yesterday"},
+            {"name": "Run history immutable after export", "status": "Passed", "tone": "teal", "duration": "0.4s", "tested": "Yesterday"},
+            {"name": "Audit log captures every re-run", "status": "Passed", "tone": "teal", "duration": "0.3s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "vulnerabilityScanning",
+      "label": "Vulnerability scanning",
+      "kicker": "VULNERABILITY SCANNING",
+      "icon": "Search",
+      "subtitle": "Automated scans for known weaknesses across the console, API and Desk portals.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "v1",
+          "name": "Automated scans",
+          "desc": "Scheduled scans against the console, API and Desk portals for known CVEs.",
+          "target": "Ops Console",
+          "owner": "Dana K.",
+          "env": "Staging",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "OWASP dependency check", "status": "Passed", "tone": "teal", "duration": "1m 20s", "tested": "Today"},
+            {"name": "TLS configuration scan", "status": "Passed", "tone": "teal", "duration": "0.8s", "tested": "Today"},
+            {"name": "Open port sweep", "status": "Warning", "tone": "gold", "duration": "2m 00s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "v2",
+          "name": "Manual triage",
+          "desc": "Findings confirmed and scored before entering the control pack.",
+          "target": "Ops Console",
+          "owner": "Dana K.",
+          "env": "Staging",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "False-positive triage on scan output", "status": "Passed", "tone": "teal", "duration": "6m 00s", "tested": "Yesterday"},
+            {"name": "CVSS scoring review", "status": "Passed", "tone": "teal", "duration": "4m 00s", "tested": "Yesterday"},
+            {"name": "Remediation ticket linkage", "status": "Passed", "tone": "teal", "duration": "1m 00s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "penTesting",
+      "label": "Penetration tests",
+      "kicker": "PENETRATION TESTS",
+      "icon": "Wrench",
+      "subtitle": "Simulated attacks against the console and portals to confirm defenses hold.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "pt1",
+          "name": "External surface",
+          "desc": "Simulated attacks against the internet-facing Desk portals and sign-in gate.",
+          "target": "Sign-in Gate",
+          "owner": "Marcus T.",
+          "env": "Staging",
+          "lastRun": "Today",
+          "tone": "gold",
+          "statusLabel": "Attention",
+          "cases": [
+            {"name": "Auth bypass attempt on sign-in gate", "status": "Warning", "tone": "gold", "duration": "4m 00s", "tested": "Today"},
+            {"name": "Rate-limit evasion on API Desk", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Today"},
+            {"name": "Session fixation check", "status": "Passed", "tone": "teal", "duration": "1m 30s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "pt2",
+          "name": "Internal surface",
+          "desc": "Simulated attacks against the Ops Console once authenticated.",
+          "target": "Ops Console",
+          "owner": "Marcus T.",
+          "env": "Staging",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Privilege escalation via RBAC gap", "status": "Passed", "tone": "teal", "duration": "5m 00s", "tested": "Yesterday"},
+            {"name": "Evidence export path traversal", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Yesterday"},
+            {"name": "Admin route exposure check", "status": "Passed", "tone": "teal", "duration": "1m 00s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "regression",
+      "label": "Regression tests",
+      "kicker": "REGRESSION TESTS",
+      "icon": "Copy",
+      "subtitle": "Full suite re-run after any rule or schema change to catch new breaks.",
+      "category": "qa",
+      "suites": [
+        {
+          "id": "rg1",
+          "name": "Rule change regression",
+          "desc": "Every existing rule re-validated after a rule pack update.",
+          "target": "Rule Engine",
+          "owner": "Priya N.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Full rule pack re-run", "status": "Passed", "tone": "teal", "duration": "8m 00s", "tested": "Today"},
+            {"name": "Diff against prior baseline", "status": "Passed", "tone": "teal", "duration": "1m 10s", "tested": "Today"},
+            {"name": "New rule does not break existing coverage", "status": "Passed", "tone": "teal", "duration": "6m 00s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "rg2",
+          "name": "Schema change regression",
+          "desc": "Full suite re-run after a scheme XSD update.",
+          "target": "Schema Validator",
+          "owner": "Priya N.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "pacs.008.001.14 full re-run", "status": "Passed", "tone": "teal", "duration": "5m 00s", "tested": "Yesterday"},
+            {"name": "camt.054 full re-run", "status": "Passed", "tone": "teal", "duration": "4m 00s", "tested": "Yesterday"},
+            {"name": "Cross-message regression sweep", "status": "Passed", "tone": "teal", "duration": "9m 00s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "smoke",
+      "label": "Smoke tests",
+      "kicker": "SMOKE TESTS",
+      "icon": "Check",
+      "subtitle": "A fast pass/fail gate before committing to a full test cycle.",
+      "category": "qa",
+      "suites": [
+        {
+          "id": "sm1",
+          "name": "Pre-cycle gate",
+          "desc": "Minimal checks that must pass before a full cycle is allowed to start.",
+          "target": "Detection Stack Sandbox",
+          "owner": "Dana K.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Target reachable", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Today"},
+            {"name": "Rule engine responds", "status": "Passed", "tone": "teal", "duration": "0.1s", "tested": "Today"},
+            {"name": "Evidence export service up", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "sm2",
+          "name": "Post-deploy gate",
+          "desc": "Sanity checks run immediately after any deploy.",
+          "target": "Ops Console",
+          "owner": "Dana K.",
+          "env": "Staging",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Console loads without error", "status": "Passed", "tone": "teal", "duration": "0.3s", "tested": "Yesterday"},
+            {"name": "Sample message round-trip", "status": "Passed", "tone": "teal", "duration": "0.9s", "tested": "Yesterday"},
+            {"name": "Auth gate responds", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    }
+  ]
+}
