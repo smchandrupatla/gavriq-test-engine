@@ -1,0 +1,214 @@
+{
+  "types": [
+    {
+      "key": "compatibility",
+      "label": "Compatibility tests",
+      "kicker": "COMPATIBILITY TESTS",
+      "icon": "ArrowUpRight",
+      "subtitle": "Cross-version message format checks across supported ISO 20022 releases.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "cp1",
+          "name": "Message family compatibility",
+          "desc": "Same scenario run across supported pacs and camt versions.",
+          "target": "Schema Validator",
+          "owner": "Marcus T.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "pacs.008.001.13 vs .14 parity", "status": "Passed", "tone": "teal", "duration": "1.0s", "tested": "Today"},
+            {"name": "camt.053 vs camt.054 parity", "status": "Passed", "tone": "teal", "duration": "0.9s", "tested": "Today"},
+            {"name": "Mixed-family batch", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "cp2",
+          "name": "Client format compatibility",
+          "desc": "Customer-specific field mappings validated against the base schema.",
+          "target": "Rule Engine",
+          "owner": "Marcus T.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "gold",
+          "statusLabel": "Attention",
+          "cases": [
+            {"name": "Custom field extension parsing", "status": "Warning", "tone": "gold", "duration": "1.4s", "tested": "Yesterday"},
+            {"name": "Legacy field mapping fallback", "status": "Passed", "tone": "teal", "duration": "0.8s", "tested": "Yesterday"},
+            {"name": "Unicode name field handling", "status": "Passed", "tone": "teal", "duration": "0.6s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "dataQuality",
+      "label": "Data quality tests",
+      "kicker": "DATA QUALITY TESTS",
+      "icon": "FileBarChart2",
+      "subtitle": "Synthetic payload integrity checked before it is fired at the target.",
+      "category": "qa",
+      "suites": [
+        {
+          "id": "dq1",
+          "name": "Payload integrity",
+          "desc": "Generated payloads checked for structural and encoding correctness before firing.",
+          "target": "Message Generator",
+          "owner": "Priya N.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "No null required fields", "status": "Passed", "tone": "teal", "duration": "0.3s", "tested": "Today"},
+            {"name": "UTF-8 encoding valid", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Today"},
+            {"name": "Well-formed XML before dispatch", "status": "Passed", "tone": "teal", "duration": "0.2s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "dq2",
+          "name": "Fixture data hygiene",
+          "desc": "Underlying fixture and reference data kept in sync with scheme updates.",
+          "target": "Reference Data Store",
+          "owner": "Priya N.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Country code list current", "status": "Passed", "tone": "teal", "duration": "0.4s", "tested": "Yesterday"},
+            {"name": "PEP list fixture current", "status": "Passed", "tone": "teal", "duration": "0.5s", "tested": "Yesterday"},
+            {"name": "Currency code table current", "status": "Passed", "tone": "teal", "duration": "0.3s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "chaos",
+      "label": "Chaos and failover tests",
+      "kicker": "CHAOS AND FAILOVER TESTS",
+      "icon": "Download",
+      "subtitle": "Target outage and network-fault injection to confirm graceful degradation.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "ch1",
+          "name": "Target outage injection",
+          "desc": "Detection stack taken offline mid-run to observe response.",
+          "target": "Detection Stack Sandbox",
+          "owner": "Dana K.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "gold",
+          "statusLabel": "Attention",
+          "cases": [
+            {"name": "Target drops mid-run, no crash", "status": "Passed", "tone": "teal", "duration": "3m 00s", "tested": "Today"},
+            {"name": "Queued messages replay on recovery", "status": "Warning", "tone": "gold", "duration": "2m 30s", "tested": "Today"},
+            {"name": "Partial outage on one endpoint", "status": "Passed", "tone": "teal", "duration": "4m 00s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "ch2",
+          "name": "Network fault injection",
+          "desc": "Latency and packet loss injected between Sand Bench and the target.",
+          "target": "Detection Stack Sandbox",
+          "owner": "Dana K.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "High-latency network simulation", "status": "Passed", "tone": "teal", "duration": "5m 00s", "tested": "Yesterday"},
+            {"name": "Packet loss tolerance", "status": "Passed", "tone": "teal", "duration": "5m 00s", "tested": "Yesterday"},
+            {"name": "Connection reset mid-message", "status": "Passed", "tone": "teal", "duration": "1m 30s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "compliance",
+      "label": "Compliance tests",
+      "kicker": "COMPLIANCE TESTS",
+      "icon": "ExternalLink",
+      "subtitle": "Checks against specific regulatory rule packs and screening lists.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "co1",
+          "name": "Sanctions list compliance",
+          "desc": "Screening rules checked against current OFAC and EU sanctions lists.",
+          "target": "Sanctions Screening API",
+          "owner": "Marcus T.",
+          "env": "Sandbox",
+          "lastRun": "Today",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "OFAC SDN list coverage", "status": "Passed", "tone": "teal", "duration": "1.2s", "tested": "Today"},
+            {"name": "EU consolidated list coverage", "status": "Passed", "tone": "teal", "duration": "1.1s", "tested": "Today"},
+            {"name": "UN sanctions list coverage", "status": "Passed", "tone": "teal", "duration": "1.0s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "co2",
+          "name": "Regulatory rule pack compliance",
+          "desc": "Jurisdiction-specific rule packs validated against their published spec.",
+          "target": "Rule Engine",
+          "owner": "Marcus T.",
+          "env": "Sandbox",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "FATF recommendation mapping", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Yesterday"},
+            {"name": "Local AML rule pack validation", "status": "Passed", "tone": "teal", "duration": "3m 00s", "tested": "Yesterday"},
+            {"name": "Audit evidence completeness", "status": "Passed", "tone": "teal", "duration": "0.6s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "drRecovery",
+      "label": "DR recovery and self-healing tests",
+      "kicker": "DR RECOVERY AND SELF-HEALING TESTS",
+      "icon": "RefreshCw",
+      "subtitle": "Disaster-recovery failover and automatic recovery behavior under fault conditions.",
+      "category": "qc",
+      "suites": [
+        {
+          "id": "dr1",
+          "name": "Disaster recovery failover",
+          "desc": "Primary-to-secondary failover drills for the detection stack.",
+          "target": "Detection Stack Sandbox",
+          "owner": "Dana K.",
+          "env": "Staging",
+          "lastRun": "Today",
+          "tone": "red",
+          "statusLabel": "Failing",
+          "cases": [
+            {"name": "Primary region failover", "status": "Failed", "tone": "red", "duration": "6m 00s", "tested": "Today"},
+            {"name": "Failback to primary after recovery", "status": "Passed", "tone": "teal", "duration": "4m 00s", "tested": "Today"},
+            {"name": "Data consistency post-failover", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Today"}
+          ]
+        },
+        {
+          "id": "dr2",
+          "name": "Self-healing behavior",
+          "desc": "Automatic recovery from transient faults without manual intervention.",
+          "target": "Ops Console",
+          "owner": "Dana K.",
+          "env": "Staging",
+          "lastRun": "Yesterday",
+          "tone": "teal",
+          "statusLabel": "Passing",
+          "cases": [
+            {"name": "Auto-restart on process crash", "status": "Passed", "tone": "teal", "duration": "1m 00s", "tested": "Yesterday"},
+            {"name": "Connection pool self-recovery", "status": "Passed", "tone": "teal", "duration": "0.8s", "tested": "Yesterday"},
+            {"name": "Stuck run auto-terminates and retries", "status": "Passed", "tone": "teal", "duration": "2m 00s", "tested": "Yesterday"}
+          ]
+        }
+      ]
+    }
+  ]
+}

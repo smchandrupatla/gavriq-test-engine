@@ -39,24 +39,27 @@
   </style>
 </head>
 <body class="bg-surface text-slate-200 min-h-screen">
-  <div class="min-h-screen flex">
-    <aside class="w-60 shrink-0 bg-surface-card border-r border-surface-border flex flex-col sticky top-0 h-screen">
-      <div class="px-4 py-4 border-b border-surface-border flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-semibold text-white text-sm" aria-hidden="true">TE</div>
-        <div>
-          <p class="text-sm font-semibold leading-tight">GAVRIQ</p>
-          <p class="text-[11px] text-slate-400 leading-tight">Test Engine</p>
+  <div class="min-h-screen flex flex-col">
+    <header class="border-b border-surface-border bg-surface-card sticky top-0 z-10">
+      <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-3 mr-2">
+          <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center font-semibold text-white text-sm" aria-hidden="true">TE</div>
+          <div>
+            <p class="text-sm font-semibold leading-tight">GAVRIQ</p>
+            <p class="text-[11px] text-slate-400 leading-tight">Test Engine</p>
+          </div>
         </div>
+        <nav class="flex items-center gap-2 text-xs flex-wrap">
+          <a href="/sit/" class="px-3 py-1.5 rounded border border-accent/40 bg-accent/10 hover:bg-accent/20 transition text-blue-200 font-medium">SIT Console</a>
+          <a href="/catalog/" class="px-3 py-1.5 rounded border border-surface-border hover:bg-surface-border transition text-slate-300">Catalog</a>
+          <a href="/" class="px-3 py-1.5 rounded border border-surface-border hover:bg-surface-border transition text-slate-300">Dashboard</a>
+          <span id="healthBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">checking…</span>
+          <button type="button" onclick="refreshAll()" class="px-3 py-1.5 rounded bg-surface border border-surface-border hover:bg-surface-border transition">Refresh</button>
+        </nav>
       </div>
-      <div class="flex items-center gap-2 text-xs">
-        <a href="http://localhost:8098" target="_blank" class="px-3 py-1.5 rounded border border-surface-border hover:bg-surface-border transition text-slate-300">SIT Console</a>
-        <span id="healthBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300">checking…</span>
-        <button onclick="refreshAll()" class="px-3 py-1.5 rounded bg-surface border border-surface-border hover:bg-surface-border transition">Refresh</button>
-      </div>
-    </div>
-  </header>
+    </header>
 
-  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6 w-full">
     <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="bg-surface-card border border-surface-border rounded-xl p-4">
         <p class="text-xs text-slate-400 uppercase tracking-wide">Total tests</p>
@@ -80,44 +83,40 @@
       <section class="lg:col-span-2 bg-surface-card border border-surface-border rounded-xl overflow-hidden">
         <div class="px-4 py-3 border-b border-surface-border flex items-center justify-between">
           <h2 class="font-medium">Test repository</h2>
-          <span class="text-xs text-slate-400" id="caseCount"></span>
         </div>
-        <div class="overflow-x-auto max-h-[440px] overflow-y-auto">
+        <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead class="text-left text-xs text-slate-400 sticky top-0 bg-surface-card">
+            <thead class="text-xs text-slate-400 uppercase tracking-wide bg-surface-inset">
               <tr>
-                <th class="px-4 py-2 font-medium">Key</th>
-                <th class="px-4 py-2 font-medium">Name</th>
-                <th class="px-4 py-2 font-medium">Method</th>
-                <th class="px-4 py-2 font-medium">Last result</th>
-                <th class="px-4 py-2 font-medium"></th>
+                <th class="text-left px-4 py-2 font-medium">Key</th>
+                <th class="text-left px-4 py-2 font-medium">Name</th>
+                <th class="text-left px-4 py-2 font-medium">Method</th>
+                <th class="text-left px-4 py-2 font-medium">Last result</th>
               </tr>
             </thead>
-            <tbody id="caseRows" class="divide-y divide-surface-border"></tbody>
+            <tbody id="caseTableBody" class="divide-y divide-surface-border"></tbody>
           </table>
         </div>
       </section>
 
-      <section class="space-y-4">
+      <aside class="space-y-4">
         <div class="bg-surface-card border border-surface-border rounded-xl p-4 space-y-3">
-          <h2 class="font-medium">On-demand run</h2>
+          <h2 class="font-medium text-sm">On-demand run</h2>
           <p class="text-xs text-slate-400">Queue selected cases against local-dev. Requires a worker for browser/HTTP execution.</p>
-          <button onclick="runSelected()" class="w-full py-2 rounded-lg bg-accent hover:bg-blue-600 text-white text-sm font-medium transition">Run selected</button>
-          <button onclick="runSmokeSuite()" class="w-full py-2 rounded-lg border border-surface-border hover:bg-surface-border text-sm transition">Run full smoke suite</button>
-          <pre id="runLog" class="text-xs text-slate-400 bg-surface rounded p-2 max-h-28 overflow-y-auto hidden"></pre>
+          <button type="button" onclick="runSelected()" class="w-full py-2 rounded-lg bg-accent hover:bg-blue-600 text-white text-sm font-medium transition">Run selected</button>
+          <button type="button" onclick="runSmokeSuite()" class="w-full py-2 rounded-lg border border-surface-border hover:bg-surface-border text-sm transition">Run full smoke suite</button>
         </div>
-
         <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-          <h2 class="font-medium mb-2">Workers</h2>
-          <ul id="workerList" class="text-sm space-y-1 text-slate-300"></ul>
+          <h2 class="font-medium text-sm mb-2">Workers</h2>
+          <div id="workerList" class="text-xs text-slate-400">—</div>
         </div>
-
         <div class="bg-surface-card border border-surface-border rounded-xl p-4">
-          <h2 class="font-medium mb-2">In-container / build status</h2>
-          <div id="buildStatus" class="text-sm text-slate-400">No build results yet.</div>
+          <h2 class="font-medium text-sm mb-2">In-container / build status</h2>
+          <div id="buildStatus" class="text-xs text-slate-400">No build results yet.</div>
         </div>
-      </section>
+      </aside>
     </div>
+  </main>
   </div>
   <script src="/console-ui.js"></script>
   <script src="/console-pages.js"></script>

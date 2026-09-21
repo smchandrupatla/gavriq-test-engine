@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * GAVRIQ Test Engine — Control Plane API + Dashboard UI
+ * GAVRIQ Test Engine — Control Plane API + Unified UI
  */
 import Fastify from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';
@@ -28,8 +28,39 @@ import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const rbacEnabled = process.env.RBAC_ENABLED === 'true';
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '../../..');
 const publicDir = path.join(root, 'apps/api/public');
+
+function packageVersion(): string {
+  try {
+    const pkgPath = path.join(root, 'package.json');
+    if (existsSync(pkgPath)) {
+      return String(JSON.parse(readFileSync(pkgPath, 'utf8')).version || '0.0.0');
+    }
+  } catch {
+    /* ignore */
+  }
+  return process.env.npm_package_version || '0.3.3';
+}
+
+function mimeFor(file: string): string {
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js') return 'application/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.ico') return 'image/x-icon';
+  return 'application/octet-stream';
+}
+
+function readPublic(rel: string): { body: Buffer; type: string } | null {
+  const file = path.normalize(path.join(publicDir, rel));
+  if (!file.startsWith(publicDir) || !existsSync(file)) return null;
+  return { body: readFileSync(file), type: mimeFor(file) };
+}
 
 async function main() {
   try {
@@ -62,16 +93,48 @@ async function main() {
     rbac: rbacEnabled,
     jwt: Boolean(process.env.JWT_SECRET),
     ui: true,
+    schema: process.env.PG_SCHEMA || 'test_engine',
   }));
 
   app.get('/ready', async () => ({ status: 'ready' }));
 
+  // Unified shell at / (Overview · SIT · Catalog QA/QC)
   app.get('/', async (_req, reply) => {
-    const index = path.join(publicDir, 'index.html');
-    if (!existsSync(index)) {
-      return reply.type('text/plain').send('Dashboard not found. Expected apps/api/public/index.html');
+    const file = readPublic('catalog/index.html');
+    if (!file) {
+      return reply.type('text/plain').send('Unified UI not found');
     }
-    return reply.type('text/html').send(readFileSync(index, 'utf8'));
+    return reply.type(file.type).send(file.body);
+  });
+
+  app.get('/console.js', async (_req, reply) => {
+    const file = readPublic('console.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+  app.get('/console-ui.js', async (_req, reply) => {
+    const file = readPublic('console-ui.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+  app.get('/console-pages.js', async (_req, reply) => {
+    const file = readPublic('console-pages.js');
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
+  });
+
+  // Same shell also at /catalog/
+  app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
+  app.get('/catalog/', async (_req, reply) => {
+    const file = readPublic('catalog/index.html');
+    if (!file) return reply.code(404).type('text/plain').send('Catalog UI not found');
+    return reply.type(file.type).send(file.body);
+  });
+  app.get('/catalog/*', async (req, reply) => {
+    const rel = String((req.params as { '*': string })['*'] || '').replace(/\.\./g, '');
+    const file = readPublic(path.join('catalog', rel));
+    if (!file) return reply.code(404).send('Not found');
+    return reply.type(file.type).send(file.body);
   });
 
   if (rbacEnabled) {
@@ -118,6 +181,7 @@ async function main() {
 
   await app.listen({ port, host });
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
+  console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
 }
 
 main().catch((err) => {

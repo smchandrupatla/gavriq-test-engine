@@ -48,4 +48,83 @@ export async function opsRoutes(app: FastifyInstance) {
     );
     return reply.send({ data: rows, window_days: 14 });
   });
+
+  /** Catalog counts for post-seed verification (Render / ops). */
+  app.get('/api/v1/ops/catalog-counts', async (_req, reply) => {
+    const cases = await query(`SELECT count(*)::int AS c FROM test_cases`);
+    const sandbench = await query(
+      `SELECT count(*)::int AS c FROM test_cases WHERE 'sandbench' = ANY(tags)`
+    );
+    const suites = await query(`SELECT count(*)::int AS c FROM test_suites`);
+    const sbSuites = await query(
+      `SELECT count(*)::int AS c FROM test_suites WHERE key LIKE 'sb-%'`
+    );
+    const apps = await query(
+      `SELECT key, name, metadata FROM applications WHERE key = 'sand-bench'`
+    );
+    const byTag = await query(
+      `SELECT t.tag, count(*)::int AS c
+       FROM test_cases tc, LATERAL unnest(tc.tags) AS t(tag)
+       WHERE t.tag IN (
+         'unit','integration','screen','usecase','regression','smoke','dataQuality',
+         'endurance','performance','rollingUpgrade','nonFunctional','vulnerabilityScanning',
+         'penTesting','compatibility','chaos','compliance','drRecovery'
+       )
+       GROUP BY t.tag
+       ORDER BY t.tag`
+    );
+    const meta = apps.rows[0]?.metadata as { sandbench_types?: unknown[] } | undefined;
+    return reply.send({
+      data: {
+        test_cases_total: cases.rows[0]?.c ?? 0,
+        test_cases_sandbench: sandbench.rows[0]?.c ?? 0,
+        test_suites_total: suites.rows[0]?.c ?? 0,
+        test_suites_sandbench: sbSuites.rows[0]?.c ?? 0,
+        sand_bench_app: apps.rows[0]
+          ? { key: apps.rows[0].key, name: apps.rows[0].name, type_count: meta?.sandbench_types?.length ?? 0 }
+          : null,
+        cases_by_type_tag: Object.fromEntries(byTag.rows.map((r) => [r.tag, r.c])),
+      },
+    });
+  });
+
+  /**
+   * Trigger Sand Bench taxonomy seed (idempotent upsert).
+   * Protect with SEED_TOKEN if set: header x-seed-token must match.
+   */
+  app.post('/api/v1/ops/seed-sandbench', async (req, reply) => {
+    const expected = process.env.SEED_TOKEN;
+    if (expected) {
+      const got = String(req.headers['x-seed-token'] || '');
+      if (got !== expected) {
+        return reply.status(401).send({ error: 'invalid or missing x-seed-token' });
+      }
+    }
+    try {
+      const { spawn } = await import('node:child_process');
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('npx', ['tsx', 'apps/api/src/seed-sandbench-catalog.ts'], {
+          stdio: 'inherit',
+          env: process.env,
+        });
+        child.on('exit', (code) =>
+          code === 0 ? resolve() : reject(new Error(`seed exit ${code}`))
+        );
+      });
+      const counts = await query(
+        `SELECT
+           (SELECT count(*)::int FROM test_cases WHERE 'sandbench' = ANY(tags)) AS cases,
+           (SELECT count(*)::int FROM test_suites WHERE key LIKE 'sb-%') AS suites`
+      );
+      return reply.send({
+        data: {
+          ok: true,
+          sandbench_cases: counts.rows[0]?.cases ?? 0,
+          sandbench_suites: counts.rows[0]?.suites ?? 0,
+        },
+      });
+    } catch (err) {
+      return reply.status(500).send({ error: (err as Error).message });
+    }
+  });
 }

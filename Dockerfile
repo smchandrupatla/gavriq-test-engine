@@ -31,6 +31,7 @@ COPY apps ./apps
 COPY sit ./sit
 COPY dev ./dev
 COPY docs ./docs
+COPY data ./data
 COPY tsconfig.json* ./
 COPY scripts/consolidated-entrypoint.mjs ./scripts/consolidated-entrypoint.mjs
 
