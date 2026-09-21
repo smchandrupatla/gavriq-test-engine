@@ -30,6 +30,7 @@ const TYPE_TO_ENUM: Record<string, string> = {
   chaos: 'resilience',
   compliance: 'other',
   drRecovery: 'resilience',
+  'selenium-baseline': 'selenium-baseline',
 };
 
 type CaseDef = { name: string; status: string; tone: string; duration: string; tested: string };

@@ -136,7 +136,7 @@ async function main() {
         tc.name,
         tc.description,
         appId,
-        tc.method === 'http' ? 'api' : 'ui',
+        'selenium-baseline',
         tc.method,
         tc.script,
         tc.priority,

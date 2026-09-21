@@ -15,7 +15,7 @@ DO $$ BEGIN
     'unit','component','service','api','ui','integration','system','e2e',
     'regression','smoke','sanity','acceptance','contract','database',
     'workflow','event','batch','scheduler','file','performance',
-    'security','resilience','deployment','other'
+    'security','resilience','deployment','selenium-baseline','other'
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
