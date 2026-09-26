@@ -81,7 +81,7 @@ async function main() {
      RETURNING id`,
     [JSON.stringify({ brand: 'Sand Bench', tagline: 'TEST INTELLIGENCE' })]
   );
-  const appId = appRes.rows[0].id;
+  const appId = appRes.rows[0]!.id;
 
   for (const [key, name, envType] of [
     ['sandbox', 'Sandbox', 'sit'],
@@ -110,7 +110,7 @@ async function main() {
        RETURNING id`,
       [typeSuiteKey, t.label, t.subtitle, appId, t.key]
     );
-    const typeSuiteId = typeSuiteRes.rows[0].id;
+    const typeSuiteId = typeSuiteRes.rows[0]!.id;
     suiteCount++;
 
     for (const s of t.suites) {
@@ -133,7 +133,7 @@ async function main() {
           t.key,
         ]
       );
-      const suiteId = suiteRes.rows[0].id;
+      const suiteId = suiteRes.rows[0]!.id;
       suiteCount++;
 
       for (const c of s.cases) {
@@ -159,11 +159,11 @@ async function main() {
         );
         await query(
           `INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [rows[0].id, suiteId]
+          [rows[0]!.id, suiteId]
         );
         await query(
           `INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [rows[0].id, typeSuiteId]
+          [rows[0]!.id, typeSuiteId]
         );
         caseCount++;
       }

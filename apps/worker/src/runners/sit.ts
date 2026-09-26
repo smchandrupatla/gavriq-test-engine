@@ -28,7 +28,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 function parseScript(script: string): { fileRel: string; testName?: string } | null {
   const s = script.trim();
   if (!s.startsWith('sit/cases/') && !s.includes('.sit.ts')) return null;
-  const [filePart, ...rest] = s.split('::');
+  const [filePart = '', ...rest] = s.split('::');
   const fileRel = filePart.trim();
   const testName = rest.length ? rest.join('::').trim() : undefined;
   return { fileRel, testName };

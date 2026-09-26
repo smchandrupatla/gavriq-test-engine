@@ -119,7 +119,7 @@ export async function sitRunRoutes(app: FastifyInstance) {
     let rows: { id: string; key: string; name: string }[] = [];
     try {
       if (names.length) {
-        const { rows: found } = await query(
+        const { rows: found } = await query<{ id: string; key: string; name: string }>(
           `SELECT id, key, name FROM test_cases
            WHERE (key LIKE 'SIT-%' OR 'sit' = ANY(tags))
              AND name = ANY($1::text[])`,
@@ -128,7 +128,7 @@ export async function sitRunRoutes(app: FastifyInstance) {
         rows = found;
       } else if (files.length) {
         const like = files.map((f) => `%${f.replace(/^sit\/cases\//, '')}%`);
-        const { rows: found } = await query(
+        const { rows: found } = await query<{ id: string; key: string; name: string }>(
           `SELECT id, key, name FROM test_cases
            WHERE (key LIKE 'SIT-%' OR 'sit' = ANY(tags))
              AND script LIKE ANY($1::text[])`,

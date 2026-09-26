@@ -16,7 +16,7 @@ export interface DriverFactoryOptions {
   config?: Partial<SeleniumBaselineConfig>;
 }
 
-function buildChromeOptions(config: SeleniumBaselineConfig): chrome.Options {
+function buildChromeOptions(config: SeleniumBaselineConfig): InstanceType<typeof chrome.Options> {
   const options = new chrome.Options();
   if (config.headless) {
     options.addArguments('--headless=new');
@@ -31,7 +31,7 @@ function buildChromeOptions(config: SeleniumBaselineConfig): chrome.Options {
   return options;
 }
 
-function buildFirefoxOptions(config: SeleniumBaselineConfig): firefox.Options {
+function buildFirefoxOptions(config: SeleniumBaselineConfig): InstanceType<typeof firefox.Options> {
   const options = new firefox.Options();
   if (config.headless) {
     options.addArguments('-headless');
@@ -40,7 +40,7 @@ function buildFirefoxOptions(config: SeleniumBaselineConfig): firefox.Options {
   return options;
 }
 
-function buildEdgeOptions(config: SeleniumBaselineConfig): edge.Options {
+function buildEdgeOptions(config: SeleniumBaselineConfig): InstanceType<typeof edge.Options> {
   const options = new edge.Options();
   if (config.headless) {
     options.addArguments('--headless=new');

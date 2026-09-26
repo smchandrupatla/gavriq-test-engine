@@ -104,7 +104,7 @@ function extractTestNames(source: string): string[] {
   const names: string[] = [];
   const re = /\b(?:test|it)\s*\(\s*[`'"]([^`'"\n]+)[`'"]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) names.push(m[1]);
+  while ((m = re.exec(source))) names.push(m[1]!);
   return [...new Set(names)];
 }
 
