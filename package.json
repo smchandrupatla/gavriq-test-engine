@@ -16,6 +16,8 @@
     "seed": "tsx apps/api/src/seed.ts",
     "seed:sandbench": "tsx apps/api/src/seed-sandbench-catalog.ts",
     "import:sit": "tsx apps/api/src/import-sit-catalog.ts",
+    "sync:sit": "node scripts/sync-sandbench-sit.mjs",
+    "check:sit-sync": "node scripts/sync-sandbench-sit.mjs --check",
     "mint-token": "tsx apps/api/src/scripts/mint-token.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "tsx --test tests/e2e-api-flow.test.ts",

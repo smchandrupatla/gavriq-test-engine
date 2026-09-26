@@ -36,9 +36,10 @@ export async function openConsole(page: Page): Promise<void> {
 
 // Navigates the mounted console to the Configuration page by clicking the real sidebar
 // nav item (not a direct URL — this is a client-rendered SPA), then waits for the
-// Eventing panel the page injects once its title reads "Configuration".
+// Eventing submenu, which owns the delivery controls in the current navigation.
 export async function openConfigurationPage(page: Page): Promise<void> {
   await page.locator(".opsc-navitem", { hasText: "Configuration" }).first().click();
+  await page.locator('.opsc-subitem', { hasText: /^Eventing$/ }).click();
   await page.waitForSelector("#sbe-eventing-dummy", { timeout: 10000 });
 }
 
