@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
+import { ingestExecution } from '../defects/service.js';
 
 export async function executionRoutes(app: FastifyInstance) {
   app.get('/api/v1/executions', async (req, reply) => {
@@ -216,7 +217,15 @@ export async function executionRoutes(app: FastifyInstance) {
           [rows[0].worker_id]
         );
       }
-      return reply.send({ data: rows[0] });
+      // Defect Manager: file failures as a defect report, or settle a PM rerun.
+      // Never let the register fail a completion the worker already reported.
+      let defects: unknown = null;
+      try {
+        defects = await ingestExecution(rows[0].id);
+      } catch (err) {
+        req.log.warn({ err }, 'defect ingest failed');
+      }
+      return reply.send({ data: rows[0], defects });
     }
   );
 }

@@ -446,6 +446,69 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at D
 CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id);
 
 -- ---------------------------------------------------------------------------
+-- Defect Manager: failures → defect reports → Sand Bench PM → rerun → verified
+-- ---------------------------------------------------------------------------
+CREATE SEQUENCE IF NOT EXISTS defect_key_seq;
+
+CREATE TABLE IF NOT EXISTS defect_reports (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                 TEXT NOT NULL UNIQUE,            -- DR-20260926-4f1a2b
+  execution_id        UUID UNIQUE REFERENCES executions(id) ON DELETE SET NULL,
+  source              TEXT NOT NULL DEFAULT 'execution', -- execution|ingest
+  status              TEXT NOT NULL DEFAULT 'open',      -- open|with_pm|fixing|rerunning|verified|reopened
+  claimed_by          TEXT,
+  claimed_at          TIMESTAMPTZ,
+  rerun_execution_id  UUID REFERENCES executions(id) ON DELETE SET NULL,
+  rerun_count         INT NOT NULL DEFAULT 0,
+  history             JSONB NOT NULL DEFAULT '[]',
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_defect_reports_status ON defect_reports(status);
+
+CREATE TABLE IF NOT EXISTS defects (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                 TEXT NOT NULL UNIQUE,            -- DEF-00042
+  report_id           UUID NOT NULL REFERENCES defect_reports(id) ON DELETE CASCADE,
+  fingerprint         TEXT NOT NULL,
+  test_case_id        UUID REFERENCES test_cases(id) ON DELETE SET NULL,
+  case_key            TEXT NOT NULL,
+  case_name           TEXT NOT NULL,
+  test_type           TEXT,
+  category            TEXT NOT NULL DEFAULT 'unknown',
+  severity            TEXT NOT NULL DEFAULT 'medium',
+  status              TEXT NOT NULL DEFAULT 'open',
+  message             TEXT NOT NULL,
+  execution_id        UUID REFERENCES executions(id) ON DELETE SET NULL,
+  execution_result_id UUID REFERENCES execution_results(id) ON DELETE SET NULL,
+  occurrences         INT NOT NULL DEFAULT 1,
+  rerun_attempts      INT NOT NULL DEFAULT 0,
+  assignee            TEXT,
+  fix_ref             TEXT,                            -- PR / commit URL from the fixer
+  history             JSONB NOT NULL DEFAULT '[]',
+  first_seen          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- A verified defect that fails again files a new defect pointing at the old one.
+ALTER TABLE defects ADD COLUMN IF NOT EXISTS regression_of UUID REFERENCES defects(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_defects_report ON defects(report_id);
+CREATE INDEX IF NOT EXISTS idx_defects_fingerprint ON defects(fingerprint, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_defects_status ON defects(status);
+
+-- One row per execution the Defect Manager has read, so replays are no-ops.
+CREATE TABLE IF NOT EXISTS defect_ingests (
+  execution_id  UUID PRIMARY KEY REFERENCES executions(id) ON DELETE CASCADE,
+  report_id     UUID REFERENCES defect_reports(id) ON DELETE SET NULL,
+  outcome       TEXT NOT NULL,                         -- report|recurring_only|clean|rerun
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------------------------------------------------------------------------
 -- Test Packs (Prompt 10)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS test_packs (
