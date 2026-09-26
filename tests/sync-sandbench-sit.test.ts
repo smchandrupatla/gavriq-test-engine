@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { sync, check, hashContent } from '../scripts/sync-sandbench-sit.mjs';
+import { execFileSync } from 'node:child_process';
+import { sync, check, hashContent, gitSource } from '../scripts/sync-sandbench-sit.mjs';
 
 const SYNCED = ['sit/cases', 'tests/helpers/r1.mjs'];
 
@@ -58,6 +59,24 @@ describe('sync-sandbench-sit', () => {
     assert.deepEqual(r.deleted, ['sit/cases/71-e2e.sit.ts']);
     assert.ok(!existsSync(path.join(dest, 'sit/cases/71-e2e.sit.ts')));
     assert.ok(existsSync(path.join(dest, 'sit/cases/90-agents.sit.ts')));
+  });
+
+  it('reads a git ref, so uncommitted Sand Bench edits never leak in', () => {
+    const git = (...args: string[]) => execFileSync('git', ['-C', src, ...args], { stdio: 'pipe' });
+    git('init', '-q');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'seed');
+    put(src, 'sit/cases/00-health.sit.ts', 'uncommitted edit\n');
+    put(src, 'sit/cases/99-untracked.sit.ts', 'untracked\n');
+
+    const source = gitSource(src, 'HEAD');
+    const r = sync({ src: source, dest, synced: SYNCED });
+    assert.equal(r.copied, 3);
+    assert.equal(readFileSync(path.join(dest, 'sit/cases/00-health.sit.ts'), 'utf8'), 'health\n');
+    assert.ok(!existsSync(path.join(dest, 'sit/cases/99-untracked.sit.ts')));
+    const manifest = JSON.parse(readFileSync(path.join(dest, 'sit/SYNCED-FROM-SANDBENCH.json'), 'utf8'));
+    assert.equal(manifest.sourceCommit, source.commit);
+    assert.equal(check({ src: source, dest, synced: SYNCED }).clean, true);
   });
 
   it('ignores CRLF vs LF differences', () => {
