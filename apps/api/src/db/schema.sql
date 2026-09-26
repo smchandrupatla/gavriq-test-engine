@@ -493,6 +493,9 @@ CREATE TABLE IF NOT EXISTS defects (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A verified defect that fails again files a new defect pointing at the old one.
+ALTER TABLE defects ADD COLUMN IF NOT EXISTS regression_of UUID REFERENCES defects(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS idx_defects_report ON defects(report_id);
 CREATE INDEX IF NOT EXISTS idx_defects_fingerprint ON defects(fingerprint, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_defects_status ON defects(status);

@@ -114,23 +114,23 @@ export async function ingestExecution(executionId: string): Promise<IngestResult
     );
     const report = reports[0]!;
 
-    for (const c of plan.create) {
+    // A regression is a new defect linked to the verified one, so the report
+    // that verified it keeps its record intact.
+    const toInsert = [
+      ...plan.create.map((c) => ({ c, regressionOf: null as string | null })),
+      ...plan.regress.map(({ defect, candidate }) => ({ c: candidate, regressionOf: defect.id })),
+    ];
+    for (const { c, regressionOf } of toInsert) {
       await db.query(
         `INSERT INTO defects (key, report_id, fingerprint, test_case_id, case_key, case_name, test_type,
-                              category, severity, status, message, execution_id, execution_result_id, history)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13::jsonb)`,
+                              category, severity, status, message, execution_id, execution_result_id,
+                              regression_of, history)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13,$14::jsonb)`,
         [
           await nextDefectKey(db), report.id, c.fingerprint, c.test_case_id, c.case_key, c.case_name,
-          c.test_type, c.category, c.severity, c.message, exec.id, c.execution_result_id,
-          entry('defect-manager', 'opened', { execution: exec.key }),
+          c.test_type, c.category, c.severity, c.message, exec.id, c.execution_result_id, regressionOf,
+          entry('defect-manager', regressionOf ? 'regressed' : 'opened', { execution: exec.key }),
         ]
-      );
-    }
-    for (const { defect } of plan.regress) {
-      await db.query(
-        `UPDATE defects SET status = 'reopened', report_id = $2, occurrences = occurrences + 1,
-                last_seen = now(), updated_at = now(), history = history || $3::jsonb WHERE id = $1`,
-        [defect.id, report.id, entry('defect-manager', 'regressed', { execution: exec.key, report: report.key })]
       );
     }
 
@@ -211,8 +211,10 @@ export async function getReport(ref: string) {
   );
   if (!rows[0]) return null;
   const defects = await query<{ status: DefectStatus; severity: string }>(
-    `SELECT * FROM defects WHERE report_id = $1 ORDER BY
-       CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, key`,
+    `SELECT d.*, p.key AS regression_of_key FROM defects d
+       LEFT JOIN defects p ON p.id = d.regression_of
+      WHERE d.report_id = $1 ORDER BY
+       CASE d.severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.key`,
     [rows[0].id]
   );
   return { ...rows[0], summary: summarize(defects.rows), defects: defects.rows };

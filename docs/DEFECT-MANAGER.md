@@ -22,7 +22,7 @@ The engine does all of this on `POST /api/v1/executions/:id/complete`. No extra 
 ## Rules
 
 - **One defect per failure signature.** The fingerprint is the test case plus the first line of the error, with ids, numbers and timestamps normalized away.
-- **Repeats are not new defects.** A repeat of a defect that is still open only increments `occurrences`. If a *verified* defect fails again, it is a regression: it is reopened into a new report.
+- **Repeats are not new defects.** A repeat of a defect that is still open only increments `occurrences`. If a *verified* defect fails again, it is a regression: a new report gets a new defect with `regression_of` pointing at the verified one. The verified report keeps its record.
 - **Only the engine verifies.** Agents may move a defect to `acknowledged`, `in_fix`, `fixed` or `wont_fix`. Asking for `verified` or `reopened` returns 403.
 - **A rerun needs every defect fixed or `wont_fix`.** `wont_fix` needs a note. Only one rerun can be in flight per report.
 - **Not run is not passed.** If the rerun did not execute a fixed case, that defect is reopened.
@@ -46,7 +46,7 @@ When `RBAC_ENABLED=true`, reads need `tests:read` and writes need `executions:ru
 
 ## Statuses
 
-Defect: `open → acknowledged → in_fix → fixed → verified`. From `fixed` a defect can also go to `reopened`, and from `verified` back to `reopened` on a regression. Any unresolved defect can move to `wont_fix`.
+Defect: `open → acknowledged → in_fix → fixed → verified`. From `fixed` a defect can also go to `reopened` (the rerun failed). Any unresolved defect can move to `wont_fix`.
 
 Report: `open → with_pm → fixing → rerunning → verified | reopened`, and `reopened → with_pm`.
 
