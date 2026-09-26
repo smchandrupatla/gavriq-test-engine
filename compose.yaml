@@ -87,6 +87,12 @@ services:
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       EVIDENCE_DIR: /data/evidence
+      # SIT cases run by the worker target the same system under test as the SIT runner.
+      # SIT_WEB_BASE is overridden per run by the execution environment's base URL.
+      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://host.docker.internal:8787}
+      SIT_DBVIEWER_BASE: ${SIT_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
+      SIT_TESTHUB_BASE: ${SIT_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
+      SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:80}
     volumes:
       - test-engine-evidence:/data/evidence
     extra_hosts:

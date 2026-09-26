@@ -1,13 +1,19 @@
 /**
  * Playwright runner for out-of-container UI tests.
+ * Every run leaves proof: a PNG of the final screen (and one per step for step
+ * scripts, one at the point of failure) plus a step log.
+ * Set CAPTURE_SCREENSHOTS=failure to keep only failure screenshots.
  */
 import { chromium, type Browser, type Page } from 'playwright';
+import { saveLog, savePng, type EvidenceRef } from '../evidence.js';
 
 export interface PlaywrightRunInput {
   script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
   steps?: Array<{ action: string; selector?: string; value?: string; expected?: string }>;
+  /** Evidence file name prefix (execution + case key). */
+  evidencePrefix?: string;
 }
 
 export interface PlaywrightRunResult {
@@ -15,6 +21,7 @@ export interface PlaywrightRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
+  evidence: EvidenceRef[];
 }
 
 const NAMED: Record<string, (page: Page, baseUrl: string) => Promise<string>> = {
@@ -67,23 +74,51 @@ const NAMED: Record<string, (page: Page, baseUrl: string) => Promise<string>> = 
 export async function runPlaywright(input: PlaywrightRunInput): Promise<PlaywrightRunResult> {
   const start = Date.now();
   let browser: Browser | null = null;
+  let page: Page | null = null;
+  const evidence: EvidenceRef[] = [];
+  const passShots = process.env.CAPTURE_SCREENSHOTS !== 'failure';
+  const prefix = input.evidencePrefix || 'playwright';
+  const log: string[] = [`# playwright run against ${input.baseUrl}`, `# script: ${input.script || (input.steps?.length ? `${input.steps.length} steps` : 'load base URL')}`];
+  const note = (line: string) => log.push(`[+${((Date.now() - start) / 1000).toFixed(1)}s] ${line}`);
+  const shot = async (label: string) => {
+    if (!page) return;
+    try {
+      const ref = savePng(`${prefix}-${label}`, await page.screenshot({ fullPage: true }), { label, url: page.url(), title: await page.title().catch(() => null) });
+      if (ref) { evidence.push(ref); note(`screenshot ${label}`); }
+    } catch (err) {
+      note(`screenshot ${label} failed: ${(err as Error).message}`);
+    }
+  };
+  const done = (r: Omit<PlaywrightRunResult, 'evidence' | 'duration_ms'>): PlaywrightRunResult => {
+    note(r.status.toUpperCase() + (r.status === 'passed' ? '' : `: ${r.message}`));
+    const ref = saveLog(`${prefix}-steps`, log);
+    return { ...r, duration_ms: Date.now() - start, evidence: ref ? [ref, ...evidence] : evidence };
+  };
+
   try {
     browser = await chromium.launch({
       headless: true,
+      // The worker image ships system Chromium instead of Playwright's bundled browser.
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || process.env.CHROME_BIN || undefined,
       args: ['--no-sandbox', '--disable-dev-shm-usage'],
     });
-    const page = await browser.newPage();
+    page = await browser.newPage();
     page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
 
     const named = input.script ? NAMED[input.script] : undefined;
     if (named) {
+      note(`named script ${input.script}`);
       const msg = await named(page, input.baseUrl);
-      return { status: 'passed', message: msg, duration_ms: Date.now() - start };
+      note(msg);
+      if (passShots) await shot('final');
+      return done({ status: 'passed', message: msg });
     }
 
     if (input.steps?.length) {
       await page.goto(input.baseUrl, { waitUntil: 'domcontentloaded' });
-      for (const step of input.steps) {
+      note(`opened ${input.baseUrl}`);
+      for (const [idx, step] of input.steps.entries()) {
+        note(`step ${idx + 1}: ${step.action}${step.selector ? ` ${step.selector}` : ''}${step.value ? ` = ${step.value}` : ''}${step.expected ? ` expect "${step.expected}"` : ''}`);
         switch (step.action) {
           case 'navigate':
             await page.goto(step.value || input.baseUrl);
@@ -116,20 +151,14 @@ export async function runPlaywright(input: PlaywrightRunInput): Promise<Playwrig
           default:
             throw new Error(`Unknown step: ${step.action}`);
         }
+        if (passShots && idx < 20 && step.action !== 'wait') await shot(`step-${idx + 1}`);
       }
-      return {
-        status: 'passed',
-        message: `Executed ${input.steps.length} Playwright steps`,
-        duration_ms: Date.now() - start,
-      };
+      return done({ status: 'passed', message: `Executed ${input.steps.length} Playwright steps` });
     }
 
     await page.goto(input.baseUrl, { waitUntil: 'domcontentloaded' });
-    return {
-      status: 'passed',
-      message: `Loaded ${input.baseUrl}`,
-      duration_ms: Date.now() - start,
-    };
+    if (passShots) await shot('final');
+    return done({ status: 'passed', message: `Loaded ${input.baseUrl}` });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     let classification = 'unknown';
@@ -137,12 +166,8 @@ export async function runPlaywright(input: PlaywrightRunInput): Promise<Playwrig
     else if (/net::|ECONNREFUSED|NS_ERROR/i.test(msg)) classification = 'network_failure';
     else if (/assert|expected/i.test(msg)) classification = 'assertion_failure';
     else if (/selector|locator|not found/i.test(msg)) classification = 'script_problem';
-    return {
-      status: 'failed',
-      message: msg.slice(0, 500),
-      duration_ms: Date.now() - start,
-      classification,
-    };
+    await shot('failure');
+    return done({ status: 'failed', message: msg.slice(0, 500), classification });
   } finally {
     if (browser) await browser.close().catch(() => undefined);
   }

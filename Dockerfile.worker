@@ -14,11 +14,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# SIT cases drive the same system Chromium.
+ENV SIT_CHROME_BINARY=/usr/bin/chromium
+ENV SIT_CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 COPY package.json package-lock.json* ./
 RUN npm install
 
 COPY apps ./apps
+# The SIT runner executes sit/cases/*.sit.ts; without these the worker reported
+# "SIT file not found" for every imported SIT case.
+COPY sit ./sit
+COPY tests/helpers ./tests/helpers
+COPY tests/fixtures ./tests/fixtures
 COPY tsconfig.json* ./
 
 ENV NODE_ENV=production
