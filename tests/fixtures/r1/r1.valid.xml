@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Report>
+  <reportId>00123</reportId>
+  <createdAt>2026-09-17</createdAt>
+  <currency>AUD</currency>
+  <transaction>
+    <amount>1000</amount>
+    <country>AU</country>
+    <reference>INV-1001</reference>
+  </transaction>
+</Report>

@@ -177,8 +177,9 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
 
     let message: string;
 
-    if (input.script && NAMED_SCRIPTS[input.script]) {
-      message = await NAMED_SCRIPTS[input.script](driver, input.baseUrl);
+    const named = input.script ? NAMED_SCRIPTS[input.script] : undefined;
+    if (named) {
+      message = await named(driver, input.baseUrl);
     } else if (input.steps?.length) {
       await driver.get(input.baseUrl);
       for (const step of input.steps) {

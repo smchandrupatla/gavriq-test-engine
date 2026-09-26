@@ -200,6 +200,7 @@ export class MenuNavigator {
     for (let i = 0; i < before.items.length; i++) {
       const bItem = before.items[i];
       const aItem = after.items[i];
+      if (!bItem || !aItem) return false;
 
       if (bItem.label !== aItem.label) return false;
       if (bItem.hasChildren !== aItem.hasChildren) return false;
