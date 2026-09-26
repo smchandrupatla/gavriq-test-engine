@@ -24,6 +24,10 @@ COPY package.json package-lock.json* ./
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm install
 COPY sit ./sit
+# Helpers and fixtures synced from Sand Bench with sit/ (scripts/sync-sandbench-sit.mjs)
+COPY tests/helpers ./tests/helpers
+COPY tests/fixtures ./tests/fixtures
+COPY apps/secportal ./apps/secportal
 COPY dev ./dev
 COPY docs/use-cases ./docs/use-cases
 COPY tsconfig.json ./

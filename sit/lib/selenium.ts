@@ -31,6 +31,7 @@ function buildChromeOptions() {
     "--window-size=1280,1000"
   );
   if (CHROME_BINARY) options.setChromeBinaryPath(CHROME_BINARY);
+  if (process.env.BASELINE_CONTAINER === '1') options.addArguments('--host-resolver-rules=MAP unpkg.com ~NOTFOUND');
   return options;
 }
 
@@ -60,6 +61,7 @@ export async function openConsole(driver: WebDriver): Promise<void> {
     const cls = (await gates[0].getAttribute("class")) || "";
     return cls.split(/\s+/).includes("hidden");
   }, 20000, "console gate never hid — sign-in/mount did not complete");
+  await driver.wait(until.elementLocated(By.css('#console-root .opsc-sidebar')), 20000, 'console sidebar did not mount');
 }
 
 async function firstWithText(driver: WebDriver, css: string, text: string): Promise<WebElement> {
