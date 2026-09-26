@@ -166,6 +166,55 @@ describe('e2e api flow', () => {
     assert.equal(done.body.data.status, 'passed');
   });
 
+  it('serves application detail, run-tests, and failures by key', async (t) => {
+    if (!available) {
+      t.skip('API not reachable');
+      return;
+    }
+    const apps = await api('/api/v1/applications');
+    const application = (apps.body.data || [])[0];
+    if (!application) {
+      t.skip('No applications — run npm run seed');
+      return;
+    }
+
+    const detail = await api(`/api/v1/applications/${application.key}`);
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.equal(detail.body.data.id, application.id);
+    assert.ok(Array.isArray(detail.body.data.test_cases));
+    assert.ok(Array.isArray(detail.body.data.recent_executions));
+
+    const missing = await api('/api/v1/applications/no-such-application');
+    assert.equal(missing.status, 404);
+
+    const failures = await api(`/api/v1/applications/${application.key}/failures`);
+    assert.equal(failures.status, 200, JSON.stringify(failures.body));
+    assert.equal(typeof failures.body.data.total_failed, 'number');
+
+    const badIds = await api(`/api/v1/applications/${application.key}/run-tests`, {
+      method: 'POST',
+      body: JSON.stringify({ test_case_ids: ['not-a-uuid'] }),
+    });
+    assert.equal(badIds.status, 400);
+
+    const testCase = detail.body.data.test_cases[0];
+    if (!testCase) return;
+    const run = await api(`/api/v1/applications/${application.key}/run-tests`, {
+      method: 'POST',
+      body: JSON.stringify({ test_case_ids: [testCase.id] }),
+    });
+    assert.equal(run.status, 201, JSON.stringify(run.body));
+    assert.deepEqual(run.body.data.test_case_ids, [testCase.id]);
+    assert.equal(run.body.data.metadata.application_key, application.key);
+
+    const after = await api(`/api/v1/applications/${application.id}`);
+    assert.ok(after.body.data.recent_executions.some((e: any) => e.id === run.body.data.id));
+    await api(`/api/v1/executions/${run.body.data.id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ status: 'cancelled' }),
+    });
+  });
+
   it('accepts build-results and exposes test-status', async (t) => {
     if (!available) {
       t.skip('API not reachable');
