@@ -21,7 +21,7 @@
     "mint-token": "tsx apps/api/src/scripts/mint-token.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "tsx --test tests/e2e-api-flow.test.ts",
-    "test:unit": "tsx --test tests/enterprise-api-smoke.test.ts tests/classify.test.ts",
+    "test:unit": "tsx --test tests/enterprise-api-smoke.test.ts tests/classify.test.ts tests/sync-sandbench-sit.test.ts",
     "parse:junit": "node scripts/parse-junit.mjs",
     "report:build": "bash scripts/post-build-results.sh",
     "report:unit-container": "node scripts/in-container-unit-report.mjs",
