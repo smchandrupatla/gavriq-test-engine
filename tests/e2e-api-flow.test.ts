@@ -215,6 +215,17 @@ describe('e2e api flow', () => {
     });
   });
 
+  it('reaches the SIT console that runs Sand Bench suites', async (t) => {
+    // Only the combined container ships the console; CI starts the API alone.
+    if (!available || process.env.E2E_SIT_CONSOLE !== '1') {
+      t.skip('set E2E_SIT_CONSOLE=1 against the docker engine');
+      return;
+    }
+    const status = await api('/api/v1/sit-status');
+    assert.equal(status.status, 200, JSON.stringify(status.body));
+    assert.equal(status.body.reachable, true, JSON.stringify(status.body));
+  });
+
   it('accepts build-results and exposes test-status', async (t) => {
     if (!available) {
       t.skip('API not reachable');
