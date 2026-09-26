@@ -1,5 +1,6 @@
 /**
  * Lightweight HTTP/API runner for health, REST smoke, and contract-style checks.
+ * Every request and response is written to `transcript` so the result carries proof.
  */
 export interface HttpRunInput {
   baseUrl: string;
@@ -22,11 +23,30 @@ export interface HttpRunResult {
   duration_ms: number;
   classification?: string;
   metrics?: Record<string, number>;
+  transcript: string[];
+}
+
+const BODY_LIMIT = 4000;
+
+function clip(text: string): string {
+  return text.length > BODY_LIMIT ? `${text.slice(0, BODY_LIMIT)}\n… (${text.length - BODY_LIMIT} more bytes)` : text;
+}
+
+function record(transcript: string[], method: string, url: string, reqBody: unknown, res: Response, text: string, latency: number) {
+  transcript.push(
+    `>>> ${method} ${url}`,
+    ...(reqBody !== undefined ? [JSON.stringify(reqBody, null, 2)] : []),
+    `<<< ${res.status} ${res.statusText} (${latency}ms)`,
+    `content-type: ${res.headers.get('content-type') || '-'}`,
+    clip(text),
+    ''
+  );
 }
 
 export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
   const start = Date.now();
   const timeout = (input.timeoutSeconds || 15) * 1000;
+  const transcript: string[] = [];
 
   try {
     // Named scripts
@@ -36,6 +56,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
       const res = await fetch(url, { signal: AbortSignal.timeout(timeout) });
       const latency = Date.now() - t0;
       const text = await res.text();
+      record(transcript, 'GET', url, undefined, res, text, latency);
       if (!res.ok) {
         return {
           status: 'failed',
@@ -43,6 +64,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
           duration_ms: Date.now() - start,
           classification: res.status >= 500 ? 'environment_problem' : 'assertion_failure',
           metrics: { latency_ms: latency, status_code: res.status },
+          transcript,
         };
       }
       return {
@@ -50,6 +72,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
         message: `health OK (${res.status}) in ${latency}ms`,
         duration_ms: Date.now() - start,
         metrics: { latency_ms: latency, status_code: res.status },
+        transcript,
       };
     }
 
@@ -69,6 +92,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
         });
         const latency = Date.now() - t0;
         const text = await res.text();
+        record(transcript, method, url, step.body, res, text, latency);
         const expected = step.expected_status ?? 200;
         if (res.status !== expected) {
           return {
@@ -77,6 +101,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
             duration_ms: Date.now() - start,
             classification: 'assertion_failure',
             metrics: { latency_ms: latency, status_code: res.status },
+            transcript,
           };
         }
         if (step.expected_body_contains && !text.includes(step.expected_body_contains)) {
@@ -86,6 +111,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
             duration_ms: Date.now() - start,
             classification: 'assertion_failure',
             metrics: { latency_ms: latency, status_code: res.status },
+            transcript,
           };
         }
         results.push(`${method} ${step.path || '/'} → ${res.status} (${latency}ms)`);
@@ -94,19 +120,24 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
         status: 'passed',
         message: results.join('; '),
         duration_ms: Date.now() - start,
+        transcript,
       };
     }
 
     // Default: GET baseUrl
+    const t0 = Date.now();
     const res = await fetch(input.baseUrl, { signal: AbortSignal.timeout(timeout) });
+    record(transcript, 'GET', input.baseUrl, undefined, res, await res.text(), Date.now() - t0);
     return {
       status: res.ok ? 'passed' : 'failed',
       message: `GET ${input.baseUrl} → ${res.status}`,
       duration_ms: Date.now() - start,
       metrics: { status_code: res.status },
+      transcript,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    transcript.push(`!!! ${msg}`);
     let classification = 'unknown';
     if (/timeout|aborted/i.test(msg)) classification = 'timeout';
     else if (/ECONNREFUSED|fetch failed|network/i.test(msg)) classification = 'network_failure';
@@ -115,6 +146,7 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
       message: msg.slice(0, 500),
       duration_ms: Date.now() - start,
       classification,
+      transcript,
     };
   }
 }

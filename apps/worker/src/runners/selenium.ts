@@ -1,18 +1,20 @@
 /**
  * Selenium WebDriver runner for out-of-container UI tests.
- * Captures PNG screenshots on failure (and always if CAPTURE_SCREENSHOTS=always).
+ * Every run leaves proof: a PNG of the final screen (pass or fail) and a step log.
+ * Set CAPTURE_SCREENSHOTS=failure to keep only failure screenshots.
  * Evidence written under EVIDENCE_DIR (default ./evidence).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
 import { Builder, By, until, type WebDriver } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
+import { saveLog, savePng, type EvidenceRef } from '../evidence.js';
 
 export interface SeleniumRunInput {
   script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
   steps?: Array<{ action: string; selector?: string; value?: string; expected?: string }>;
+  /** Evidence file name prefix (execution + case key). */
+  evidencePrefix?: string;
 }
 
 export interface SeleniumRunResult {
@@ -20,10 +22,8 @@ export interface SeleniumRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
-  evidence?: Array<{ type: string; storage_key: string; content_type?: string; size_bytes?: number }>;
+  evidence?: EvidenceRef[];
 }
-
-const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
 
 async function buildDriver(): Promise<WebDriver> {
   const options = new chrome.Options();
@@ -50,23 +50,12 @@ async function buildDriver(): Promise<WebDriver> {
   return builder.build();
 }
 
-async function captureScreenshot(
-  driver: WebDriver,
-  prefix: string
-): Promise<{ type: string; storage_key: string; content_type: string; size_bytes: number } | null> {
+async function captureScreenshot(driver: WebDriver, prefix: string, label: string): Promise<EvidenceRef | null> {
   try {
-    mkdirSync(EVIDENCE_DIR, { recursive: true });
-    const name = `${prefix}-${Date.now()}.png`;
-    const full = path.join(EVIDENCE_DIR, name);
     const b64 = await driver.takeScreenshot();
-    const buf = Buffer.from(b64, 'base64');
-    writeFileSync(full, buf);
-    return {
-      type: 'screenshot',
-      storage_key: `evidence/${name}`,
-      content_type: 'image/png',
-      size_bytes: buf.length,
-    };
+    return savePng(prefix, Buffer.from(b64, 'base64'), {
+      label, url: await driver.getCurrentUrl().catch(() => null), title: await driver.getTitle().catch(() => null),
+    });
   } catch (err) {
     console.warn('[selenium] screenshot failed:', (err as Error).message);
     return null;
@@ -167,8 +156,20 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
 export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunResult> {
   const start = Date.now();
   let driver: WebDriver | null = null;
-  const evidence: SeleniumRunResult['evidence'] = [];
-  const alwaysShot = process.env.CAPTURE_SCREENSHOTS === 'always';
+  const evidence: EvidenceRef[] = [];
+  const passShots = process.env.CAPTURE_SCREENSHOTS !== 'failure';
+  const prefix = input.evidencePrefix || 'selenium';
+  const log: string[] = [`# selenium run against ${input.baseUrl}`, `# script: ${input.script || (input.steps?.length ? `${input.steps.length} steps` : 'load base URL')}`];
+  const note = (line: string) => log.push(`[+${((Date.now() - start) / 1000).toFixed(1)}s] ${line}`);
+  const shot = async (label: string) => {
+    if (!driver) return;
+    const ref = await captureScreenshot(driver, `${prefix}-${label}`, label);
+    if (ref) { evidence.push(ref); note(`screenshot ${label}`); }
+  };
+  const finishLog = () => {
+    const ref = saveLog(`${prefix}-steps`, log);
+    if (ref) evidence.unshift(ref);
+  };
 
   try {
     driver = await buildDriver();
@@ -179,10 +180,14 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
 
     const named = input.script ? NAMED_SCRIPTS[input.script] : undefined;
     if (named) {
+      note(`named script ${input.script}`);
       message = await named(driver, input.baseUrl);
+      note(message);
     } else if (input.steps?.length) {
       await driver.get(input.baseUrl);
-      for (const step of input.steps) {
+      note(`opened ${input.baseUrl}`);
+      for (const [idx, step] of input.steps.entries()) {
+        note(`step ${idx + 1}: ${step.action}${step.selector ? ` ${step.selector}` : ''}${step.value ? ` = ${step.value}` : ''}${step.expected ? ` expect "${step.expected}"` : ''}`);
         switch (step.action) {
           case 'navigate':
             await driver.get(step.value || input.baseUrl);
@@ -221,18 +226,19 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
           default:
             throw new Error(`Unknown step action: ${step.action}`);
         }
+        if (passShots && idx < 20 && step.action !== 'wait') await shot(`step-${idx + 1}`);
       }
       message = `Executed ${input.steps.length} steps`;
     } else {
       await driver.get(input.baseUrl);
       await driver.wait(until.elementLocated(By.css('body')), 10000);
       message = `Loaded ${input.baseUrl}`;
+      note(message);
     }
 
-    if (alwaysShot) {
-      const shot = await captureScreenshot(driver, 'pass');
-      if (shot) evidence.push(shot);
-    }
+    if (passShots && !input.steps?.length) await shot('final');
+    note('PASSED');
+    finishLog();
 
     return {
       status: 'passed',
@@ -248,10 +254,9 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
     else if (/assert|expected/i.test(msg)) classification = 'assertion_failure';
     else if (/element|selector|not found/i.test(msg)) classification = 'script_problem';
 
-    if (driver) {
-      const shot = await captureScreenshot(driver, 'fail');
-      if (shot) evidence.push(shot);
-    }
+    note(`FAILED: ${msg}`);
+    await shot('failure');
+    finishLog();
 
     return {
       status: 'failed',

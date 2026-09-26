@@ -10,6 +10,7 @@ import { migrate } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
+import { caseEvidenceRoutes } from './routes/case-evidence.js';
 import { environmentRoutes } from './routes/environments.js';
 import { executionRoutes } from './routes/executions.js';
 import { workerRoutes } from './routes/workers.js';
@@ -148,8 +149,12 @@ async function main() {
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName === '/api/v1/catalog-audit')) {
         return requirePermission('tests:read')(req, reply);
+      }
+      // Building suites (create, rename, add/remove cases, delete) is test authoring.
+      if (method !== 'GET' && pathName.startsWith('/api/v1/suites')) {
+        return requirePermission('tests:write')(req, reply);
       }
       if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
         return requirePermission('executions:run')(req, reply);
@@ -168,6 +173,7 @@ async function main() {
   await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
+  await app.register(caseEvidenceRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
   await app.register(evidenceRoutes);
