@@ -72,6 +72,7 @@ function readManifest(dest) {
 /**
  * Copy synced files from `src` to `dest`. Files that disappeared from Sand Bench are
  * deleted only if the previous manifest says we synced them, so engine-only files survive.
+ * @param {{ src: string, dest: string, synced?: string[], sourceCommit?: string | null }} opts
  */
 export function sync({ src, dest, synced = SYNCED, sourceCommit = null }) {
   const previous = readManifest(dest)?.files ?? {};
@@ -91,11 +92,13 @@ export function sync({ src, dest, synced = SYNCED, sourceCommit = null }) {
 /**
  * Drift check. Compares the synced files in `dest` with Sand Bench when `src` exists,
  * otherwise with the manifest. Only files Sand Bench owns are compared.
+ * @param {{ src: string | null, dest: string, synced?: string[] }} opts
+ * @returns {{ clean: boolean, added: string[], changed: string[], removed: string[], against: string | null, reason?: string }}
  */
 export function check({ src, dest, synced = SYNCED }) {
   const manifest = readManifest(dest);
   const expected = src && existsSync(src) ? snapshot(src, synced) : manifest?.files;
-  if (!expected) return { clean: false, added: [], changed: [], removed: [], reason: "no manifest and no Sand Bench checkout" };
+  if (!expected) return { clean: false, added: [], changed: [], removed: [], against: null, reason: "no manifest and no Sand Bench checkout" };
   const owned = new Set([...Object.keys(expected), ...Object.keys(manifest?.files ?? {})]);
   const actual = Object.fromEntries(Object.entries(snapshot(dest, synced)).filter(([f]) => owned.has(f)));
   return { ...diffSnapshots(expected, actual), against: src && existsSync(src) ? "sand-bench" : "manifest" };
