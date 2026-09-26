@@ -8,6 +8,8 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "types": ["node"]
   },
   "include": ["apps/**/*.ts", "tests/**/*.ts", "sit/**/*.ts"]

@@ -94,7 +94,7 @@ export async function executionRoutes(app: FastifyInstance) {
       `INSERT INTO executions (
          key, requested_by, test_plan_id, test_suite_id, test_case_ids,
          environment_id, execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
+       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::execution_location,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
        RETURNING *`,
       [
         key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
@@ -103,7 +103,7 @@ export async function executionRoutes(app: FastifyInstance) {
       ]
     );
 
-    await audit(req, 'execution.queue', 'execution', rows[0].id, {
+    await audit(req, 'execution.queue', 'execution', rows[0]!.id, {
       key,
       case_count: resolvedIds.length,
       environment_id: environmentId,
@@ -187,7 +187,7 @@ export async function executionRoutes(app: FastifyInstance) {
             `INSERT INTO evidence (execution_result_id, evidence_type, storage_key, content_type, size_bytes, redacted, metadata)
              VALUES ($1,$2,$3,$4,$5,COALESCE($6,false),COALESCE($7,'{}'::jsonb))`,
             [
-              rows[0].id, ev.type, ev.storage_key, ev.content_type ?? null,
+              rows[0]!.id, ev.type, ev.storage_key, ev.content_type ?? null,
               ev.size_bytes ?? null, ev.redacted ?? false, JSON.stringify(ev.metadata ?? {}),
             ]
           );
@@ -203,8 +203,8 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const status = req.body?.status || 'passed';
       const { rows } = await query(
-        `UPDATE executions SET status = $2, finished_at = now()
-         WHERE id = $1 OR key = $1 RETURNING *`,
+        `UPDATE executions SET status = $2::execution_status, finished_at = now()
+         WHERE id::text = $1 OR key = $1 RETURNING *`,
         [req.params.id, status]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
