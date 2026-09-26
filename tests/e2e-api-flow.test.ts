@@ -1,12 +1,16 @@
 /**
  * End-to-end control-plane flow (no browser).
- * Requires DATABASE_URL and a reachable API on TEST_ENGINE_API (default :8787).
- * Skips cleanly when API is down so local unit runs stay green.
+ * Requires DATABASE_URL and a reachable API on TEST_ENGINE_API
+ * (default: 127.0.0.1 on TEST_ENGINE_HOST_PORT from .env, else :8787, the compose host port).
+ * Skips cleanly when API is down so local unit runs stay green, but fails if a different
+ * service answers on that port (Sand Bench's API also uses :8787).
  */
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 
-const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
+try { process.loadEnvFile(); } catch { /* .env is optional */ }
+const API = process.env.TEST_ENGINE_API
+  || `http://127.0.0.1:${process.env.TEST_ENGINE_HOST_PORT || 8787}`;
 
 async function api(path: string, opts: RequestInit = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -26,6 +30,11 @@ describe('e2e api flow', () => {
       available = status === 200 && body.status === 'ok';
     } catch {
       available = false;
+    }
+    if (available) {
+      const meta = await api('/api/v1/meta');
+      assert.equal(meta.body.service, 'gavriq-test-engine',
+        `${API} is not the test engine (set TEST_ENGINE_API or TEST_ENGINE_HOST_PORT)`);
     }
   });
 
@@ -130,6 +139,31 @@ describe('e2e api flow', () => {
     const report = await api(`/api/v1/reports/summary/${execId}`);
     assert.equal(report.status, 200);
     assert.ok(report.body.data.executive_summary);
+  });
+
+  it('completes an execution addressed by its key', async (t) => {
+    if (!available) {
+      t.skip('API not reachable');
+      return;
+    }
+    const cases = await api('/api/v1/test-cases?limit=1');
+    const testCase = (cases.body.data || [])[0];
+    if (!testCase) {
+      t.skip('No test cases — run npm run seed');
+      return;
+    }
+    const queued = await api('/api/v1/executions', {
+      method: 'POST',
+      body: JSON.stringify({ test_case_ids: [testCase.id], trigger_source: 'ci', metadata: { e2e: true } }),
+    });
+    assert.equal(queued.status, 202, JSON.stringify(queued.body));
+    const done = await api(`/api/v1/executions/${queued.body.data.key}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ status: 'passed' }),
+    });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal(done.body.data.id, queued.body.data.id);
+    assert.equal(done.body.data.status, 'passed');
   });
 
   it('accepts build-results and exposes test-status', async (t) => {
