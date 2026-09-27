@@ -88,8 +88,8 @@ async function main() {
      ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
      RETURNING id, key`
   );
-  const appId = appRes.rows[0].id;
-  console.log('Application:', appRes.rows[0].key, appId);
+  const appId = appRes.rows[0]!.id;
+  console.log('Application:', appRes.rows[0]!.key, appId);
 
   await query(
     `INSERT INTO environments (key, name, env_type, base_url, safety_policy)
@@ -112,7 +112,7 @@ async function main() {
      RETURNING id`,
     [appId]
   );
-  const suiteId = suiteRes.rows[0].id;
+  const suiteId = suiteRes.rows[0]!.id;
   console.log('Suite: smoke-main-flows', suiteId);
 
   for (const tc of MAIN_FLOWS) {
@@ -146,9 +146,9 @@ async function main() {
     await query(
       `INSERT INTO test_case_suites (test_case_id, test_suite_id, sort_order)
        VALUES ($1,$2,0) ON CONFLICT DO NOTHING`,
-      [rows[0].id, suiteId]
+      [rows[0]!.id, suiteId]
     );
-    console.log('  +', rows[0].key, `(${tc.method})`);
+    console.log('  +', rows[0]!.key, `(${tc.method})`);
   }
 
   await query(

@@ -53,7 +53,7 @@ export interface BaselineRunResult {
   passed: boolean;
 }
 
-async function runBaseline(options?: BaselineRunOptions): Promise<BaselineRunResult> {
+export async function runBaseline(options?: BaselineRunOptions): Promise<BaselineRunResult> {
   const config = loadConfig();
   const reporter = new FailureReporter();
   const summaryGen = new TestRunSummaryGenerator();
