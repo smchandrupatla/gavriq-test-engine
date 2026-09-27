@@ -75,8 +75,9 @@ export async function runPlaywright(input: PlaywrightRunInput): Promise<Playwrig
     const page = await browser.newPage();
     page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
 
-    if (input.script && NAMED[input.script]) {
-      const msg = await NAMED[input.script](page, input.baseUrl);
+    const named = input.script ? NAMED[input.script] : undefined;
+    if (named) {
+      const msg = await named(page, input.baseUrl);
       return { status: 'passed', message: msg, duration_ms: Date.now() - start };
     }
 

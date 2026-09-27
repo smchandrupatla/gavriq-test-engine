@@ -139,7 +139,7 @@ async function main() {
 
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
-      const pathName = req.url.split('?')[0];
+      const pathName = req.url.split('?')[0] ?? '';
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;

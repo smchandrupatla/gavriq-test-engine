@@ -46,7 +46,7 @@ function extractTestNames(source: string): string[] {
   const names: string[] = [];
   const re = /\b(?:test|it)\s*\(\s*[`'"]([^`'"\n]+)[`'"]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) names.push(m[1]);
+  while ((m = re.exec(source))) names.push(m[1]!);
   return [...new Set(names)];
 }
 
@@ -67,7 +67,7 @@ async function main() {
      ON CONFLICT (key) DO UPDATE SET updated_at = now()
      RETURNING id`
   );
-  const appId = appRes.rows[0].id;
+  const appId = appRes.rows[0]!.id;
 
   if (!existsSync(casesDir)) {
     console.error('sit/cases not found at', casesDir);
@@ -94,7 +94,7 @@ async function main() {
        RETURNING id`,
       [meta.suite, meta.suite, `Imported from sit/cases/${file}`, appId, meta.type]
     );
-    const suiteId = suiteRes.rows[0].id;
+    const suiteId = suiteRes.rows[0]!.id;
 
     if (!names.length) {
       // File-level placeholder case
@@ -119,7 +119,7 @@ async function main() {
       );
       await query(
         `INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [rows[0].id, suiteId]
+        [rows[0]!.id, suiteId]
       );
       imported++;
       console.log('  +', key, '(file-level)');
@@ -148,7 +148,7 @@ async function main() {
       );
       await query(
         `INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-        [rows[0].id, suiteId]
+        [rows[0]!.id, suiteId]
       );
       imported++;
       console.log('  +', key.slice(0, 80));

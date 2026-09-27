@@ -103,7 +103,7 @@ export async function executionRoutes(app: FastifyInstance) {
       ]
     );
 
-    await audit(req, 'execution.queue', 'execution', rows[0].id, {
+    await audit(req, 'execution.queue', 'execution', rows[0]!.id, {
       key,
       case_count: resolvedIds.length,
       environment_id: environmentId,
@@ -187,7 +187,7 @@ export async function executionRoutes(app: FastifyInstance) {
             `INSERT INTO evidence (execution_result_id, evidence_type, storage_key, content_type, size_bytes, redacted, metadata)
              VALUES ($1,$2,$3,$4,$5,COALESCE($6,false),COALESCE($7,'{}'::jsonb))`,
             [
-              rows[0].id, ev.type, ev.storage_key, ev.content_type ?? null,
+              rows[0]!.id, ev.type, ev.storage_key, ev.content_type ?? null,
               ev.size_bytes ?? null, ev.redacted ?? false, JSON.stringify(ev.metadata ?? {}),
             ]
           );
