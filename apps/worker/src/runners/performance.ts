@@ -18,6 +18,7 @@ export interface PerfRunInput {
   body?: unknown;
   /** Optional SLA thresholds */
   sla?: {
+    p50_ms?: number;
     p95_ms?: number;
     error_rate_pct?: number;
     min_rps?: number;
@@ -168,6 +169,9 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
 
   const sla = input.sla || {};
   const violations: string[] = [];
+  if (sla.p50_ms != null && metrics.latency_p50_ms > sla.p50_ms) {
+    violations.push(`p50 ${metrics.latency_p50_ms}ms > ${sla.p50_ms}ms`);
+  }
   if (sla.p95_ms != null && metrics.latency_p95_ms > sla.p95_ms) {
     violations.push(`p95 ${metrics.latency_p95_ms}ms > ${sla.p95_ms}ms`);
   }

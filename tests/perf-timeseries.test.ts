@@ -51,6 +51,19 @@ describe('runPerformance', () => {
     }
   });
 
+  it('fails the p50 SLA when the median is over budget', async () => {
+    const server = createServer((_req, res) => { setTimeout(() => res.end('ok'), 40); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const r = await runPerformance({ baseUrl: `http://127.0.0.1:${port}`, requests: 10, concurrency: 2, sla: { p50_ms: 5 } });
+      assert.equal(r.status, 'failed');
+      assert.match(r.message, /p50 \d+ms > 5ms/);
+    } finally {
+      server.close();
+    }
+  });
+
   it('runs for a duration in endurance mode', async () => {
     const server = createServer((_req, res) => { setTimeout(() => res.end('ok'), 5); });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

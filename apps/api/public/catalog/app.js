@@ -44,7 +44,7 @@ function isSitCase(c){const tags=(c.tags||[]).map(t=>String(t).toLowerCase());if
 function isSitSuite(s){return String(s.key||'').toLowerCase().startsWith('sit-');}
 function typeOfCase(c){if(isSitCase(c))return 'sit';const tags=(c.tags||[]).map(t=>String(t).toLowerCase());for(const t of typeList()){if(tags.includes(String(t.id).toLowerCase()))return t.id;}const suiteIds=state.membership.filter(m=>m.test_case_id===c.id).map(m=>m.test_suite_id);for(const sid of suiteIds){const s=state.suites.find(x=>x.id===sid);if(!s)continue;const st=String(s.suite_type||'');if(typeList().some(t=>t.id===st))return st;const k=String(s.key||'');if(k.startsWith('sb-')){const p=k.split('-');if(p.length>=2&&typeList().some(t=>t.id===p[1]))return p[1];}}return 'other';}
 function sitCases(){return state.cases.filter(isSitCase);}
-function catalogCases(){return state.cases.filter(c=>!isSitCase(c));}
+function catalogCases(){return state.cases.filter(c=>!isSitCase(c)&&!isRetired(c));}
 function casesForType(id){return catalogCases().filter(c=>typeOfCase(c)===id);}
 function suitesForType(typeKey){return state.suites.filter(s=>{if(isSitSuite(s))return false;if(String(s.key||'').startsWith('sb-type-'))return false;if(String(s.suite_type||'')===typeKey)return true;if(String(s.key||'').startsWith('sb-'+typeKey+'-'))return true;return false;});}
 function sitSuitesInGroup(g){const keys=new Set((g.keys||[]).map(k=>k.toLowerCase()));return state.suites.filter(s=>{if(!isSitSuite(s))return false;const k=String(s.key||'').toLowerCase();if(keys.has(k))return true;return [...keys].some(prefix=>k===prefix||k.startsWith(prefix+'-'));});}

@@ -1,4 +1,5 @@
 import { query } from './db/client.js';
+import { catalogHash } from './sandbench-catalog-source.js';
 
 /** Wait for database to be ready with retries and exponential backoff. */
 export async function waitForDatabase(maxRetries = 30, baseDelayMs = 2000) {
@@ -64,15 +65,23 @@ export async function maybeAutoSeed() {
         `SELECT count(*)::int AS c FROM test_cases WHERE 'sandbench' = ANY(tags)`
       );
       const count = rows[0]?.c || 0;
-      if (forceSandbench || count === 0) {
+      // Re-seed when the catalog files (including what runs behind each case) changed,
+      // so scripts attached or cases retired in data/ reach databases seeded earlier.
+      const stored = await query(
+        `SELECT metadata->>'sandbench_catalog_hash' AS h FROM applications WHERE key = 'sand-bench'`
+      );
+      const changed = (stored.rows[0]?.h || null) !== catalogHash();
+      if (forceSandbench || count === 0 || changed) {
         console.log(
           forceSandbench
             ? '[auto-seed] SEED_SANDBENCH=true — loading Sand Bench catalog...'
-            : '[auto-seed] no sandbench-tagged cases — loading Sand Bench catalog...'
+            : count === 0
+              ? '[auto-seed] no sandbench-tagged cases — loading Sand Bench catalog...'
+              : '[auto-seed] Sand Bench catalog files changed — re-seeding...'
         );
         await runTsx('apps/api/src/seed-sandbench-catalog.ts');
       } else {
-        console.log(`[auto-seed] sandbench cases already present (${count}), skipping`);
+        console.log(`[auto-seed] sandbench cases already present (${count}) and unchanged, skipping`);
       }
     }
 

@@ -38,6 +38,18 @@ describe('classifyCase', () => {
     assert.equal(classifyCase({ execution_method: 'endurance', validation_rules: { duration_seconds: 60 } }).runner, 'performance');
   });
 
+  it('reports a retired case as not executable with its retirement reason', () => {
+    const c = classifyCase({
+      execution_method: 'http', lifecycle: 'deprecated',
+      description: 'Sanctions list compliance: screening\nRetired: Sand Bench does not screen against sanctions lists.',
+    });
+    assert.equal(c.kind, 'retired');
+    assert.equal(c.executable, false);
+    assert.equal(c.reason, 'Retired: Sand Bench does not screen against sanctions lists.');
+    // Retirement wins even when a script is attached.
+    assert.equal(classifyCase({ script: 'sit/cases/00-health.sit.ts', lifecycle: 'archived' }).kind, 'retired');
+  });
+
   it('treats a performance case with no profile as a placeholder', () => {
     assert.equal(classifyCase({ execution_method: 'performance', validation_rules: {} }).kind, 'placeholder');
   });

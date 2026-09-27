@@ -10,10 +10,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-export type DefinitionKind = 'sit-file' | 'named-script' | 'steps' | 'performance' | 'placeholder';
+export type DefinitionKind = 'sit-file' | 'named-script' | 'steps' | 'performance' | 'placeholder' | 'retired';
+
+/** Lifecycles that take a case out of the runnable catalog. */
+export const RETIRED_LIFECYCLES = new Set(['deprecated', 'archived']);
 
 export interface CaseLike {
   key?: string | null;
+  lifecycle?: string | null;
+  description?: string | null;
   execution_method?: string | null;
   script?: string | null;
   steps?: unknown;
@@ -77,6 +82,11 @@ export function classifyCase(tc: CaseLike): Classification {
   const method = String(tc.execution_method || 'selenium').toLowerCase();
   const script = String(tc.script || '').trim();
   const steps = Array.isArray(tc.steps) ? tc.steps : [];
+
+  if (tc.lifecycle && RETIRED_LIFECYCLES.has(tc.lifecycle)) {
+    const why = /Retired: (.+)$/m.exec(String(tc.description || ''))?.[1];
+    return { kind: 'retired', runner: runnerFor(method), executable: false, reason: why ? `Retired: ${why}` : `Retired (lifecycle ${tc.lifecycle}).` };
+  }
 
   if (isSitScript(script) || method === 'sit') {
     return { kind: 'sit-file', runner: 'sit', executable: isSitScript(script), reason: isSitScript(script) ? 'Runs a Sand Bench SIT case file.' : 'Method is sit but no sit/cases file is set.' };

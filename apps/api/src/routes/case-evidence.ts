@@ -19,7 +19,7 @@ export function evidenceUrl(storageKey: string | null | undefined): string | nul
 export async function caseEvidenceRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/v1/test-cases/:id/definition', async (req, reply) => {
     const { rows } = await query(
-      'SELECT id, key, execution_method, script, steps, validation_rules FROM test_cases WHERE id::text = $1 OR key = $1',
+      'SELECT id, key, execution_method, script, steps, validation_rules, lifecycle, description FROM test_cases WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Test case not found' });
@@ -58,12 +58,13 @@ export async function caseEvidenceRoutes(app: FastifyInstance) {
   app.get('/api/v1/catalog-audit', async (_req, reply) => {
     const { rows } = await query(
       `SELECT id, key, name, test_type, execution_method, script, steps, validation_rules,
-              automation_status, created_by, tags
+              automation_status, created_by, tags, lifecycle, description
        FROM test_cases ORDER BY key`
     );
     const byKind: Record<string, number> = {};
     const placeholders: unknown[] = [];
     const stale: unknown[] = [];
+    const retired: unknown[] = [];
     for (const r of rows) {
       const cls = classifyCase(r);
       let kind: string = cls.kind;
@@ -81,14 +82,16 @@ export async function caseEvidenceRoutes(app: FastifyInstance) {
       };
       if (kind === 'placeholder') placeholders.push(row);
       else if (kind === 'stale-sit') stale.push(row);
+      else if (kind === 'retired') retired.push(row);
     }
     return reply.send({
       data: {
         total: rows.length,
-        executable: rows.length - placeholders.length - stale.length,
+        executable: rows.length - placeholders.length - stale.length - retired.length,
         by_kind: byKind,
         placeholders,
         stale,
+        retired,
       },
     });
   });

@@ -8,6 +8,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, migrate } from './db/client.js';
+import { catalogHash, loadAutomation } from './sandbench-catalog-source.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const dataDir = path.join(root, 'data');
@@ -98,6 +99,9 @@ async function main() {
 
   let suiteCount = 0;
   let caseCount = 0;
+  let automated = 0;
+  let retired = 0;
+  const automation = loadAutomation();
 
   for (const t of catalog.types) {
     const typeEnum = TYPE_TO_ENUM[t.key] || 'other';
@@ -137,26 +141,49 @@ async function main() {
       suiteCount++;
 
       for (const c of s.cases) {
+        // The key stays derived from the original catalog name so renames keep the row.
         const caseKey = `SB-${t.key.toUpperCase()}-${s.id.toUpperCase()}-${slug(c.name).toUpperCase()}`.slice(0, 120);
         // The catalog JSON is a design taxonomy: its status / duration / "tested" fields are
-        // mock-up values, not results, and it carries no script. Seed the case as an honest
-        // draft to be automated; the catalog audit lists it until a script is attached.
+        // mock-up values, not results, and it carries no script. What actually runs comes
+        // from data/sandbench-catalog-automation.json: a SIT test, a load profile, or a
+        // retirement reason. A case with no entry stays an honest draft to be automated.
+        const plan = automation[`${t.key}/${s.id}/${c.name}`] || {};
+        const tags = ['sandbench', 'seeded', t.key, t.category, s.id];
+        let method = 'http', script: string | null = null, rules: Record<string, unknown> = {};
+        let automationStatus = 'to_be_automated', lifecycle = 'draft';
+        let description = `${s.name}: ${s.desc}`;
+        if (plan.retire) {
+          automationStatus = 'not_automatable';
+          lifecycle = 'deprecated';
+          description = `${description}\nRetired: ${plan.retire}`;
+          tags.push('retired');
+          retired++;
+        } else if (plan.script) {
+          method = 'sit'; script = plan.script;
+          automationStatus = 'automated'; lifecycle = 'active';
+          automated++;
+        } else if (plan.validation_rules) {
+          method = plan.execution_method || 'performance'; rules = plan.validation_rules;
+          automationStatus = 'automated'; lifecycle = 'active';
+          automated++;
+        }
         const { rows } = await query(
           `INSERT INTO test_cases (
-             key, name, description, application_id, test_type, execution_method,
-             automation_status, lifecycle, tags, severity, priority, author_id, created_by
+             key, name, description, application_id, test_type, execution_method, script,
+             validation_rules, automation_status, lifecycle, tags, severity, priority, author_id, created_by
            ) VALUES (
-             $1, $2, $3, $4, COALESCE($5::test_type, 'other'), 'http',
-             'to_be_automated', 'draft', $6, 'medium', 'p2', $7, 'sandbench-seed'
+             $1, $2, $3, $4, COALESCE($5::test_type, 'other'), $6, $7,
+             $8::jsonb, $9::automation_status, $10::test_lifecycle, $11, 'medium', 'p2', $12, 'sandbench-seed'
            )
            ON CONFLICT (key) DO UPDATE SET
              name = EXCLUDED.name, description = EXCLUDED.description, tags = EXCLUDED.tags,
-             updated_at = now()
+             execution_method = EXCLUDED.execution_method, script = EXCLUDED.script,
+             validation_rules = EXCLUDED.validation_rules, automation_status = EXCLUDED.automation_status,
+             lifecycle = EXCLUDED.lifecycle, updated_at = now()
            RETURNING id`,
           [
-            caseKey, c.name, `${s.name}: ${s.desc}`, appId, typeEnum,
-            ['sandbench', 'seeded', t.key, t.category, s.id],
-            s.owner,
+            caseKey, plan.title || c.name, description, appId, typeEnum, method, script,
+            JSON.stringify(rules), automationStatus, lifecycle, tags, s.owner,
           ]
         );
         await query(
@@ -176,6 +203,7 @@ async function main() {
     `UPDATE applications SET metadata = metadata || $1::jsonb, updated_at = now() WHERE id = $2`,
     [
       JSON.stringify({
+        sandbench_catalog_hash: catalogHash(),
         sandbench_types: catalog.types.map((t) => ({
           key: t.key, label: t.label, kicker: t.kicker, icon: t.icon,
           subtitle: t.subtitle, category: t.category,
@@ -187,7 +215,7 @@ async function main() {
     ]
   );
 
-  console.log(`Sand Bench catalog seeded: ${catalog.types.length} types, ${suiteCount} suites, ${caseCount} cases.`);
+  console.log(`Sand Bench catalog seeded: ${catalog.types.length} types, ${suiteCount} suites, ${caseCount} cases (${automated} automated, ${retired} retired, ${caseCount - automated - retired} to be automated).`);
   console.log('All screen data must be loaded from Postgres via API — no hardcoded dummy rows in UI.');
   await pool.end();
 }

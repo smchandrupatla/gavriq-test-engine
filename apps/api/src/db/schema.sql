@@ -473,6 +473,7 @@ SET tags = ARRAY(SELECT t FROM unnest(tags) AS t WHERE t NOT LIKE 'tone:%' AND t
 WHERE created_by = 'sandbench-seed'
   AND (script IS NULL OR script = '')
   AND steps = '[]'::jsonb
+  AND validation_rules = '{}'::jsonb
   AND (automation_status = 'automated'
        OR expected_results LIKE 'Duration ref:%'
        OR EXISTS (SELECT 1 FROM unnest(tags) AS t WHERE t LIKE 'tone:%' OR t LIKE 'status:%'));

@@ -138,7 +138,7 @@ describe('suites, run links, definitions and audit', () => {
     const a = await api('/api/v1/catalog-audit');
     assert.equal(a.status, 200);
     const d = a.body.data;
-    assert.equal(d.total, d.executable + d.placeholders.length + d.stale.length);
+    assert.equal(d.total, d.executable + d.placeholders.length + d.stale.length + (d.retired || []).length);
     for (const p of d.placeholders) assert.ok(p.reason);
   });
 });

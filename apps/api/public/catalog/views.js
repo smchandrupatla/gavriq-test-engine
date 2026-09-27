@@ -32,6 +32,8 @@ function suiteLink(id, label) { return id ? '<a href="#/suite/' + encodeURICompo
 function kpi(label, value, sub, cls) {
   return '<div class="kpi"><div class="kpi-label">' + esc(label) + '</div><div class="kpi-value ' + (cls || '') + '">' + value + '</div>' + (sub ? '<div class="kpi-sub">' + sub + '</div>' : '') + '</div>';
 }
+/** Retired catalog cases stay in the database for history but leave every list and picker. */
+function isRetired(c) { return c && (c.lifecycle === 'deprecated' || c.lifecycle === 'archived'); }
 function isPlaceholder(id) { return !!(state.audit && state.audit.placeholderIds.has(id)); }
 function placeholderBadge(id) { return isPlaceholder(id) ? ' <span class="badge placeholder" data-tip="No script, steps or runner config behind this case">No script</span>' : ''; }
 
@@ -288,7 +290,7 @@ async function renderCaseView(id, tab) {
   const last = runs[0];
   const tabs = [['details', 'Details'], ['script', 'Script'], ['runs', 'Runs & evidence (' + runs.length + ')']];
   let h = '<div class="crumbs"><a href="javascript:history.back()">Back</a> / <span class="key">' + esc(c.key) + '</span></div>' +
-    '<div class="card"><div class="card-head"><h2>' + esc(c.name) + (def && !def.executable ? ' <span class="badge placeholder">No executable script</span>' : '') + '</h2>' +
+    '<div class="card"><div class="card-head"><h2>' + esc(c.name) + (def && def.kind === 'retired' ? ' <span class="badge skipped">Retired</span>' : def && !def.executable ? ' <span class="badge placeholder">No executable script</span>' : '') + '</h2>' +
     '<div class="row-actions"><button class="btn primary" id="caseRun"' + (def && !def.executable ? ' disabled title="Nothing would run — attach a script first"' : '') + '>Run this case</button></div></div>' +
     '<div class="tabs" role="tablist">' + tabs.map(([k, l]) => '<button role="tab" class="tab' + (k === tab ? ' active' : '') + '" data-tab="' + k + '" aria-selected="' + (k === tab) + '">' + esc(l) + '</button>').join('') + '</div><div class="pad" id="caseTab"></div></div>';
   el('content').innerHTML = h;
@@ -473,11 +475,12 @@ function openPicker(initialIds, onApply) {
   const cats = categoryOptions();
   let cat = 'all', q = '', hidePlaceholders = false;
   el('pickerCat').innerHTML = cats.map(([k, l]) => {
-    const n = k === 'all' ? state.cases.length : state.cases.filter((c) => caseCategory(c, sitIdx) === k).length;
+    const live = state.cases.filter((c) => !isRetired(c));
+    const n = k === 'all' ? live.length : live.filter((c) => caseCategory(c, sitIdx) === k).length;
     return n || k === 'all' ? '<option value="' + esc(k) + '">' + esc(l) + ' (' + n + ')</option>' : '';
   }).join('');
   el('pickerCat').value = 'all'; el('pickerSearch').value = ''; el('pickerHide').checked = false;
-  const visible = () => state.cases.filter((c) => (cat === 'all' || caseCategory(c, sitIdx) === cat) && (!hidePlaceholders || !isPlaceholder(c.id)) &&
+  const visible = () => state.cases.filter((c) => !isRetired(c) && (cat === 'all' || caseCategory(c, sitIdx) === cat) && (!hidePlaceholders || !isPlaceholder(c.id)) &&
     (!q || String(c.name).toLowerCase().includes(q) || String(c.key).toLowerCase().includes(q)));
   const draw = () => {
     const list = visible();
@@ -518,12 +521,14 @@ function renderAuditView() {
   el('viewTitle').textContent = 'Catalog audit';
   const a = state.audit;
   if (!a) { el('content').innerHTML = '<div class="empty">Audit unavailable.</div>'; return; }
-  const kinds = { 'sit-file': 'SIT case files', 'named-script': 'Named scripts', steps: 'Step scripts', performance: 'Load profiles', placeholder: 'Placeholders (no script)', 'stale-sit': 'Stale SIT imports' };
+  const kinds = { 'sit-file': 'SIT case files', 'named-script': 'Named scripts', steps: 'Step scripts', performance: 'Load profiles', placeholder: 'Placeholders (no script)', 'stale-sit': 'Stale SIT imports', retired: 'Retired' };
+  const retired = a.retired || [];
   const table = (rows) => '<div class="table-wrap"><table><thead><tr><th>Test case</th><th>Type</th><th>Seeded by</th><th>Why it is not real</th></tr></thead><tbody>' +
     rows.map((r) => '<tr><td>' + caseLink(r.id, r.name) + '<div class="key small">' + esc(r.key) + '</div></td><td>' + esc(r.test_type) + '</td><td class="small">' + esc(r.created_by || '—') + '</td><td class="small">' + esc(r.reason) + '</td></tr>').join('') + '</tbody></table></div>';
   el('content').innerHTML = '<div class="kpi-grid">' + kpi('All cases', a.total) + kpi('Executable', a.executable, 'real code or config behind them', 'green') +
-    kpi('Placeholders', a.placeholders.length, 'no script — blocked when run', a.placeholders.length ? 'red' : 'green') + kpi('Stale SIT', a.stale.length, 'file or test gone', a.stale.length ? 'amber' : 'green') + '</div>' +
+    kpi('Placeholders', a.placeholders.length, 'no script — blocked when run', a.placeholders.length ? 'red' : 'green') + kpi('Stale SIT', a.stale.length, 'file or test gone', a.stale.length ? 'amber' : 'green') + kpi('Retired', retired.length, 'kept for history, not run') + '</div>' +
     '<div class="card"><div class="card-head"><h2>By definition kind</h2></div><dl class="kv pad">' + Object.entries(a.by_kind).map(([k, n]) => '<dt>' + esc(kinds[k] || k) + '</dt><dd>' + esc(n) + '</dd>').join('') + '</dl></div>' +
     '<div class="card"><div class="card-head"><h2>Placeholder cases</h2><span class="muted small">Catalog entries with nothing behind them. Runs now report them as blocked instead of a fake pass.</span></div>' + (a.placeholders.length ? table(a.placeholders) : '<div class="empty">None.</div>') + '</div>' +
-    (a.stale.length ? '<div class="card"><div class="card-head"><h2>Stale SIT imports</h2></div>' + table(a.stale) + '</div>' : '');
+    (a.stale.length ? '<div class="card"><div class="card-head"><h2>Stale SIT imports</h2></div>' + table(a.stale) + '</div>' : '') +
+    (retired.length ? '<details class="card"><summary class="card-head"><h2>Retired cases (' + retired.length + ')</h2><span class="muted small">Not applicable to Sand Bench or not testable in this stack. Hidden from category lists and the suite picker.</span></summary>' + table(retired) + '</details>' : '');
 }
