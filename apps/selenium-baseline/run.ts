@@ -28,6 +28,7 @@ import { ScreenValidator } from './screen-validator.js';
 import { FailureReporter, type IssueEntry } from './failure-reporter.js';
 import { TestRunSummaryGenerator } from './test-run-summary.js';
 import { PromptFormatter } from './prompt-formatter.js';
+import { runWorkflowChecks, type WorkflowStep } from './workflow.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,8 @@ export interface BaselineRunOptions {
   menuFilter?: string[];
   /** Custom validation checks per screen */
   customChecks?: Record<string, { selector: string; required: boolean }[]>;
+  /** DB-persistence workflow checks to run after screen validation */
+  workflowChecks?: WorkflowStep[];
 }
 
 export interface BaselineRunResult {
@@ -49,6 +52,8 @@ export interface BaselineRunResult {
   issues: IssueEntry[];
   /** Test run summary */
   summary: ReturnType<TestRunSummaryGenerator['generate']>;
+  /** Workflow check results (if workflowChecks provided) */
+  workflowResults?: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }>;
   /** Whether the run passed (no failures) */
   passed: boolean;
 }
@@ -141,6 +146,24 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
     if (!homeValidation.passed) {
       reporter.recordValidationFailure('Home', 'Home page', homeValidation, '');
     }
+
+    // 4. Run workflow checks (DB-persistence)
+    let workflowResults: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }> | undefined;
+    if (options?.workflowChecks?.length) {
+      console.log('\n=== Workflow Checks ===');
+      const wfResults = await runWorkflowChecks(driver, config, { workflows: options.workflowChecks });
+      workflowResults = wfResults.map((r) => ({ name: r.name, toastOk: r.toastOk, dbOk: r.dbOk, fixedFieldsOk: r.fixedFieldsOk, error: r.error }));
+      for (const r of wfResults) {
+        const status = r.error ? '✗ FAIL' : '✓ PASS';
+        console.log(`  ${status} — ${r.name}${r.error ? ` (${r.error})` : ''}`);
+        if (r.error) {
+          reporter.recordNavigationFailure(
+            { success: false, item: { label: r.name, locator: '', hasChildren: false, children: [], clicked: false }, screenName: null, error: r.error, menuChanged: false, menuBefore: null, menuAfter: null },
+            r.screenshotPath,
+          );
+        }
+      }
+    }
   });
 
   // 4. Generate reports
@@ -160,7 +183,8 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
     jsonReport,
     issues: report.issues,
     summary,
-    passed: report.failCount === 0,
+    workflowResults,
+    passed: report.failCount === 0 && (!workflowResults || workflowResults.every((r) => !r.error)),
   };
 }
 
