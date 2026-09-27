@@ -76,14 +76,14 @@ export function loadConfig(): SeleniumBaselineConfig {
     headless: boolEnv('SELENIUM_HEADLESS', true),
     windowWidth: parseIntEnv('SELENIUM_WINDOW_WIDTH', 1440),
     windowHeight: parseIntEnv('SELENIUM_WINDOW_HEIGHT', 900),
-    menuContainerSelector: process.env.MENU_CONTAINER_SELECTOR || '.opsc-nav',
-    menuItemSelector: process.env.MENU_ITEM_SELECTOR || '.opsc-navitem',
+    menuContainerSelector: process.env.MENU_CONTAINER_SELECTOR || '.opsc-sidebar',
+    menuItemSelector: process.env.MENU_ITEM_SELECTOR || '.opsc-navitem, [role="navigation"] a, aside a',
     subNavSelector: process.env.SUB_NAV_SELECTOR || '.opsc-subnav',
     pageHeaderSelector: process.env.PAGE_HEADER_SELECTOR || 'h1, h2, [role="heading"]',
     errorSelector: process.env.ERROR_SELECTOR || '.error-message, .alert-danger, [class*="error"]',
     popupSelector: process.env.POPUP_SELECTOR || '.modal, .popup, .dialog, [role="dialog"]',
     sidebarSelector: process.env.SIDEBAR_SELECTOR || '.opsc-nav, aside, [role="navigation"]',
-    navigationDelayMs: parseIntEnv('NAVIGATION_DELAY_MS', 500),
+    navigationDelayMs: parseIntEnv('NAVIGATION_DELAY_MS', 1000),
     maxScreenshots: parseIntEnv('MAX_SCREENSHOTS', 200),
   };
 }
