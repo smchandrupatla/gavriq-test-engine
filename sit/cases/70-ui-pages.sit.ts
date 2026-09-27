@@ -143,6 +143,58 @@ test("the Configuration page renders its own real page header", async () => {
   await assertPage("Configuration", undefined, "Configuration");
 });
 
+test("the Configuration → Environment defaults page renders its own real page header", async () => {
+  await assertPage("Configuration", "Environment defaults", "Environment defaults");
+});
+
+test("the Configuration → Notifications page renders its own real page header", async () => {
+  await assertPage("Configuration", "Notifications", "Notifications");
+});
+
+test("the Configuration → API access page renders its own real page header", async () => {
+  await assertPage("Configuration", "API access", "API access");
+});
+
+test("the Configuration → Data retention page renders its own real page header", async () => {
+  await assertPage("Configuration", "Data retention", "Data retention");
+});
+
+test("the Configuration → User roles page renders its own real page header", async () => {
+  await assertPage("Configuration", "User roles", "User roles");
+});
+
+test("the Configuration → Eventing page renders its own real page header", async () => {
+  await assertPage("Configuration", "Eventing", "Eventing");
+});
+
+test("the Configuration → App configs page renders its own real page header", async () => {
+  await assertPage("Configuration", "App configs", "App configs");
+});
+
+test("the Configuration → Functional access page renders its own real page header", async () => {
+  await assertPage("Configuration", "Functional access", "Functional access");
+});
+
 test("the Naming conventions page renders its own real page header", async () => {
   await assertPage("Naming conventions", undefined, "Naming conventions");
+});
+
+test("the Configuration → External systems page renders its own real page header", async () => {
+  await assertPage("Configuration", "External systems", "External systems");
+});
+
+test("the Configuration → Use-case templates page renders its own real page header", async () => {
+  await assertPage("Configuration", "Use-case templates", "Use-case templates");
+});
+
+test("the Configuration → Feature IDs page renders its own real page header", async () => {
+  await assertPage("Configuration", "Feature IDs", "Feature IDs");
+});
+
+test("the Configuration → Use-case review page renders its own real page header", async () => {
+  await assertPage("Configuration", "Use-case review", "Use-case review");
+});
+
+test("the Configuration → Application Events page renders its own real page header", async () => {
+  await assertPage("Configuration", "Application Events", "Application Events");
 });
