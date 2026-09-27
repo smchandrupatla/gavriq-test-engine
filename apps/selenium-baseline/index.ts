@@ -13,3 +13,4 @@ export { FailureReporter, type IssueEntry, type FailureReport, type FailureType 
 export { TestRunSummaryGenerator, type TestRunSummary, type StabilityRating, type RunMetrics } from './test-run-summary.js';
 export { PromptFormatter, type FormattedPrompt } from './prompt-formatter.js';
 export { runBaseline, type BaselineRunOptions, type BaselineRunResult } from './run.js';
+export { runWorkflowChecks, type WorkflowStep, type WorkflowResult, type WorkflowCheckOptions } from './workflow.js';
