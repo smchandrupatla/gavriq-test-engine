@@ -63,11 +63,11 @@ export async function testCaseRoutes(app: FastifyInstance) {
            severity, priority, tags, owner_id, author_id, automation_status, lifecycle,
            created_by
          ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'other'),$10,$11,COALESCE($12,'[]'::jsonb),
-           $13,COALESCE($14,'{}'::jsonb),$15,$16,$17,COALESCE($18,'[]'::jsonb),$19,
+           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::test_type,'other'),$10::test_level,$11,COALESCE($12,'[]'::jsonb),
+           $13,COALESCE($14,'{}'::jsonb),$15::execution_location,$16,$17,COALESCE($18,'[]'::jsonb),$19,
            COALESCE($20,'[]'::jsonb),COALESCE($21,'{}'::jsonb),COALESCE($22,300),
-           COALESCE($23,'{"max":0}'::jsonb),COALESCE($24,'medium'),COALESCE($25,'p2'),
-           COALESCE($26,'{}'),$27,$28,COALESCE($29,'manual'),COALESCE($30,'draft'),$31
+           COALESCE($23,'{"max":0}'::jsonb),COALESCE($24::severity,'medium'),COALESCE($25::priority,'p2'),
+           COALESCE($26::text[],'{}'),$27,$28,COALESCE($29::automation_status,'manual'),COALESCE($30::test_lifecycle,'draft'),$31
          ) RETURNING *`,
         [
           b.key, b.name, b.description ?? null, b.application_id,
