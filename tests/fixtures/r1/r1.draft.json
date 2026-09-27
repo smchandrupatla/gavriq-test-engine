@@ -1,0 +1,28 @@
+{
+  "name": "Reporting fixture R1",
+  "format": "json",
+  "root": "Report",
+  "description": "Six logical leaves. transaction.reference is optional. transaction occurs 1..3.",
+  "businessVersion": "R1.1",
+  "dialect": "json-schema-draft-07",
+  "tree": {
+    "name": "Report",
+    "kind": "group",
+    "children": [
+      { "name": "reportId", "type": "string", "required": true, "minLength": 5, "maxLength": 5, "pattern": "^[0-9]{5}$" },
+      { "name": "createdAt", "type": "string", "required": true },
+      { "name": "currency", "type": "string", "required": true, "maxLength": 3, "enum": ["AUD", "EUR", "USD", "SGD"] },
+      {
+        "name": "transaction",
+        "kind": "group",
+        "minOccurs": 1,
+        "maxOccurs": 3,
+        "children": [
+          { "name": "amount", "type": "decimal", "required": true },
+          { "name": "country", "type": "string", "required": true, "maxLength": 2 },
+          { "name": "reference", "type": "string", "required": false }
+        ]
+      }
+    ]
+  }
+}

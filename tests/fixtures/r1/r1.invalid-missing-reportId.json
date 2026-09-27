@@ -1,0 +1,5 @@
+{
+  "createdAt": "2026-09-17",
+  "currency": "AUD",
+  "transaction": { "amount": 1000, "country": "AU" }
+}

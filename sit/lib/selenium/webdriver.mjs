@@ -41,7 +41,8 @@ export async function openSession() {
       alwaysMatch: {
         browserName: "chrome",
         "goog:chromeOptions": {
-          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,900"],
+          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,900",
+            ...(process.env.BASELINE_CONTAINER === '1' ? ['--host-resolver-rules=MAP unpkg.com ~NOTFOUND'] : [])],
         },
       },
     },

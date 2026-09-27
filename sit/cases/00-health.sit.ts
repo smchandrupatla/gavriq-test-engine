@@ -34,10 +34,14 @@ test("test hub (MQ/Kafka/API mimic) is healthy and decoupled from the app", asyn
 });
 
 test("db viewer is healthy and can reach the same database as the app", async () => {
-  const { status, body } = await dbviewerJson<{ status: string; mode: string }>("/health");
+  const { status, body } = await dbviewerJson<{ status: string; role: string; apps: number }>("/health");
   assert.equal(status, 200);
   assert.equal(body.status, "ok");
-  assert.equal(body.mode, "read-only");
+  assert.equal(body.role, "dbviewer");
+  assert.ok(body.apps > 0);
+  const tables = await dbviewerJson<{ data: Array<{ table_name: string }> }>('/api/tables?app=sandbench');
+  assert.equal(tables.status, 200);
+  assert.ok(tables.body.data.some(row => row.table_name === 'test_cases'), 'viewer must read the application database');
 });
 
 test("web front end serves the deployed console", async () => {

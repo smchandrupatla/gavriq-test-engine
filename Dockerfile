@@ -29,6 +29,9 @@ RUN npm install
 
 COPY apps ./apps
 COPY sit ./sit
+# Helpers and fixtures synced from Sand Bench with sit/ (scripts/sync-sandbench-sit.mjs)
+COPY tests/helpers ./tests/helpers
+COPY tests/fixtures ./tests/fixtures
 COPY dev ./dev
 COPY docs ./docs
 COPY data ./data

@@ -1,0 +1,5 @@
+[
+  { "reportId": "00123", "createdAt": "2026-09-17", "currency": "AUD", "transaction": { "amount": 999, "country": "AU" }, "expectedDetection": false },
+  { "reportId": "00124", "createdAt": "2026-09-17", "currency": "AUD", "transaction": { "amount": 1000, "country": "AU" }, "expectedDetection": true },
+  { "reportId": "00125", "createdAt": "2026-09-17", "currency": "AUD", "transaction": { "amount": 1001, "country": "AU" }, "expectedDetection": true }
+]

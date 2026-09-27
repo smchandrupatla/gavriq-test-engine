@@ -9,6 +9,8 @@
     "forceConsistentCasingInFileNames": true,
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": false,
     "noEmit": true,
     "types": ["node"]
   },

@@ -9,7 +9,10 @@ export const ENV = {
   dbviewerBase: trimSlash(process.env.SIT_DBVIEWER_BASE || "http://dbviewer:8090"),
   tenantSlug: process.env.SIT_TENANT_SLUG || "acme-demo",
   username: process.env.SIT_USERNAME || "operator.acme",
-  password: process.env.SIT_PASSWORD || "DemoOnly!Operator-2026#Change",
+  // Must match dev/demo-seed/sand-bench-demo-tenants-users.json's operator.acme
+  // temporaryPassword -- b9e119e rotated every demo seed password to this value but
+  // missed this default, so every SIT run failed at login with 401 until now.
+  password: process.env.SIT_PASSWORD || "SandBenchDemo1234!",
   messageTypeCode: process.env.SIT_MESSAGE_TYPE || "pain.001.001.09",
   // Performance cases (91-performance-soak, 92-performance-burst) are bounded-duration by
   // design -- see those files for why. Defaults are kept short so they don't meaningfully

@@ -40,6 +40,12 @@ jobs:
       - name: Install
         run: npm install
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: SIT copy matches Sand Bench manifest
+        run: npm run check:sit-sync
+
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 30); do
@@ -60,7 +66,7 @@ jobs:
         run: npm run seed
 
       - name: Unit smoke tests
-        run: npx tsx --test tests/enterprise-api-smoke.test.ts
+        run: npm run test:unit
 
       - name: Start API
         run: |

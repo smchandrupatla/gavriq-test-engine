@@ -4,15 +4,13 @@ export const APPS = [
   { id: "sand-bench", title: "Sand Bench Enterprise", summary: "Rule assurance bench, official console, API." },
   { id: "testhub", title: "Testhub", summary: "External system simulator." },
   { id: "desks", title: "Channel desks", summary: "MQ, Kafka, and API desks." },
-  { id: "agentdesk", title: "Agent Desk", summary: "Workers and orchestration." },
   { id: "security", title: "Security tooling", summary: "Trivy, ZAP, Semgrep, Security Desk." },
 ];
 
 export function appOf(fileName = "", filePath = "") {
   const blob = `${filePath} ${fileName}`.replace(/\\/g, "/");
   const nested = blob.match(/cases\/apps\/([^/]+)\//) || blob.match(/apps\/([^/]+)\//);
-  if (nested && !blob.includes("apps/agentdesk")) return nested[1];
-  if (fileName.startsWith("90-") || blob.includes("agentdesk") || blob.includes("90-agents")) return "agentdesk";
+  if (nested) return nested[1];
   if (fileName.startsWith("8") || /zap|sast|trivy|secportal/.test(blob)) return "security";
   if (/^(10-|20-|30-)/.test(fileName)) return "testhub";
   return "sand-bench";
@@ -24,7 +22,6 @@ export const TYPES = [
   { id: "gui", title: "GUI", summary: "Official console pages, Selenium screens, fields, workflows." },
   { id: "e2e", title: "End to end", summary: "First-run path a control owner can repeat." },
   { id: "security", title: "Security", summary: "ASVS 5.0 L1, OWASP API Top 10, vuln scan, pentest-lite." },
-  { id: "agents", title: "Agent Desk", summary: "Independent AI workers portal. Optional. Main app runs if it is down." },
   { id: "performance", title: "Performance", summary: "Bounded-duration soak/endurance and burst-concurrency checks against the main application." },
 ];
 
@@ -39,7 +36,6 @@ export const GROUPS = {
   ],
   gui: [{ id: "smoke", title: "Console smoke" }],
   e2e: [{ id: "first-run", title: "First-run path" }],
-  agents: [{ id: "workers", title: "Worker portal" }],
   security: [
     { id: "authentication", title: "Authentication (ASVS V6)" },
     { id: "session", title: "Session (ASVS V7)" },
@@ -64,7 +60,6 @@ export function suiteOf(fileName) {
   if (fileName.startsWith("60-") || fileName.startsWith("61-") || fileName.startsWith("62-") || fileName.startsWith("63-")) return "gui";
   if (fileName.startsWith("70-")) return "e2e";
   if (fileName.startsWith("8")) return "security";
-  if (fileName.startsWith("90-")) return "agents";
   if (fileName.startsWith("91-") || fileName.startsWith("92-")) return "performance";
   return "other";
 }
@@ -72,7 +67,6 @@ export function suiteOf(fileName) {
 export function groupOf(fileName, testName = "") {
   if (fileName.startsWith('51-') || fileName.startsWith('64-')) return 'use-cases';
   const n = `${fileName} ${testName}`.toLowerCase();
-  if (fileName.startsWith("90-")) return "workers";
   if (fileName.startsWith("91-")) return "soak";
   if (fileName.startsWith("92-")) return "burst";
   if (fileName.startsWith("00-")) return "reachability";

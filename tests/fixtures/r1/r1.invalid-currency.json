@@ -1,0 +1,6 @@
+{
+  "reportId": "00123",
+  "createdAt": "2026-09-17",
+  "currency": "XXX",
+  "transaction": { "amount": 1000, "country": "AU" }
+}
