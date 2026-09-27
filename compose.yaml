@@ -37,14 +37,16 @@ services:
       LOG_DIR: /var/log/sandbench
       LOG_SERVICE: sit-console
       SIT_CONSOLE_STORE: /data/history.json
-      SIT_API_BASE: ${SIT_CONSOLE_SIT_API_BASE:-http://127.0.0.1:18787}
+      SIT_API_BASE: ${SIT_CONSOLE_SIT_API_BASE:-http://host.docker.internal:8787}
       SIT_DBVIEWER_BASE: ${SIT_CONSOLE_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
       SIT_DEFAULT_SUITES: health,gui,security
       SIT_ON_START: "false"
       SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
-      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:80}
+      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:8080}
     ports:
       - "127.0.0.1:${TEST_ENGINE_HOST_PORT:-8787}:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - test-engine-evidence:/data/evidence
       - sit-console-data:/data
@@ -80,7 +82,7 @@ services:
         condition: service_healthy
     environment:
       TEST_ENGINE_API: http://test-engine:8787
-      TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
+      TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8080}
       WORKER_POLL_MS: "4000"
       WORKER_API_KEY: ${WORKER_API_KEY:-}
       CHROME_BIN: /usr/bin/chromium
@@ -102,11 +104,13 @@ services:
       dockerfile: sit/Dockerfile
     image: gavriq-test-engine-sit:local
     command: ["node", "sit/run.mjs"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://test-engine:8787}
+      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://host.docker.internal:8787}
       SIT_DBVIEWER_BASE: ${SIT_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
       SIT_TESTHUB_BASE: ${SIT_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
-      SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:80}
+      SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:8080}
     profiles:
       - sit
 
