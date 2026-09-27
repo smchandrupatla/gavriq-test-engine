@@ -446,6 +446,32 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at D
 CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id);
 
 -- ---------------------------------------------------------------------------
+-- Scheduler: run targets, timezone-aware cron, and a log of every firing
+-- ---------------------------------------------------------------------------
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS target JSONB;          -- {scope: all|types|suites|cases, ...}
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_outcome TEXT;     -- queued|skipped_overlap|skipped_empty|error
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS last_execution_id UUID REFERENCES executions(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(next_run_at) WHERE enabled;
+
+CREATE TABLE IF NOT EXISTS schedule_runs (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_id   UUID REFERENCES schedules(id) ON DELETE SET NULL,  -- null = Run now
+  trigger       TEXT NOT NULL,                                      -- schedule|manual|event
+  target        JSONB NOT NULL,
+  case_count    INT NOT NULL DEFAULT 0,
+  execution_id  UUID REFERENCES executions(id) ON DELETE SET NULL,
+  outcome       TEXT NOT NULL,                                      -- queued|skipped_overlap|skipped_empty
+  requested_by  TEXT,
+  message       TEXT,
+  fired_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_runs_fired ON schedule_runs(fired_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- Defect Manager: failures → defect reports → Sand Bench PM → rerun → verified
 -- ---------------------------------------------------------------------------
 CREATE SEQUENCE IF NOT EXISTS defect_key_seq;
