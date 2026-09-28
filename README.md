@@ -68,6 +68,9 @@ GET  /api/v1/release-readiness
 GET  /api/v1/test-status       → engine + in-container combined
 POST /api/v1/build-results     → CI posts in-container results
 GET  /api/v1/agents/context
+GET  /api/v1/ui/summary        → console boot: compact cases + last status, suites, build summary
+GET  /api/v1/ui/live?since=    → console poll: runs with progress, workers, statuses changed since
+POST /api/v1/ui/history        → per-run pass/fail history for a set of case ids (tile charts)
 ```
 
 Docs: [ENTERPRISE-TEST-ENGINE](docs/ENTERPRISE-TEST-ENGINE.md) · [RUNNERS-AND-RBAC](docs/RUNNERS-AND-RBAC.md) · [DOCKER-AND-BUILD-STATUS](docs/DOCKER-AND-BUILD-STATUS.md) · [PRODUCTION](docs/PRODUCTION.md) · [RELEASE](docs/RELEASE.md)

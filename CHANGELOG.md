@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+**Added**
+- Console status tiles: one tile per SIT area, QA/QC type, baseline and in-container build on Overview, and one per suite on every sub-menu page. Red = a case failed, green = everything that ran passed, amber = only skipped/blocked, dashed grey = never run; a pulsing chip marks tiles with cases in an active run
+- Per-tile history panel (loaded on click): results-per-run stacked chart, pass-rate trend, last/average pass rate, most frequent failures, and a run table; "Open details" goes to that tile's page
+- Live run board on Overview and Test runs, and a run screen (`#/run/:id`) with per-case passed / failed / running / pending state, elapsed time, lazy-loaded evidence, cancel and run-again. Runs with no new result for 15 minutes are flagged as stalled instead of spinning forever
+- Lean console endpoints: `GET /api/v1/ui/summary`, `GET /api/v1/ui/live?since=`, `GET /api/v1/ui/executions/:id`, `POST /api/v1/ui/history`, `GET /api/v1/ui/build-history` (all `tests:read` under RBAC)
+
+**Changed**
+- Console boots from one summary call plus one live poll instead of ~12 full-row calls (all case pages, suites, membership, test-status twice); case bodies, run results, evidence and history load on demand. Polls every 3s while a run is active, 15s when idle, 60s in a background tab
+- JSON, JS and HTML responses over 1 KB are gzipped; console assets are served with an ETag so reloads get a 304
+- Indexes on `execution_results(test_case_id, created_at)`, `execution_results(created_at)` and `executions(created_at)`
+- Worker pill and "no live worker" banner count only workers with a recent heartbeat
+
+**Fixed**
+- Console `esc()` mapped `&<>"'` to themselves, so case names were inserted into the page unescaped
+- Restored two fixes lost in merge `427a122`: queueing an execution failed with `execution_location ... is of type text` (0.3.1), and `POST /api/v1/executions/:id/complete` failed with `text = uuid`, so workers could never finish a run (0.3.2)
+
 ## [0.3.3] — 2026-09-18
 
 **Added**
