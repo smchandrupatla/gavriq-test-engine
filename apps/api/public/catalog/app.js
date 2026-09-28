@@ -31,109 +31,667 @@ const SIT_GROUPS=[
 const CAT={qa:'Quality assurance',qc:'Quality control'};
 const TERMINAL=new Set(['passed','failed','skipped','blocked','cancelled','error','timed_out']);
 const ACTIVE=new Set(['queued','preparing','running','claiming']);
-const state={view:'overview',typeId:null,suiteId:null,sitGroupId:null,suites:[],membership:[],cases:[],statusByCase:new Map(),environments:[],envId:null,workers:[],executions:[],dashboard:null,buildResults:[],lastBuildId:null,inContainer:[],application:null,typesFromDb:null,search:'',selected:new Set(),tracked:new Set(),liveRuns:new Map()};
+const FAILED=new Set(['failed','error','timed_out']);
+const ROWS=100;                            // case-table rows rendered before "Show more"
+const POLL_ACTIVE=3000,POLL_IDLE=15000,POLL_HIDDEN=60000;
+const STALL_MS=15*60*1000;                 // active run with no new result for this long is flagged as stalled
+const WORKER_FRESH_MS=90*1000;             // workers heartbeat every 15s
+const TONES={
+  pass:{label:'Passing',icon:'✓',dot:'green'},
+  fail:{label:'Failing',icon:'✕',dot:'red'},
+  warn:{label:'Needs attention',icon:'!',dot:'amber'},
+  never:{label:'Never run',icon:'○',dot:''},
+  empty:{label:'No cases',icon:'–',dot:null},
+};
+const state={
+  view:'overview',typeId:null,sitGroupId:null,runId:null,suiteId:null,
+  // One lean summary call; case bodies, run results, evidence and history load on demand.
+  loaded:false,cases:[],suites:[],environments:[],application:null,typesFromDb:null,build:null,stats:{},idx:null,
+  // Live poll (/api/v1/ui/live)
+  liveLoaded:false,executions:[],workers:[],since:null,catalogSig:null,liveSig:'',skew:0,lastPoll:null,
+  // UI
+  envId:null,search:'',selected:new Set(),rowLimit:ROWS,tile:null,tiles:new Map(),panels:new Set(),
+  history:new Map(),charts:new Map(),open:new Set(),section:null,live:{inRun:new Map(),current:new Set()},
+  run:null,evidence:new Map(),buildRows:null,
+};
 const el=id=>document.getElementById(id);
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&','<':'<','>':'>','"':'"',"'":'&#39;'}[c]));
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(path,opts){const res=await fetch(path,opts);const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body?.error?.message||body?.error||('HTTP '+res.status));return body;}
-function toast(m){const n=document.createElement('div');n.className='toast';n.textContent=m;el('toastWrap').appendChild(n);setTimeout(()=>n.remove(),6000);}
+const postJson=(path,body)=>api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+function toast(m,href){const n=document.createElement(href?'a':'div');n.className='toast';n.textContent=m;if(href){n.href=href;n.append(' →');}el('toastWrap').appendChild(n);setTimeout(()=>n.remove(),6000);}
 function banner(m){const b=el('banner');if(!m){b.hidden=true;return;}b.hidden=false;b.textContent=m;}
-async function fetchAllCases(){let off=0,all=[];for(;;){const r=await api('/api/v1/test-cases?limit=200&offset='+off);const rows=r.data||[];all=all.concat(rows);off+=rows.length;if(!rows.length||off>=(r.total??all.length))break;}return all;}
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+const plural=(n,w)=>n+' '+w+(n===1?'':'s');
+const ms=t=>t?new Date(t).getTime():0;
+const serverNow=()=>Date.now()+state.skew;
+function ago(t){if(!t)return '—';const s=Math.max(0,(serverNow()-ms(t))/1000);if(s<60)return Math.floor(s)+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+function dur(v){if(v==null||v<0)return '—';const s=Math.round(v/1000);if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m '+(s%60)+'s';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';}
+const secs=v=>v!=null?(v/1000).toFixed(1)+'s':'—';
+const when=t=>t?new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+
+// ---------------------------------------------------------------------------
+// Catalog model: built once per summary load, so renders never rescan membership.
+// ---------------------------------------------------------------------------
 function typeList(){return state.typesFromDb||TYPES;}
+function typeTitle(id){const t=typeList().find(x=>x.id===id)||TYPES.find(x=>x.id===id);return t?t.title:(id==='other'?'Uncategorised':id);}
 function isSitCase(c){const tags=(c.tags||[]).map(t=>String(t).toLowerCase());if(tags.includes('sit'))return true;const k=String(c.key||'');return k.startsWith('SIT-')||k.startsWith('sit-');}
 function isSitSuite(s){return String(s.key||'').toLowerCase().startsWith('sit-');}
-function typeOfCase(c){if(isSitCase(c))return 'sit';const tags=(c.tags||[]).map(t=>String(t).toLowerCase());for(const t of typeList()){if(tags.includes(String(t.id).toLowerCase()))return t.id;}const suiteIds=state.membership.filter(m=>m.test_case_id===c.id).map(m=>m.test_suite_id);for(const sid of suiteIds){const s=state.suites.find(x=>x.id===sid);if(!s)continue;const st=String(s.suite_type||'');if(typeList().some(t=>t.id===st))return st;const k=String(s.key||'');if(k.startsWith('sb-')){const p=k.split('-');if(p.length>=2&&typeList().some(t=>t.id===p[1]))return p[1];}}return 'other';}
-function sitCases(){return state.cases.filter(isSitCase);}
-function catalogCases(){return state.cases.filter(c=>!isSitCase(c));}
-function casesForType(id){return catalogCases().filter(c=>typeOfCase(c)===id);}
-function suitesForType(typeKey){return state.suites.filter(s=>{if(isSitSuite(s))return false;if(String(s.key||'').startsWith('sb-type-'))return false;if(String(s.suite_type||'')===typeKey)return true;if(String(s.key||'').startsWith('sb-'+typeKey+'-'))return true;return false;});}
-function sitSuitesInGroup(g){const keys=new Set((g.keys||[]).map(k=>k.toLowerCase()));return state.suites.filter(s=>{if(!isSitSuite(s))return false;const k=String(s.key||'').toLowerCase();if(keys.has(k))return true;return [...keys].some(prefix=>k===prefix||k.startsWith(prefix+'-'));});}
-function casesInSuite(suiteId){const ids=new Set(state.membership.filter(m=>m.test_suite_id===suiteId).map(m=>m.test_case_id));return state.cases.filter(c=>ids.has(c.id));}
+function typeOfCase(c,types,suiteById){
+  if(isSitCase(c))return 'sit';
+  const tags=new Set((c.tags||[]).map(t=>String(t).toLowerCase()));
+  for(const t of types)if(tags.has(String(t.id).toLowerCase()))return t.id;
+  for(const sid of c.suite_ids||[]){
+    const s=suiteById.get(sid);if(!s)continue;
+    const st=String(s.suite_type||'');
+    if(types.some(t=>t.id===st))return st;
+    const k=String(s.key||'');
+    if(k.startsWith('sb-')){const p=k.split('-');if(p.length>=2&&types.some(t=>t.id===p[1]))return p[1];}
+  }
+  return 'other';
+}
+function suitesForType(typeKey){return state.suites.filter(s=>{if(isSitSuite(s))return false;if(String(s.key||'').startsWith('sb-type-'))return false;if(String(s.suite_type||'')===typeKey)return true;return String(s.key||'').startsWith('sb-'+typeKey+'-');});}
+function sitSuitesInGroup(g){const keys=new Set((g.keys||[]).map(k=>k.toLowerCase()));return state.suites.filter(s=>{if(!isSitSuite(s))return false;const k=String(s.key||'').toLowerCase();return keys.has(k)||[...keys].some(prefix=>k.startsWith(prefix+'-'));});}
+function indexSummary(){
+  const caseById=new Map(state.cases.map(c=>[c.id,c]));
+  const suiteById=new Map(state.suites.map(s=>[s.id,s]));
+  const casesBySuite=new Map(),casesByType=new Map();
+  const types=typeList().some(t=>t.id==='selenium-baseline')?typeList():typeList().concat(TYPES.filter(t=>t.id==='selenium-baseline'));
+  for(const c of state.cases){
+    for(const sid of c.suite_ids||[]){if(!casesBySuite.has(sid))casesBySuite.set(sid,[]);casesBySuite.get(sid).push(c);}
+    const t=typeOfCase(c,types,suiteById);
+    if(!casesByType.has(t))casesByType.set(t,[]);
+    casesByType.get(t).push(c);
+  }
+  const sitGroupSuites=new Map(),sitGroupCases=new Map();
+  for(const g of SIT_GROUPS){
+    const suites=sitSuitesInGroup(g);
+    const seen=new Map();
+    for(const s of suites)for(const c of casesBySuite.get(s.id)||[])seen.set(c.id,c);
+    sitGroupSuites.set(g.id,suites);
+    sitGroupCases.set(g.id,[...seen.values()]);
+  }
+  state.idx={caseById,suiteById,casesBySuite,casesByType,sitGroupSuites,sitGroupCases};
+}
+const casesForType=id=>(state.idx&&state.idx.casesByType.get(id))||[];
+const casesInSuite=id=>(state.idx&&state.idx.casesBySuite.get(id))||[];
+const sitCases=()=>casesForType('sit');
 function filterCases(list){const q=state.search.trim().toLowerCase();if(!q)return list;return list.filter(c=>String(c.name||'').toLowerCase().includes(q)||String(c.key||'').toLowerCase().includes(q));}
-async function loadStatic(){const [su,mem,cases,env,apps,dash,buildRes,statusRes]=await Promise.all([api('/api/v1/suites'),api('/api/v1/test-case-suites'),fetchAllCases(),api('/api/v1/environments'),api('/api/v1/applications'),api('/api/v1/dashboard').catch(()=>({data:null})),api('/api/v1/build-results?application_key=sand-bench').catch(()=>({data:[],build_id:null})),api('/api/v1/test-status?application_key=sand-bench').catch(()=>({data:{}}))]);state.suites=su.data||[];state.membership=mem.data||[];state.cases=cases;state.environments=env.data||[];state.dashboard=dash.data||null;state.buildResults=buildRes.data||[];state.lastBuildId=buildRes.build_id||null;state.inContainer=(statusRes.data&&statusRes.data.in_container)||[];const list=apps.data||[];state.application=list.find(a=>a.key==='sand-bench')||list[0]||null;const meta=state.application&&state.application.metadata&&state.application.metadata.sandbench_types;state.typesFromDb=Array.isArray(meta)&&meta.length?meta.map(t=>({id:t.key,title:t.label||t.key,summary:t.subtitle||'',category:t.category==='qc'?'qc':'qa'})):null;if(!state.envId){const local=state.environments.find(e=>e.key==='local-dev'||e.key==='sandbox');state.envId=(local&&local.id)||(state.environments[0]&&state.environments[0].id)||null;}const sel=el('envSelect');sel.innerHTML=state.environments.map(e=>'<option value="'+esc(e.id)+'"'+(e.id===state.envId?' selected':'')+'>'+esc(e.name||e.key)+'</option>').join('')||'<option value="">None</option>';sel.onchange=()=>{state.envId=sel.value||null;};}
-async function loadDynamic(){const [st,w,ex]=await Promise.all([api('/api/v1/test-status?application_key=sand-bench').catch(()=>api('/api/v1/test-status').catch(()=>({data:{}}))),api('/api/v1/workers'),api('/api/v1/executions')]);const list=Array.isArray(st.data&&st.data.engine_executed)?st.data.engine_executed:(Array.isArray(st.data)?st.data:[]);state.statusByCase=new Map(list.filter(r=>r.last_result).map(r=>[r.id,r.last_result]));if(st.data&&st.data.in_container)state.inContainer=st.data.in_container;state.workers=w.data||[];state.executions=ex.data||[];for(const e of state.executions){if(ACTIVE.has(String(e.status))&&!state.liveRuns.has(e.id)){state.liveRuns.set(e.id,{key:e.key,status:e.status,total:0,done:0,passed:0,failed:0,pct:0});}}}
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
+async function loadSummary(){
+  const d=(await api('/api/v1/ui/summary')).data||{};
+  state.cases=d.cases||[];state.suites=d.suites||[];state.environments=d.environments||[];
+  state.application=d.application||null;state.build=d.build||null;state.stats=d.stats||{};
+  const meta=d.application&&d.application.types;
+  state.typesFromDb=Array.isArray(meta)&&meta.length?meta.map(t=>({id:t.key,title:t.label||t.key,summary:t.subtitle||'',category:t.category==='qc'?'qc':'qa'})):null;
+  if(d.now)state.since=d.now;
+  state.loaded=true;state.buildRows=null;
+  indexSummary();
+  markHistoryStale();
+  renderEnvSelect();
+}
+let polling=false,pollTimer=null;
+async function pollLive(){
+  if(polling)return;
+  polling=true;clearTimeout(pollTimer);
+  try{
+    const res=await api('/api/v1/ui/live'+(state.since?'?since='+encodeURIComponent(state.since):''));
+    await applyLive(res.data||{});
+  }catch(e){/* keep the last frame; the health pill shows reachability */}
+  finally{
+    polling=false;
+    const hot=activeRuns().some(e=>!isStalled(e));
+    pollTimer=setTimeout(pollLive,document.hidden?POLL_HIDDEN:hot?POLL_ACTIVE:POLL_IDLE);
+  }
+}
+async function applyLive(d){
+  const before=new Map(state.executions.map(e=>[e.id,e.status]));
+  if(d.now){state.skew=ms(d.now)-Date.now();state.since=d.now;}
+  state.executions=d.executions||[];state.workers=d.workers||[];state.liveLoaded=true;state.lastPoll=d.now||new Date().toISOString();
+  let dirty=false;
+  for(const r of d.changed||[]){
+    const c=state.idx&&state.idx.caseById.get(r.test_case_id);
+    if(c&&(c.last_status!==r.status||c.last_at!==r.last_at)){c.last_status=r.status;c.last_at=r.last_at;c.last_duration_ms=r.duration_ms;dirty=true;}
+  }
+  for(const e of state.executions){
+    const was=before.get(e.id);
+    if(was&&ACTIVE.has(String(was))&&TERMINAL.has(String(e.status))){toast(e.key+' finished: '+e.status,'#/run/'+e.id);markHistoryStale();dirty=true;}
+  }
+  if(state.catalogSig&&d.catalog_sig&&d.catalog_sig!==state.catalogSig){await loadSummary();dirty=true;}
+  if(d.catalog_sig)state.catalogSig=d.catalog_sig;
+  if(state.view==='run'&&state.run&&!state.run.error&&ACTIVE.has(String(state.run.status))){
+    const prev=JSON.stringify(state.run);await loadRun(state.runId);
+    if(JSON.stringify(state.run)!==prev)dirty=true;
+  }
+  const sig=JSON.stringify([state.executions.map(e=>[e.id,e.status,e.done,e.current_case_id,isStalled(e)]),state.workers.map(workerFresh)]);
+  if(sig!==state.liveSig){state.liveSig=sig;dirty=true;}
+  renderWorkerPill();renderBanner();
+  if(dirty){renderSideNav();renderCurrentView();}
+}
+async function loadRun(id){
+  try{state.run=(await api('/api/v1/ui/executions/'+encodeURIComponent(id))).data;}
+  catch(e){state.run={id,error:e.message};}
+}
+async function loadBuildRows(){
+  try{state.buildRows=(await api('/api/v1/build-results?application_key=sand-bench')).data||[];}catch{state.buildRows=[];}
+  if(state.view==='builds')renderCurrentView();
+}
+function markHistoryStale(){for(const h of state.history.values())h.stale=true;}
+async function loadHistory(tile){
+  if(!tile)return;
+  const prev=state.history.get(tile.key);
+  if(prev&&prev.loading)return;
+  state.history.set(tile.key,{...(prev||{}),loading:true});
+  let next;
+  try{
+    const res=tile.kind==='build'
+      ?await api('/api/v1/ui/build-history?limit=30')
+      :await postJson('/api/v1/ui/history',{case_ids:(tile.cases||[]).map(c=>c.id),limit:30});
+    next={data:res.data};
+  }catch(e){next={data:prev&&prev.data,error:e.message};}
+  state.history.set(tile.key,next);
+  if(state.panels.has(tile.key))renderCurrentView();
+}
 async function loadHealth(){try{const h=await api('/health');el('healthPill').textContent='engine ok · v'+(h.version||'?');el('healthPill').className='pill ok';}catch(e){el('healthPill').textContent='engine unreachable';el('healthPill').className='pill bad';}}
-function statusOf(id){return state.statusByCase.get(id)||null;}
+
+// ---------------------------------------------------------------------------
+// Live state helpers
+// ---------------------------------------------------------------------------
+const activeRuns=()=>state.executions.filter(e=>ACTIVE.has(String(e.status)));
+function isStalled(e){return ACTIVE.has(String(e.status))&&serverNow()-ms(e.last_activity_at||e.started_at||e.created_at)>STALL_MS;}
+const workerFresh=w=>w.status!=='offline'&&serverNow()-ms(w.last_heartbeat)<WORKER_FRESH_MS;
+function liveCaseState(){
+  const inRun=new Map(),current=new Set();
+  for(const e of activeRuns()){
+    if(isStalled(e))continue;
+    for(const id of e.case_ids||[])if(inRun.get(id)!=='running')inRun.set(id,e.status==='running'?'running':'queued');
+    if(e.current_case_id)current.add(e.current_case_id);
+  }
+  return {inRun,current};
+}
+function tileStats(tile){
+  if(tile.kind==='build'){
+    const b=state.build;
+    if(!b)return {total:0,passed:0,failed:0,other:0,never:0,lastAt:null,running:null,tone:'never'};
+    const other=Math.max(0,b.total-b.passed-b.failed);
+    return {total:b.total,passed:b.passed,failed:b.failed,other,never:0,lastAt:b.reported_at,running:null,tone:b.failed?'fail':b.passed?'pass':other?'warn':'never'};
+  }
+  const cases=tile.cases||[];
+  let passed=0,failed=0,other=0,never=0,lastAt=null,running=null;
+  for(const c of cases){
+    const s=c.last_status;
+    if(!s)never++;else if(FAILED.has(s))failed++;else if(s==='passed')passed++;else other++;
+    if(c.last_at&&(!lastAt||c.last_at>lastAt))lastAt=c.last_at;
+    const r=state.live.inRun.get(c.id);
+    if(r==='running'||(r&&!running))running=r;
+  }
+  const tone=!cases.length?'empty':failed?'fail':passed?'pass':other?'warn':'never';
+  return {total:cases.length,passed,failed,other,never,lastAt,running,tone};
+}
+
+// ---------------------------------------------------------------------------
+// Shared fragments
+// ---------------------------------------------------------------------------
 function badge(st){if(!st)return '<span class="badge never">Never run</span>';const s=String(st.status||st).toLowerCase();return '<span class="badge '+esc(s)+'">'+esc(s.replace(/_/g,' '))+'</span>';}
-function tone(results){if(!results.length)return'';if(results.some(r=>['failed','error','timed_out'].includes(String(r.status).toLowerCase())))return'red';if(results.every(r=>String(r.status).toLowerCase()==='passed'))return'green';return'amber';}
-async function refreshLiveRun(id){try{const res=await api('/api/v1/executions/'+encodeURIComponent(id));const e=res.data;const results=e.results||e.execution_results||[];let total=Number(e.total_cases||e.case_count||0);if(!total&&Array.isArray(e.test_case_ids))total=e.test_case_ids.length;if(!total&&results.length)total=results.length;const done=results.filter(r=>TERMINAL.has(String(r.status))).length;const passed=results.filter(r=>String(r.status)==='passed').length;const failed=results.filter(r=>['failed','error','timed_out'].includes(String(r.status))).length;const pct=total?Math.round((done/total)*100):(TERMINAL.has(String(e.status))?100:ACTIVE.has(String(e.status))?5:0);state.liveRuns.set(id,{key:e.key,status:e.status,total,done,passed,failed,pct});if(TERMINAL.has(String(e.status)))state.tracked.delete(id);return e;}catch(err){state.tracked.delete(id);state.liveRuns.delete(id);return null;}}
-function renderLiveBanners(){const active=[...state.liveRuns.entries()].filter(([id,r])=>ACTIVE.has(String(r.status))||state.tracked.has(id));if(!active.length)return '';return active.map(([id,r])=>{const cls=r.failed?'red':(ACTIVE.has(String(r.status))?'running':'');return '<div class="run-banner"><span class="run-key">'+esc(r.key||id)+'</span>'+badge({status:r.status})+'<span class="run-meta">'+esc(r.done)+' / '+esc(r.total||'?')+' · '+esc(r.passed)+' passed · '+esc(r.failed)+' failed</span><div class="progress-track"><span class="'+cls+'" style="width:'+Math.max(r.pct,ACTIVE.has(String(r.status))?8:r.pct)+'%"></span></div><span class="muted small">'+esc(r.pct)+'%</span></div>';}).join('');}
-function navItem(view,id,label,count,dot,cls){const active=state.view===view&&(view==='type'?state.typeId===id:view==='sit'?state.sitGroupId===id:true);return '<button class="nav-item '+(active?(cls||'active'):'')+'" data-view="'+view+'" data-id="'+(id||'')+'">'+(dot?'<span class="nav-dot '+dot+'"></span>':'')+'<span class="nav-label">'+esc(label)+'</span>'+(count!=null?'<span class="nav-count">'+count+'</span>':'')+'</button>';}
-function renderSideNav(){const tl=typeList();const qa=tl.filter(t=>t.category==='qa');const qc=tl.filter(t=>t.category==='qc'||(!t.category&&!qa.includes(t)));const sitN=sitCases().length;let h='<div class="nav-section">Workspace</div>';h+=navItem('overview',null,'Overview');h+=navItem('history',null,'Test runs',state.executions.length);h+='<div class="nav-section">SIT console</div>';h+=navItem('sit-all',null,'All SIT cases',sitN,'blue','active-sit');SIT_GROUPS.forEach(g=>{const suites=sitSuitesInGroup(g);const n=suites.reduce((a,s)=>a+casesInSuite(s.id).length,0);const res=[];suites.forEach(s=>casesInSuite(s.id).forEach(c=>{const st=statusOf(c.id);if(st)res.push(st);}));h+=navItem('sit',g.id,g.title,n||null,tone(res)||'blue','active-sit');});h+='<div class="nav-section">Quality assurance</div>';qa.forEach(t=>{const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,tone(cs.map(c=>statusOf(c.id)).filter(Boolean)));});h+='<div class="nav-section">Quality control</div>';qc.forEach(t=>{const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,tone(cs.map(c=>statusOf(c.id)).filter(Boolean)));});h+='<div class="nav-section">Selenium Baseline</div>';const blCases=casesForType('selenium-baseline');h+=navItem('baseline',null,'Selenium Baseline',blCases.length,'green','');h+='<div class="nav-section">Quality control</div>';el('sideNav').innerHTML=h;el('sideNav').querySelectorAll('.nav-item').forEach(btn=>{btn.onclick=()=>{const v=btn.getAttribute('data-view');const id=btn.getAttribute('data-id');if(v==='type'&&id)location.hash='#/type/'+encodeURIComponent(id);else if(v==='sit'&&id)location.hash='#/sit/'+encodeURIComponent(id);else if(v==='sit-all')location.hash='#/sit';else if(v==='history')location.hash='#/history';else location.hash='#/overview';el('sidebar').classList.remove('open');};});}
+function kpi(label,value,sub,cls){return `<div class="kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value ${cls||''}">${value}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;}
+function stat(label,value,sub){return `<div class="stat"><div class="stat-label">${esc(label)}</div><div class="stat-value">${value}</div>${sub?`<div class="stat-sub">${sub}</div>`:''}</div>`;}
+function statsRowHtml(cases,sub){
+  const s=tileStats({cases});
+  return '<div class="kpi-grid">'+
+    kpi('Cases',s.total,esc(sub||''))+
+    kpi('Passing',s.passed,'latest result passed',s.passed?'green':'')+
+    kpi('Failing',s.failed,'latest result failed',s.failed?'red':'')+
+    kpi('Never run',s.never,'no result recorded')+
+    kpi('Last run',s.lastAt?`<span data-ago="${esc(s.lastAt)}">${ago(s.lastAt)}</span>`:'—',s.lastAt?esc(when(s.lastAt)):'nothing has run yet','sm')+
+  '</div>';
+}
+function skeletonHtml(){return `<div class="kpi-grid">${'<div class="skel" style="height:84px"></div>'.repeat(6)}</div><div class="stiles">${'<div class="skel"></div>'.repeat(8)}</div>`;}
+function legendHtml(){return '<div class="tone-legend" aria-label="Tile colour key"><span><i class="sw tone-pass"></i>Passing — every case that ran passed</span><span><i class="sw tone-fail"></i>Failing — at least one case failed</span><span><i class="sw tone-warn"></i>Needs attention — only skipped or blocked</span><span><i class="sw tone-never"></i>Never run</span><span><span class="pulse"></span>Running now</span></div>';}
+function progressHtml(e,cls){
+  const done=e.done||0,total=Math.max(e.total||0,done);
+  const other=Math.max(0,done-(e.passed||0)-(e.failed||0));
+  const rest=total-done;
+  const seg=(v,c)=>v>0?`<span class="${c}" style="flex:${v} 1 0"></span>`:'';
+  const moving=ACTIVE.has(String(e.status))&&!isStalled(e);
+  return `<div class="progress-seg ${cls||''}" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}" aria-label="${done} of ${total} cases done">${seg(e.passed,'pass')}${seg(e.failed,'fail')}${seg(other,'other')}${rest>0||!total?`<span class="rest${moving?' running':''}" style="flex:${rest||1} 1 0"></span>`:''}</div>`;
+}
+function countsHtml(e){const other=Math.max(0,(e.done||0)-(e.passed||0)-(e.failed||0));return `<span class="counts"><span><i class="kdot pass"></i>${e.passed||0} passed</span><span><i class="kdot fail"></i>${e.failed||0} failed</span>${other?`<span><i class="kdot other"></i>${other} other</span>`:''}</span>`;}
+function liveHeading(live){return live.some(e=>!isStalled(e))?'Running now':'Stalled runs';}
+
+// ---------------------------------------------------------------------------
+// Tiles + per-tile history panel
+// ---------------------------------------------------------------------------
+function tileHtml(tile){
+  state.tiles.set(tile.key,tile);
+  const s=tileStats(tile),t=TONES[s.tone],open=state.tile===tile.key;
+  const noun=tile.kind==='build'?'results':'cases';
+  const counts=tile.kind==='build'&&!state.build?'No build reported yet':[`<b>${s.total}</b> ${noun}`,s.passed&&`${s.passed} passed`,s.failed&&`${s.failed} failed`,s.other&&`${s.other} other`,s.never&&`${s.never} not run`].filter(Boolean).join(' · ');
+  const seg=(v,c)=>v?`<span class="seg ${c}" style="flex-grow:${v}"></span>`:'';
+  const running=s.running?`<span class="live-chip"><span class="pulse ${s.running}"></span>${s.running==='running'?'Running':'Queued'}</span>`:'';
+  return `<button type="button" class="stile tone-${s.tone}${open?' open':''}${s.running?' is-running':''}${tile.accent?' accent-'+tile.accent:''}" data-tile="${esc(tile.key)}" aria-expanded="${open}" title="${esc(tile.sub||'')}">
+    <span class="stile-head"><span class="stile-title">${esc(tile.title)}</span><span class="chip chip-${s.tone}"><span aria-hidden="true">${t.icon}</span>${t.label}</span></span>
+    <span class="stile-counts">${counts}</span>
+    <span class="meter" aria-hidden="true">${seg(s.passed,'pass')}${seg(s.failed,'fail')}${seg(s.other,'other')}${seg(s.never,'never')}</span>
+    <span class="stile-foot"><span>${s.lastAt?`Last run <span data-ago="${esc(s.lastAt)}">${ago(s.lastAt)}</span>`:'No runs yet'}</span>${running}</span>
+  </button>`;
+}
+function tileGroupHtml(group){
+  if(!group.tiles.length)return '';
+  const tiles=group.tiles.map(tileHtml).join('');
+  const open=group.tiles.find(t=>t.key===state.tile);
+  return `<section class="tile-group"><div class="group-head"><h2>${esc(group.title)}</h2>${group.sub?`<span class="muted small">${esc(group.sub)}</span>`:''}</div><div class="stiles">${tiles}</div>${open?historyPanelHtml(open):''}</section>`;
+}
+function historyPanelHtml(tile,opts){
+  const fixed=opts&&opts.fixed;
+  state.tiles.set(tile.key,tile);state.panels.add(tile.key);
+  const h=state.history.get(tile.key)||{};
+  const s=tileStats(tile);
+  const isBuild=tile.kind==='build';
+  const rateOf=r=>{const t=r.passed+r.failed+r.other;return t?Math.round(r.passed/t*100):null;};
+  const runs=h.data?h.data.runs.slice().reverse():[];                 // oldest -> newest for charts
+  let body;
+  if(!h.data&&h.error)body=`<div class="empty">Could not load history: ${esc(h.error)} <button class="btn" data-action="retry-history" data-key="${esc(tile.key)}">Retry</button></div>`;
+  else if(!h.data)body='<div class="hp-loading"><div class="skel" style="height:78px"></div><div class="skel" style="height:200px"></div></div>';
+  else if(!runs.length)body=`<div class="empty">No runs recorded yet for ${isBuild?'this application':'these '+plural(s.total,'case')}.${!isBuild&&s.total?' Use <b>Run</b> above to record the first one.':''}</div>`;
+  else{
+    const last=h.data.runs[0];
+    const rates=runs.map(rateOf).filter(v=>v!=null);
+    const avg=rates.length?Math.round(rates.reduce((a,b)=>a+b,0)/rates.length):null;
+    const fails=runs.reduce((a,r)=>a+r.failed,0);
+    const cid='c'+state.charts.size;
+    state.charts.set(cid+'b',{type:'stacked',runs,opts:isBuild?{}:{onSelect:r=>{location.hash='#/run/'+r.id;}}});
+    state.charts.set(cid+'r',{type:'rate',runs});
+    const noun=isBuild?'build':'run';
+    body=`<div class="hp-stats">
+        ${stat(`Last ${noun} pass rate`,rateOf(last)==null?'—':rateOf(last)+'%',`${last.passed}/${last.total} passed · ${esc(when(last.created_at))}`)}
+        ${stat('Average pass rate',avg==null?'—':avg+'%',`across the last ${plural(runs.length,noun)}`)}
+        ${stat('Failures in window',fails,`${plural(runs.filter(r=>r.failed).length,noun)} with a failure`)}
+        ${isBuild?stat('Latest build',esc(String(last.key).slice(0,14)),esc([last.branch,last.commit_sha&&String(last.commit_sha).slice(0,8)].filter(Boolean).join(' · ')||'—')):stat('Never run',s.never,`of ${plural(s.total,'case')}`)}
+      </div>
+      <div class="hp-charts">
+        <figure class="viz"><figcaption><span>Results per ${noun}</span><span class="legend"><span><i style="background:var(--viz-pass)"></i>Passed</span><span><i style="background:var(--viz-fail)"></i>Failed</span><span><i style="background:var(--viz-other)"></i>Other (skipped, blocked, cancelled)</span></span></figcaption><div class="chart" data-chart="${cid}b"></div></figure>
+        <figure class="viz"><figcaption><span>Pass rate trend</span><span class="muted small">share of cases passed per ${noun}</span></figcaption><div class="chart" data-chart="${cid}r"></div></figure>
+      </div>
+      ${topFailingHtml(h.data.top_failing||[],isBuild)}
+      <details data-keep="runs:${esc(tile.key)}"${state.open.has('runs:'+tile.key)?' open':''}><summary>${isBuild?'Build':'Run'} history table (${runs.length})</summary>${historyTableHtml(h.data.runs,isBuild)}</details>`;
+  }
+  const details=fixed?'':tile.inline?'<button class="btn" data-action="scroll-details">View cases ↓</button>':tile.href?`<a class="btn" href="${esc(tile.href)}">Open details →</a>`:'';
+  const run=isBuild?'':`<button class="btn primary" data-action="run-tile" data-key="${esc(tile.key)}"${s.total?'':' disabled'}>Run ${plural(s.total,'case')}</button>`;
+  const close=fixed?'':'<button class="icon-btn" style="display:inline-block" data-action="close-tile" aria-label="Close history">✕</button>';
+  return `<div class="card hp tone-${s.tone}" id="${fixed?'hp-'+esc(tile.key):'hp'}">
+    <div class="card-head"><div><h2><span class="chip chip-${s.tone}"><span aria-hidden="true">${TONES[s.tone].icon}</span>${TONES[s.tone].label}</span> ${esc(tile.title)} · history</h2>${tile.sub?`<div class="muted small">${esc(tile.sub)}</div>`:''}</div><div class="hp-actions">${run}${details}${close}</div></div>
+    <div class="hp-body${h.loading&&h.data?' refreshing':''}">${body}</div></div>`;
+}
+function topFailingHtml(rows,isBuild){
+  if(!rows.length)return '';
+  return `<div class="top-fail"><h3>Most frequent failures</h3><ol>${rows.map(r=>`<li>${isBuild?`<span>${esc(r.name||r.key)}</span>`:`<button class="case-name" data-case="${esc(r.test_case_id)}">${esc(r.name)}</button>`}<span class="key small">${esc(r.key)}</span><span class="muted small">failed ${r.failures} of ${plural(r.runs,'run')} · last ${esc(when(r.last_failed_at))}</span></li>`).join('')}</ol></div>`;
+}
+function historyTableHtml(runs,isBuild){
+  const rows=runs.map(r=>{const t=r.passed+r.failed+r.other;return `<tr${isBuild?'':` class="clickable" data-run="${esc(r.id)}"`}><td class="key">${esc(r.key)}</td><td>${esc(when(r.created_at))}</td><td class="num">${r.passed}</td><td class="num">${r.failed}</td><td class="num">${r.other}</td><td class="num">${t?Math.round(r.passed/t*100)+'%':'—'}</td>${isBuild?'':`<td>${badge(r.status)}</td>`}</tr>`;}).join('');
+  return `<div class="table-wrap"><table><thead><tr><th>${isBuild?'Build':'Run'}</th><th>Date</th><th class="num">Passed</th><th class="num">Failed</th><th class="num">Other</th><th class="num">Pass rate</th>${isBuild?'':'<th>Run status</th>'}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function drawCharts(){document.querySelectorAll('#content [data-chart]').forEach(host=>{const spec=state.charts.get(host.dataset.chart);if(spec&&spec.runs.length)Charts[spec.type](host,spec.runs,spec.opts);});}
+
+// ---------------------------------------------------------------------------
+// Case tables
+// ---------------------------------------------------------------------------
+function caseTable(cases){
+  const shown=cases.slice(0,state.rowLimit);
+  const rows=shown.map(c=>{
+    const st=c.last_status?{status:c.last_status}:null;
+    const now=state.live.current.has(c.id),inRun=state.live.inRun.get(c.id);
+    const status=now?'<span class="badge running"><span class="pulse running"></span>running</span>':badge(st)+(inRun?` <span class="muted small" title="Part of an active run">· ${inRun==='running'?'in run':'queued'}</span>`:'');
+    return `<tr${now?' class="row-running"':''}><td><button class="case-name" data-case="${esc(c.id)}">${esc(c.name)}</button>${c._type==='sit'?' <span class="badge sit">SIT</span>':''}<div class="key small">${esc(c.key)}</div></td><td>${status}</td><td>${esc(c.execution_method||c.test_type||'—')}</td><td>${esc(secs(c.last_duration_ms))}</td><td class="muted small" title="${esc(when(c.last_at))}">${c.last_at?`<span data-ago="${esc(c.last_at)}">${ago(c.last_at)}</span>`:'Never'}</td><td><input type="checkbox" aria-label="Select ${esc(c.name)}" data-sel="${esc(c.id)}"${state.selected.has(c.id)?' checked':''}></td></tr>`;
+  }).join('');
+  const more=cases.length>shown.length?`<div class="more"><button class="btn" data-action="more">Show ${Math.min(ROWS,cases.length-shown.length)} more</button><span class="muted small">${shown.length} of ${cases.length} shown</span></div>`:'';
+  return `<div class="table-wrap"><table><thead><tr><th>Test case</th><th>Status</th><th>Method</th><th>Duration</th><th>Last run</th><th><span class="sr-only">Select</span></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No cases.</td></tr>'}</tbody></table></div>${more}`;
+}
+function runSelLabel(){return 'Run selected'+(state.selected.size?' ('+state.selected.size+')':'');}
+function caseSectionHtml(o){
+  state.section={ids:o.cases.map(c=>c.id),suiteId:o.suiteId||null,label:o.label||o.title};
+  const cases=filterCases(o.cases);
+  return `<div class="card" id="details"><div class="card-head"><div><h2>${esc(o.title)}</h2>${o.sub?`<div class="muted small">${esc(o.sub)}</div>`:''}</div><div class="hp-actions">${o.clear?'<button class="btn" data-action="clear-suite">Show all cases</button>':''}<button class="btn" data-action="run-selected"${state.selected.size?'':' disabled'}>${runSelLabel()}</button><button class="btn ${o.sit?'sit':'primary'}" data-action="run-section"${o.cases.length?'':' disabled'}>${o.suiteId?'Run suite':'Run all'} (${o.cases.length})</button></div></div><div class="toolbar"><span class="muted small">${plural(cases.length,'case')}${state.search?' matching “'+esc(state.search)+'”':''}</span>${o.note?`<span class="muted small">${esc(o.note)}</span>`:''}</div>${caseTable(cases)}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Live runs (run screen building blocks)
+// ---------------------------------------------------------------------------
+function liveCardHtml(e){
+  const stalled=isStalled(e);
+  const cur=e.current_case_id&&state.idx&&state.idx.caseById.get(e.current_case_id);
+  const suite=e.test_suite_id&&state.idx&&state.idx.suiteById.get(e.test_suite_id);
+  const total=Math.max(e.total||0,e.done||0);
+  const noWorker=!state.workers.some(workerFresh);
+  const now=e.status==='running'?(cur?`Now running <b>${esc(cur.name)}</b>`:'Finishing up'):e.status==='queued'?(noWorker?'Waiting — no live worker connected':'Waiting for a worker to claim it'):'Preparing';
+  return `<article class="live-card${stalled?' stalled':''}" data-run="${esc(e.id)}" tabindex="0" aria-label="Run ${esc(e.key)}, ${esc(e.status)}">
+    <div class="live-head"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.key)}</span>${badge(e.status)}<span class="muted small">${esc(suite?suite.name:plural(total,'case'))} · ${esc(e.trigger_source||'manual')}</span><span class="live-elapsed" title="Elapsed"><span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-ms(e.started_at||e.created_at))}</span></span></div>
+    ${progressHtml(e,'big')}
+    <div class="live-meta"><span><b>${e.done||0}</b> / ${total} done</span>${countsHtml(e)}</div>
+    <div class="live-now">${stalled?`<span class="stall">Last activity <span data-ago="${esc(e.last_activity_at||e.started_at||e.created_at)}">${ago(e.last_activity_at||e.started_at||e.created_at)}</span> — the worker may have stopped.</span><button class="btn" data-action="cancel-run" data-id="${esc(e.id)}">Cancel run</button>`:now}</div>
+  </article>`;
+}
+function liveStripHtml(){
+  const a=activeRuns().filter(e=>!isStalled(e));
+  if(!a.length)return '';
+  return `<div class="live-strip">${a.slice(0,3).map(e=>`<a class="ls-item" href="#/run/${esc(e.id)}"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.key)}</span><span class="muted small">${e.done||0}/${Math.max(e.total||0,e.done||0)} done · ${e.failed||0} failed</span>${progressHtml(e,'thin')}<span class="small">Watch →</span></a>`).join('')}${a.length>3?`<a class="small" href="#/history">+${a.length-3} more running</a>`:''}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+function navItem(view,id,label,count,dot,cls){
+  const active=(state.view===view&&(view==='type'?state.typeId===id:view==='sit'?state.sitGroupId===id:true))||(view==='history'&&state.view==='run');
+  return '<button class="nav-item '+(active?(cls||'active'):'')+'" data-view="'+view+'" data-id="'+esc(id||'')+'">'+(dot!=null?'<span class="nav-dot '+dot+'"></span>':'')+'<span class="nav-label">'+esc(label)+'</span>'+(count!=null?'<span class="nav-count">'+count+'</span>':'')+'</button>';
+}
+const toneDot=cases=>TONES[tileStats({cases}).tone].dot;
+function renderSideNav(){
+  const tl=typeList();
+  const live=activeRuns().filter(e=>!isStalled(e)).length;
+  let h='<div class="nav-section">Workspace</div>';
+  h+=navItem('overview',null,'Overview');
+  h+=navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null);
+  h+=navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot);
+  h+='<div class="nav-section">SIT console</div>';
+  h+=navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit');
+  for(const g of SIT_GROUPS){const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];h+=navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}
+  h+='<div class="nav-section">'+CAT.qa+'</div>';
+  for(const t of tl.filter(t=>t.category==='qa')){const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,toneDot(cs));}
+  h+='<div class="nav-section">'+CAT.qc+'</div>';
+  for(const t of tl.filter(t=>t.category!=='qa')){const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,toneDot(cs));}
+  if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+='<div class="nav-section">Selenium Baseline</div>';h+=navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl));}
+  el('sideNav').innerHTML=h;
+}
+function overviewGroups(){
+  const tl=typeList();
+  const typeTile=t=>({key:'type:'+t.id,title:t.title,sub:t.summary,cases:casesForType(t.id),href:'#/type/'+encodeURIComponent(t.id)});
+  const more=[];
+  if(!tl.some(t=>t.id==='selenium-baseline'))more.push({key:'baseline',title:'Selenium Baseline',sub:'Selenium GUI automation baseline checks.',cases:casesForType('selenium-baseline'),href:'#/baseline'});
+  more.push({key:'build',kind:'build',title:'In-container build',sub:'Reported by CI; not re-run by the engine.',href:'#/builds'});
+  const other=casesForType('other');
+  if(other.length)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:other,href:'#/type/other'});
+  return [
+    {title:'SIT console',sub:'Post-deploy packs by area',tiles:SIT_GROUPS.map(g=>({key:'sit:'+g.id,title:g.title,sub:g.summary,cases:(state.idx&&state.idx.sitGroupCases.get(g.id))||[],href:'#/sit/'+g.id,accent:'sit'}))},
+    {title:CAT.qa,tiles:tl.filter(t=>t.category==='qa').map(typeTile)},
+    {title:CAT.qc,tiles:tl.filter(t=>t.category!=='qa').map(typeTile)},
+    {title:'Baselines & builds',tiles:more},
+  ];
+}
 function renderOverview(){
   el('viewTitle').textContent='Overview';
-  const d=state.dashboard||{};
-  const br=state.buildResults||[];
-  const unitBuild=br.filter(r=>String(r.suite||'').toLowerCase()==='unit'||String(r.test_key||'').startsWith('unit'));
-  const buildFailed=br.filter(r=>['failed','error'].includes(String(r.status))).length;
-  const buildPassed=br.filter(r=>String(r.status)==='passed').length;
-  const buildLabel=state.lastBuildId?String(state.lastBuildId).slice(0,12):'—';
-  const sitN=sitCases().length;
-  const catN=catalogCases().length;
-  const activeCount=[...state.liveRuns.values()].filter(r=>ACTIVE.has(String(r.status))).length;
-  const unitPass=unitBuild.filter(r=>String(r.status)==='passed').length;
-  const unitVal=unitBuild.length?(unitPass+'/'+unitBuild.length):'—';
-  const unitCls=buildFailed?'red':(unitBuild.length?'green':'');
-  const buildRows=br.slice(0,30).map(r=>
-    '<tr><td>'+esc(r.test_name||r.test_key)+'<div class="key small">'+esc(r.test_key)+'</div></td><td>'+esc(r.suite||'—')+'</td><td>'+badge({status:r.status})+'</td><td>'+esc(r.duration_ms!=null?((r.duration_ms/1000).toFixed(1)+'s'):'—')+'</td></tr>'
-  ).join('');
-  el('content').innerHTML=renderLiveBanners()+
-    '<div class="kpi-grid">'+
-      '<div class="kpi"><div class="kpi-label">All cases</div><div class="kpi-value">'+String(state.cases.length).padStart(2,'0')+'</div><div class="kpi-sub">in repository (DB)</div></div>'+
-      '<div class="kpi"><div class="kpi-label">SIT cases</div><div class="kpi-value blue">'+String(sitN).padStart(2,'0')+'</div><div class="kpi-sub">from sit/cases import</div></div>'+
-      '<div class="kpi"><div class="kpi-label">Catalog cases</div><div class="kpi-value">'+String(catN).padStart(2,'0')+'</div><div class="kpi-sub">Sand Bench taxonomy</div></div>'+
-      '<div class="kpi"><div class="kpi-label">Active runs</div><div class="kpi-value '+(activeCount?'amber':'')+'">'+String(activeCount).padStart(2,'0')+'</div><div class="kpi-sub">live executions</div></div>'+
-      '<div class="kpi"><div class="kpi-label">Last build</div><div class="kpi-value" style="font-size:14px">'+esc(buildLabel)+'</div><div class="kpi-sub">'+esc(buildPassed)+' passed · '+esc(buildFailed)+' failed (in-container)</div></div>'+
-      '<div class="kpi"><div class="kpi-label">Unit (in-container)</div><div class="kpi-value '+unitCls+'">'+esc(unitVal)+'</div><div class="kpi-sub">from Sand Bench CI / container</div></div>'+
-    '</div>'+
-    '<div class="tiles">'+
-      '<button type="button" class="tile sit" data-go="#/sit"><h3>SIT console</h3><p>Health, integration, GUI, security, performance — same repository.</p></button>'+
-      '<button type="button" class="tile" data-go="#/type/unit"><h3>Catalog · Unit</h3><p>Unit definitions + in-container last build status.</p></button>'+
-      '<button type="button" class="tile" data-go="#/type/performance"><h3>Catalog · QC</h3><p>Performance, chaos, compliance, DR…</p></button>'+
-      '<button type="button" class="tile" data-go="#/history"><h3>Test runs</h3><p>Execution history and live progress.</p></button>'+
-    '</div>'+
-    '<div class="card"><div class="card-head"><h2>Last build (in-container)</h2><span class="muted small">'+esc(state.lastBuildId||'none')+'</span></div>'+
-    (br.length
-      ? '<div class="table-wrap"><table><thead><tr><th>Test</th><th>Suite</th><th>Status</th><th>Duration</th></tr></thead><tbody>'+buildRows+'</tbody></table></div>'
-      : '<div class="empty">No build results yet. From Sand Bench CI or container: <code>npm run report:unit-container</code></div>')+
-    '</div>'+
-    '<div class="card"><div class="card-head"><h2>Repository snapshot</h2><span class="muted small">From API + Postgres</span></div>'+
-    '<div class="table-wrap"><table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>'+
-      '<tr><td>Total tests</td><td>'+esc(d.total_tests??state.cases.length)+'</td></tr>'+
-      '<tr><td>Automated</td><td>'+esc(d.automated??'—')+'</td></tr>'+
-      '<tr><td>Failed (7d)</td><td>'+esc(d.failed_last_7d??0)+'</td></tr>'+
-      '<tr><td>Environments</td><td>'+esc(d.total_environments??state.environments.length)+'</td></tr>'+
-    '</tbody></table></div></div>';
-  el('content').querySelectorAll('[data-go]').forEach(b=>{b.onclick=()=>{location.hash=b.getAttribute('data-go');};});
-}
-function caseTable(cases){const rows=cases.map(c=>{const st=statusOf(c.id);const dur=st&&st.duration_ms!=null?((st.duration_ms/1000).toFixed(1)+'s'):'—';const when=st&&st.finished_at?new Date(st.finished_at).toLocaleString():(st?'—':'Never');const sit=isSitCase(c)?' <span class="badge sit">SIT</span>':'';return '<tr><td><button class="case-name" data-id="'+esc(c.id)+'">'+esc(c.name)+'</button>'+sit+'<div class="key small">'+esc(c.key)+'</div></td><td>'+badge(st)+'</td><td>'+esc(c.execution_method||c.test_type||'—')+'</td><td>'+esc(dur)+'</td><td class="muted small">'+esc(when)+'</td><td><input type="checkbox" data-sel="'+esc(c.id)+'"'+(state.selected.has(c.id)?' checked':'')+'></td></tr>';}).join('');return '<div class="table-wrap"><table><thead><tr><th>Test case</th><th>Status</th><th>Method</th><th>Duration</th><th>Last run</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="empty">No cases.</td></tr>')+'</tbody></table></div>';}
-function bindCaseTable(){el('content').querySelectorAll('[data-id]').forEach(b=>{b.onclick=()=>openCase(b.getAttribute('data-id'));});el('content').querySelectorAll('[data-sel]').forEach(cb=>{cb.onchange=()=>{const id=cb.getAttribute('data-sel');if(cb.checked)state.selected.add(id);else state.selected.delete(id);const r=el('runSel');if(r)r.disabled=!state.selected.size;};});const rs=el('runSel');if(rs)rs.onclick=()=>runCases([...state.selected],state.selected.size+' cases');}
-function renderTypeView(typeId){const t=typeList().find(x=>x.id===typeId)||{title:typeId,summary:''};el('viewTitle').textContent=t.title;const suites=suitesForType(typeId);if(!state.suiteId&&suites[0])state.suiteId=suites[0].id;if(state.suiteId&&suites.length&&!suites.some(s=>s.id===state.suiteId))state.suiteId=suites[0].id;const selected=suites.find(s=>s.id===state.suiteId)||null;const typeCases=casesForType(typeId);const suiteCases=selected?casesInSuite(selected.id):typeCases;const cases=filterCases(suiteCases);const suiteHtml=suites.map(s=>{const sc=casesInSuite(s.id);const sr=sc.map(c=>statusOf(c.id)).filter(Boolean);const tn=tone(sr);const sel=selected&&s.id===selected.id;return '<button type="button" class="suite-item '+(sel?'selected':'')+'" data-suite="'+esc(s.id)+'"><div class="suite-name">'+esc(s.name)+(tn?' <span class="nav-dot '+tn+'"></span>':'')+'</div><div class="suite-meta">'+sc.length+' cases</div></button>';}).join('')||'<div class="empty small">No suites — cases by type tag.</div>';el('content').innerHTML=renderLiveBanners()+'<div class="layout-split"><div class="card"><div class="card-head"><h2>Suites</h2><span class="muted small">'+suites.length+'</span></div><div class="suite-list">'+suiteHtml+'</div></div><div class="card"><div class="card-head"><h2>'+esc(selected?selected.name:t.title)+'</h2><div style="display:flex;gap:8px"><button class="btn" id="runSel" '+(!state.selected.size?'disabled':'')+'>Run selected</button><button class="btn primary" id="runSuite">'+(selected?'Run suite':'Run all')+'</button></div></div><div class="toolbar"><span class="muted small">'+cases.length+' cases</span></div>'+caseTable(cases)+'</div></div>';el('content').querySelectorAll('[data-suite]').forEach(btn=>{btn.onclick=()=>{state.suiteId=btn.getAttribute('data-suite');state.selected=new Set();renderTypeView(typeId);};});bindCaseTable();const ra=el('runSuite');if(ra)ra.onclick=()=>{if(selected)runSuite(selected.id,casesInSuite(selected.id).map(c=>c.id),selected.name);else runCases(typeCases.map(c=>c.id),t.title);};}
-function renderSitView(groupId){const g=groupId?SIT_GROUPS.find(x=>x.id===groupId):null;el('viewTitle').textContent=g?('SIT · '+g.title):'SIT console · All cases';const suites=g?sitSuitesInGroup(g):state.suites.filter(isSitSuite);if(!state.suiteId&&suites[0])state.suiteId=suites[0].id;if(state.suiteId&&suites.length&&!suites.some(s=>s.id===state.suiteId))state.suiteId=suites[0]?suites[0].id:null;const selected=suites.find(s=>s.id===state.suiteId)||null;let cases;if(selected)cases=filterCases(casesInSuite(selected.id));else if(g){const ids=new Set();suites.forEach(s=>casesInSuite(s.id).forEach(c=>ids.add(c.id)));cases=filterCases(sitCases().filter(c=>ids.has(c.id)||!suites.length));if(!cases.length)cases=filterCases(sitCases());}else cases=filterCases(sitCases());const suiteHtml=suites.map(s=>{const sc=casesInSuite(s.id);const sel=selected&&s.id===selected.id;return '<button type="button" class="suite-item '+(sel?'selected-sit':'')+'" data-suite="'+esc(s.id)+'"><div class="suite-name">'+esc(s.name||s.key)+' <span class="badge sit">SIT</span></div><div class="suite-meta">'+sc.length+' cases · '+esc(s.key)+'</div></button>';}).join('')||'<div class="empty small">No SIT suites yet. Set IMPORT_SIT=true and redeploy.</div>';el('content').innerHTML=renderLiveBanners()+'<div class="kpi-grid"><div class="kpi"><div class="kpi-label">SIT cases shown</div><div class="kpi-value blue">'+String(cases.length).padStart(2,'0')+'</div><div class="kpi-sub">'+esc(g?g.summary:'All imported SIT definitions')+'</div></div><div class="kpi"><div class="kpi-label">Suites</div><div class="kpi-value">'+String(suites.length).padStart(2,'0')+'</div><div class="kpi-sub">sit-* packs</div></div></div><div class="layout-split"><div class="card"><div class="card-head"><h2>SIT suites</h2></div><div class="suite-list">'+suiteHtml+'</div></div><div class="card"><div class="card-head"><h2>'+esc(selected?(selected.name||selected.key):'SIT cases')+'</h2><div style="display:flex;gap:8px"><button class="btn" id="runSel" '+(!state.selected.size?'disabled':'')+'>Run selected</button><button class="btn sit" id="runSuite" '+(!(selected||cases.length)?'disabled':'')+'>'+(selected?'Run suite':'Run all shown')+'</button></div></div><div class="toolbar"><span class="muted small">Same repository · run on demand</span></div>'+caseTable(cases)+'</div></div>';el('content').querySelectorAll('[data-suite]').forEach(btn=>{btn.onclick=()=>{state.suiteId=btn.getAttribute('data-suite');state.selected=new Set();renderSitView(groupId);};});bindCaseTable();const ra=el('runSuite');if(ra)ra.onclick=()=>{if(selected)runSuite(selected.id,casesInSuite(selected.id).map(c=>c.id),selected.name||selected.key);else runCases(cases.map(c=>c.id),'SIT selection');};}
-function renderHistory(){el('viewTitle').textContent='Test runs';const runs=state.executions.slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));const rows=runs.slice(0,50).map(r=>{const live=state.liveRuns.get(r.id);const pct=live?live.pct:(TERMINAL.has(String(r.status))?100:0);const barCls=ACTIVE.has(String(r.status))?'running':(String(r.status)==='failed'||String(r.status)==='error'?'red':'');return '<tr><td class="key">'+esc(r.key)+'</td><td>'+badge({status:r.status})+'</td><td style="min-width:140px"><div class="progress-track"><span class="'+barCls+'" style="width:'+Math.max(pct,ACTIVE.has(String(r.status))?8:pct)+'%"></span></div></td><td class="muted small">'+esc(r.trigger_source||'—')+'</td><td class="muted small">'+(r.created_at?esc(new Date(r.created_at).toLocaleString()):'—')+'</td></tr>';}).join('');el('content').innerHTML=renderLiveBanners()+'<div class="card"><div class="card-head"><h2>Recent executions</h2></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Trigger</th><th>Created</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="empty">No executions yet.</td></tr>')+'</tbody></table></div></div>';}
-async function openCase(id){try{const res=await api('/api/v1/test-cases/'+encodeURIComponent(id));const c=res.data;const st=statusOf(c.id);el('detailTitle').textContent=c.name||c.key;el('detailBody').innerHTML='<dl class="kv"><dt>Key</dt><dd class="key">'+esc(c.key)+'</dd><dt>Status</dt><dd>'+badge(st)+'</dd><dt>Type</dt><dd>'+esc(c.test_type||'—')+'</dd><dt>Tags</dt><dd>'+(c.tags||[]).map(t=>'<span class="tag">'+esc(t)+'</span>').join(' ')+'</dd><dt>Description</dt><dd>'+esc(c.description||'—')+'</dd></dl><button class="btn primary" id="detailRun">Run this case</button>';el('detail').showModal();el('detailRun').onclick=()=>{runCases([c.id],c.key);el('detail').close();};}catch(e){toast(e.message);}}
-async function runCases(ids,label){if(!ids.length)return;if(!state.envId){toast('No environment available.');return;}try{const res=await api('/api/v1/executions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({test_case_ids:ids,environment_id:state.envId,trigger_source:'manual'})});toast('Queued '+label+' — '+res.data.key);trackExecution(res.data.id,res.data.key,ids.length);}catch(e){toast('Run failed: '+e.message);}}
-async function runSuite(suiteId,fallbackIds,label){if(!state.envId){toast('No environment available.');return;}try{const res=await api('/api/v1/executions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({test_suite_id:suiteId,test_case_ids:fallbackIds,environment_id:state.envId,trigger_source:'manual'})});toast('Queued '+(label||'suite')+' — '+res.data.key);trackExecution(res.data.id,res.data.key,fallbackIds.length);}catch(e){toast('Run failed: '+e.message);}}
-function trackExecution(id,key,total){state.tracked.add(id);state.liveRuns.set(id,{key:key||id,status:'queued',total:total||0,done:0,passed:0,failed:0,pct:0});renderCurrentView();pollTracked();}
-async function pollTracked(){if(!state.tracked.size&&![...state.liveRuns.values()].some(r=>ACTIVE.has(String(r.status))))return;const ids=new Set([...state.tracked,...[...state.liveRuns.keys()].filter(id=>ACTIVE.has(String((state.liveRuns.get(id)||{}).status)))]);for(const id of ids){const e=await refreshLiveRun(id);if(e&&TERMINAL.has(String(e.status))){state.tracked.delete(id);toast((e.key||id)+' finished: '+e.status);}}await loadDynamic();renderWorkerPill();renderSideNav();renderCurrentView();if(state.tracked.size||[...state.liveRuns.values()].some(r=>ACTIVE.has(String(r.status))))setTimeout(pollTracked,2000);}
-function renderWorkerPill(){const n=state.workers.filter(w=>w.status==='online').length;el('workerPill').textContent='workers '+n+'/'+state.workers.length;el('workerPill').className=n?'pill ok':'pill';}
-function renderBaselineView(){
-el('viewTitle').textContent='Selenium Baseline';
-const blCases=casesForType('selenium-baseline');
-const cases=filterCases(blCases);
-el('content').innerHTML=renderLiveBanners()+
-  '<div class="kpi-grid"><div class="kpi"><div class="kpi-label">Baseline cases</div><div class="kpi-value">'+String(cases.length).padStart(2,'0')+'</div><div class="kpi-sub">Selenium GUI automation baseline checks</div></div></div>'+
-  '<div class="card"><div class="card-head"><h2>Baseline test cases</h2></div>'+
-  caseTable(cases)+
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const all=tileStats({cases:state.cases});
+  const live=activeRuns();
+  const hot=live.filter(e=>!isStalled(e)).length;
+  const b=state.build;
+  let h='';
+  if(live.length)h+=`<div class="group-head first"><h2>${liveHeading(live)}</h2><a class="small" href="#/history">Open run screen →</a></div><div class="live-board">${live.map(liveCardHtml).join('')}</div>`;
+  h+='<div class="kpi-grid">'+
+    kpi('All cases',all.total,'in repository')+
+    kpi('Passing',all.passed,'latest result passed',all.passed?'green':'')+
+    kpi('Failing',all.failed,'latest result failed',all.failed?'red':'')+
+    kpi('Never run',all.never,'no result recorded')+
+    kpi('Active runs',hot,`${state.stats.runs_7d||0} runs in the last 7 days`,hot?'amber':'')+
+    kpi('Last build',b?esc(String(b.build_id).slice(0,14)):'—',b?`${b.passed} passed · ${b.failed} failed (in-container)`:'no CI results yet','sm'+(b&&b.failed?' red':''))+
   '</div>';
-bindCaseTable();
+  if(state.search)h+=caseSectionHtml({title:'Matching cases',cases:filterCases(state.cases),label:'search results'});
+  h+=legendHtml();
+  h+=overviewGroups().map(tileGroupHtml).join('');
+  el('content').innerHTML=h;
 }
-function renderCurrentView(){if(state.view==='overview')renderOverview();else if(state.view==='history')renderHistory();else if(state.view==='type')renderTypeView(state.typeId);else if(state.view==='sit'||state.view==='sit-all')renderSitView(state.sitGroupId);else if(state.view==='baseline')renderBaselineView();else renderOverview();}
-function parseHash(){const parts=(location.hash||'#/overview').replace(/^#\//,'').split('/');const v=parts[0]||'overview';state.suiteId=null;if(v==='type'){state.view='type';state.typeId=decodeURIComponent(parts[1]||'');state.sitGroupId=null;}else if(v==='sit'){state.view=parts[1]?'sit':'sit-all';state.sitGroupId=parts[1]?decodeURIComponent(parts[1]):null;state.typeId=null;}else if(v==='history'){state.view='history';state.typeId=null;state.sitGroupId=null;}else if(v==='baseline'){state.view='baseline';state.typeId=null;state.sitGroupId=null;}else{state.view='overview';state.typeId=null;state.sitGroupId=null;}state.selected=new Set();}
-function onRoute(){parseHash();renderSideNav();renderCurrentView();}
-async function refreshAll(full){try{if(full)await loadStatic();await loadDynamic();for(const e of state.executions){if(ACTIVE.has(String(e.status)))await refreshLiveRun(e.id);}renderWorkerPill();renderSideNav();renderCurrentView();banner(state.workers.some(w=>w.status==='online')?null:'No worker online — runs will queue.');if(!state.cases.length)banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');}catch(e){banner('Failed to load: '+e.message);}}
+function suiteTile(s,accent){return {key:'suite:'+s.id,suiteId:s.id,title:s.name||s.key,sub:s.key,cases:casesInSuite(s.id),inline:true,accent};}
+function renderTypeView(typeId){
+  const t=typeList().find(x=>x.id===typeId)||{title:typeTitle(typeId),summary:''};
+  el('viewTitle').textContent=t.title;
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const suites=suitesForType(typeId);
+  const typeCases=casesForType(typeId);
+  const tiles=suites.length?suites.map(s=>suiteTile(s)):[{key:'type:'+typeId,title:t.title,sub:t.summary,cases:typeCases,inline:true}];
+  const sel=suites.find(s=>s.id===state.suiteId)||null;
+  el('content').innerHTML=liveStripHtml()+statsRowHtml(typeCases,t.summary)+
+    tileGroupHtml({title:suites.length?'Suites':'Cases',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'No suites — grouped by type tag',tiles})+
+    caseSectionHtml({title:sel?sel.name:`${t.title} — all cases`,sub:sel?sel.key:'',cases:sel?casesInSuite(sel.id):typeCases,suiteId:sel&&sel.id,clear:!!sel,label:sel?sel.name:t.title});
+}
+function renderSitView(groupId){
+  const g=groupId?SIT_GROUPS.find(x=>x.id===groupId):null;
+  el('viewTitle').textContent=g?('SIT · '+g.title):'SIT console · All cases';
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  let h=liveStripHtml();
+  if(!g){
+    const tiles=SIT_GROUPS.map(x=>({key:'sit:'+x.id,title:x.title,sub:x.summary,cases:state.idx.sitGroupCases.get(x.id)||[],href:'#/sit/'+x.id,accent:'sit'}));
+    h+=statsRowHtml(sitCases(),'imported SIT definitions')+tileGroupHtml({title:'SIT areas',sub:'select a tile for its run history',tiles})+caseSectionHtml({title:'All SIT cases',cases:sitCases(),sit:true,label:'SIT selection'});
+  }else{
+    const suites=state.idx.sitGroupSuites.get(g.id)||[];
+    const groupCases=state.idx.sitGroupCases.get(g.id)||[];
+    const sel=suites.find(s=>s.id===state.suiteId)||null;
+    const tiles=suites.length?suites.map(s=>suiteTile(s,'sit')):[{key:'sit:'+g.id,title:g.title,sub:g.summary,cases:groupCases,inline:true,accent:'sit'}];
+    h+=statsRowHtml(groupCases,g.summary)+tileGroupHtml({title:'SIT suites',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'',tiles})+
+      caseSectionHtml({title:sel?(sel.name||sel.key):`${g.title} — all cases`,sub:sel?sel.key:'',cases:sel?casesInSuite(sel.id):groupCases,suiteId:sel&&sel.id,clear:!!sel,sit:true,label:sel?(sel.name||sel.key):'SIT '+g.title,note:suites.length?'':'No SIT suites in this area yet — set IMPORT_SIT=true and redeploy.'});
+  }
+  el('content').innerHTML=h;
+}
+function renderHistory(){
+  el('viewTitle').textContent='Test runs';
+  const live=activeRuns();
+  const hot=live.filter(e=>!isStalled(e)).length;
+  let h=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span></div>`;
+  h+=live.length?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`:'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
+  if(state.loaded)h+=`<div class="group-head"><h2>History</h2><span class="muted small">every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',cases:state.cases},{fixed:true});
+  const rows=state.executions.map(e=>{
+    const end=e.finished_at?ms(e.finished_at):null,start=ms(e.started_at||e.created_at);
+    const time=ACTIVE.has(String(e.status))?`<span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-start)}</span>`:end?dur(end-start):'—';
+    return `<tr class="clickable" data-run="${esc(e.id)}"><td class="key">${esc(e.key)}</td><td>${badge(e.status)}${isStalled(e)?' <span class="muted small">stalled</span>':''}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${time}</td></tr>`;
+  }).join('');
+  h+=`<div class="card"><div class="card-head"><h2>Recent executions</h2><span class="muted small">select a run for per-case results</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Trigger</th><th>Created</th><th>Duration</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">No executions yet.</td></tr>'}</tbody></table></div></div>`;
+  el('content').innerHTML=h;
+}
+function renderRun(){
+  const r=state.run;
+  el('viewTitle').textContent='Run';
+  if(!r||(r.id!==state.runId&&r.key!==state.runId)){el('content').innerHTML='<div class="skel" style="height:140px;margin-bottom:16px"></div><div class="skel" style="height:320px"></div>';return;}
+  if(r.error){el('content').innerHTML=`<div class="card empty">Run not found (${esc(r.error)}). <a href="#/history">Back to test runs</a></div>`;return;}
+  el('viewTitle').textContent='Run '+r.key;
+  const byCase=new Map();for(const x of r.results)byCase.set(x.test_case_id,x);
+  const names=new Map((r.cases||[]).map(c=>[c.id,c]));
+  const ids=[...(r.test_case_ids||[])];for(const x of r.results)if(!ids.includes(x.test_case_id))ids.push(x.test_case_id);
+  const active=ACTIVE.has(String(r.status));
+  const current=r.status==='running'?ids.find(id=>!byCase.has(id)):null;
+  const passed=r.results.filter(x=>x.status==='passed').length,failed=r.results.filter(x=>FAILED.has(String(x.status))).length;
+  const lastResult=r.results.reduce((m,x)=>Math.max(m,ms(x.finished_at)),0);
+  const e={...r,total:ids.length,done:byCase.size,passed,failed,last_activity_at:lastResult?new Date(Math.max(lastResult,ms(r.started_at))).toISOString():r.started_at};
+  const stalled=isStalled(e);
+  const start=r.started_at||r.created_at;
+  const elapsed=active?`<span data-elapsed="${esc(start)}">${dur(serverNow()-ms(start))}</span>`:r.finished_at?dur(ms(r.finished_at)-ms(start)):'—';
+  const rows=ids.map(id=>{
+    const x=byCase.get(id),c=names.get(id)||(state.idx&&state.idx.caseById.get(id))||{name:id,key:''};
+    const s=x?String(x.status):id===current?(stalled?'stalled':'running'):active?'pending':'not run';
+    const icon=s==='passed'?'✓':FAILED.has(s)?'✕':s==='running'?'':s==='pending'?'':'–';
+    const iconCls=s==='passed'?'passed':FAILED.has(s)?'failed':s==='running'?'running':s==='pending'||s==='stalled'?'pending':'other';
+    const ev=x&&state.evidence.get(x.id);
+    const evidence=x&&x.evidence_count?`<button class="btn small-btn" data-action="evidence" data-rid="${esc(x.id)}">${ev?'Hide':'Show'} evidence (${x.evidence_count})</button>`:'';
+    const shots=ev?`<div class="evidence">${ev.map(v=>v.url&&String(v.content_type||'').startsWith('image')?`<a href="${esc(v.url)}" target="_blank" rel="noopener"><img src="${esc(v.url)}" alt="${esc(v.evidence_type)} evidence" loading="lazy"></a>`:`<a class="tag" href="${esc(v.url||'#')}" target="_blank" rel="noopener">${esc(v.evidence_type)}</a>`).join('')}</div>`:'';
+    return `<li class="run-case ${iconCls}"><span class="rc-icon ${iconCls}" aria-hidden="true">${icon}</span><div class="rc-main"><button class="case-name" data-case="${esc(id)}">${esc(c.name)}</button><div class="key small">${esc(c.key)}${x&&x.classification?' · '+esc(String(x.classification).replace(/_/g,' ')):''}</div>${x&&x.message&&s!=='passed'?`<div class="rc-msg">${esc(x.message)}</div>`:''}${evidence}${shots}</div><span>${s==='running'?'<span class="badge running">running</span>':s==='stalled'?'<span class="badge blocked">no progress</span>':s==='pending'?'<span class="badge queued">pending</span>':s==='not run'?'<span class="badge never">not run</span>':badge(s)}</span><span class="muted small rc-dur">${x?secs(x.duration_ms):s==='running'?'…':''}</span></li>`;
+  }).join('');
+  el('content').innerHTML=`<div class="card run-head">
+      <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
+        <div class="hp-actions"><a class="btn" href="#/history">← All runs</a><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
+      <div class="run-body">
+        ${progressHtml(e,'big')}
+        <div class="live-meta"><span><b>${byCase.size}</b> / ${ids.length} done</span>${countsHtml(e)}${current?`<span>Now running <b>${esc((names.get(current)||{}).name||current)}</b></span>`:''}</div>
+        <dl class="kv run-kv"><dt>Suite</dt><dd>${esc(r.suite_name||'—')}</dd><dt>Environment</dt><dd>${esc(r.environment_name||'—')}</dd><dt>Trigger</dt><dd>${esc(r.trigger_source||'—')}</dd><dt>Worker</dt><dd class="key">${esc(r.worker_id||(active?'waiting for a worker':'—'))}</dd><dt>Queued</dt><dd>${esc(when(r.created_at))}</dd><dt>Started</dt><dd>${esc(when(r.started_at))}</dd><dt>${active?'Elapsed':'Duration'}</dt><dd>${elapsed}</dd></dl>
+      </div></div>
+    <div class="card"><div class="card-head"><h2>Cases in this run</h2><span class="muted small">${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><ol class="run-cases">${rows||'<li class="empty">This run has no cases.</li>'}</ol></div>`;
+}
+function renderBuilds(){
+  el('viewTitle').textContent='In-container build';
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const b=state.build;
+  const tile={key:'build',kind:'build',title:'In-container build',sub:'Results posted by CI (npm run report:unit-container); the engine does not re-run them.'};
+  let h='<div class="kpi-grid">'+
+    kpi('Latest build',b?esc(String(b.build_id).slice(0,14)):'—',b?esc(when(b.reported_at)):'no CI results yet','sm')+
+    kpi('Passed',b?b.passed:0,'latest build',b&&b.passed?'green':'')+
+    kpi('Failed',b?b.failed:0,'latest build',b&&b.failed?'red':'')+
+    kpi('Unit',b&&b.unit_total?`${b.unit_passed}/${b.unit_total}`:'—','unit tests passed')+
+    kpi('Commit',b&&b.commit_sha?esc(String(b.commit_sha).slice(0,10)):'—',esc((b&&b.branch)||''),'sm')+
+  '</div>';
+  h+=historyPanelHtml(tile,{fixed:true});
+  const rows=state.buildRows;
+  const body=rows===null?'<div class="hp-loading"><div class="skel" style="height:160px"></div></div>':rows.length?`<div class="table-wrap"><table><thead><tr><th>Test</th><th>Suite</th><th>Status</th><th>Duration</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.test_name||r.test_key)}<div class="key small">${esc(r.test_key)}</div></td><td>${esc(r.suite||'—')}</td><td>${badge({status:r.status})}</td><td>${esc(secs(r.duration_ms))}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No build results yet. From Sand Bench CI or container: <code>npm run report:unit-container</code></div>';
+  h+=`<div class="card"><div class="card-head"><h2>Latest build results</h2><span class="muted small">${esc((b&&b.build_id)||'none')}</span></div>${body}</div>`;
+  el('content').innerHTML=h;
+}
+function renderCurrentView(){
+  state.tiles=new Map();state.charts=new Map();state.panels=new Set();state.section=null;
+  state.live=liveCaseState();
+  const v=state.view;
+  if(v==='history')renderHistory();
+  else if(v==='run')renderRun();
+  else if(v==='builds')renderBuilds();
+  else if(v==='type')renderTypeView(state.typeId);
+  else if(v==='baseline')renderTypeView('selenium-baseline');
+  else if(v==='sit'||v==='sit-all')renderSitView(state.sitGroupId);
+  else renderOverview();
+  drawCharts();
+  for(const key of state.panels){const h=state.history.get(key);if(!h||(h.stale&&!h.loading))loadHistory(state.tiles.get(key));}
+}
+function renderWorkerPill(){const live=state.workers.filter(workerFresh).length;el('workerPill').textContent='workers '+live+' live / '+state.workers.length;el('workerPill').title='Heartbeat within the last '+(WORKER_FRESH_MS/1000)+'s / registered';el('workerPill').className=live?'pill ok':'pill';el('livePill').innerHTML=`<span class="pulse${activeRuns().some(e=>!isStalled(e))?'':' idle'}"></span>updated <span data-ago="${esc(state.lastPoll)}">${ago(state.lastPoll)}</span>`;}
+function renderBanner(){
+  if(state.loaded&&!state.cases.length)return banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');
+  if(state.liveLoaded&&!state.workers.some(workerFresh))return banner('No live worker (no heartbeat in the last 90s) — queued runs will wait until one connects.');
+  banner(null);
+}
+function renderEnvSelect(){
+  if(!state.envId){const local=state.environments.find(e=>e.key==='local-dev'||e.key==='sandbox');state.envId=(local&&local.id)||(state.environments[0]&&state.environments[0].id)||null;}
+  el('envSelect').innerHTML=state.environments.map(e=>'<option value="'+esc(e.id)+'"'+(e.id===state.envId?' selected':'')+'>'+esc(e.name||e.key)+'</option>').join('')||'<option value="">None</option>';
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+async function openCase(id){
+  el('detailTitle').textContent='Loading…';
+  el('detailBody').innerHTML='<div class="skel" style="height:160px"></div>';
+  if(!el('detail').open)el('detail').showModal();
+  try{
+    const [res,hist]=await Promise.all([api('/api/v1/test-cases/'+encodeURIComponent(id)),postJson('/api/v1/ui/history',{case_ids:[id],limit:10}).catch(()=>({data:{runs:[]}}))]);
+    const c=res.data,lite=state.idx&&state.idx.caseById.get(c.id);
+    const suites=((lite&&lite.suite_ids)||[]).map(s=>state.idx.suiteById.get(s)).filter(Boolean);
+    const runs=hist.data.runs||[];
+    el('detailTitle').textContent=c.name||c.key;
+    el('detailBody').innerHTML=`<dl class="kv"><dt>Key</dt><dd class="key">${esc(c.key)}</dd><dt>Status</dt><dd>${badge(lite&&lite.last_status?{status:lite.last_status}:null)}${lite&&lite.last_at?' <span class="muted small">'+esc(when(lite.last_at))+'</span>':''}</dd><dt>Type</dt><dd>${esc(c.test_type||'—')}</dd><dt>Method</dt><dd>${esc(c.execution_method||'—')}</dd><dt>Suites</dt><dd>${suites.map(s=>'<span class="tag">'+esc(s.name)+'</span>').join(' ')||'—'}</dd><dt>Tags</dt><dd>${(c.tags||[]).map(t=>'<span class="tag">'+esc(t)+'</span>').join(' ')||'—'}</dd><dt>Description</dt><dd>${esc(c.description||'—')}</dd></dl>
+      <h3 class="dlg-h">Recent runs</h3>${runs.length?`<ul class="mini-runs">${runs.map(r=>`<li><a href="#/run/${esc(r.id)}" data-close>${badge(r.failed?'failed':r.passed?'passed':'other')}<span class="key">${esc(r.key)}</span><span class="muted small">${esc(when(r.created_at))}</span></a></li>`).join('')}</ul>`:'<p class="muted small">This case has never run.</p>'}
+      <button class="btn primary" id="detailRun">Run this case</button>`;
+    el('detailRun').onclick=()=>{runCases([c.id],c.key);el('detail').close();};
+  }catch(e){el('detailTitle').textContent='Could not load case';el('detailBody').textContent=e.message;}
+}
+async function queueExecution(body,label){
+  if(!state.envId){toast('No environment available.');return;}
+  try{
+    const res=await postJson('/api/v1/executions',{...body,environment_id:state.envId,trigger_source:'manual'});
+    toast('Queued '+label+' — '+res.data.key,'#/run/'+res.data.id);
+    pollLive();
+  }catch(e){toast('Run failed: '+e.message);}
+}
+function runCases(ids,label){if(ids.length)queueExecution({test_case_ids:ids},label);}
+function runSuite(suiteId,ids,label){queueExecution({test_suite_id:suiteId,test_case_ids:ids},label||'suite');}
+async function cancelRun(id){
+  try{await api('/api/v1/executions/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Cancelled run');}
+  catch(e){toast('Cancel failed: '+e.message);}
+  if(state.view==='run')await loadRun(state.runId);
+  pollLive();
+}
+async function toggleEvidence(rid){
+  if(state.evidence.has(rid))state.evidence.delete(rid);
+  else{try{state.evidence.set(rid,(await api('/api/v1/execution-results/'+encodeURIComponent(rid)+'/evidence')).data||[]);}catch(e){toast('Evidence failed: '+e.message);}}
+  renderCurrentView();
+}
+function toggleTile(key){
+  const tile=state.tiles.get(key);
+  const opening=state.tile!==key;
+  state.tile=opening?key:null;
+  if(tile&&tile.suiteId){state.suiteId=opening?tile.suiteId:null;state.selected=new Set();state.rowLimit=ROWS;}
+  renderCurrentView();
+  if(opening){const p=el('hp');if(p)p.scrollIntoView({behavior:'smooth',block:'nearest'});}
+}
+function handleAction(action,node){
+  const key=node.dataset.key;
+  if(action==='close-tile'){const t=state.tiles.get(state.tile);if(t&&t.suiteId)state.suiteId=null;state.tile=null;renderCurrentView();}
+  else if(action==='scroll-details'){const d=el('details');if(d)d.scrollIntoView({behavior:'smooth',block:'start'});}
+  else if(action==='run-tile'){const t=state.tiles.get(key);if(!t)return;const ids=(t.cases||[]).map(c=>c.id);if(t.suiteId)runSuite(t.suiteId,ids,t.title);else runCases(ids,t.title);}
+  else if(action==='retry-history'){state.history.delete(key);renderCurrentView();}
+  else if(action==='more'){state.rowLimit+=ROWS;renderCurrentView();}
+  else if(action==='clear-suite'){state.suiteId=null;state.tile=null;renderCurrentView();}
+  else if(action==='run-selected')runCases([...state.selected],plural(state.selected.size,'case'));
+  else if(action==='run-section'&&state.section){const s=state.section;if(s.suiteId)runSuite(s.suiteId,s.ids,s.label);else runCases(s.ids,s.label);}
+  else if(action==='cancel-run')cancelRun(node.dataset.id);
+  else if(action==='rerun'&&state.run)runCases(state.run.test_case_ids||[],state.run.key);
+  else if(action==='evidence')toggleEvidence(node.dataset.rid);
+}
+
+// ---------------------------------------------------------------------------
+// Routing + wiring (event delegation: bound once, survives re-renders)
+// ---------------------------------------------------------------------------
+function parseHash(){
+  const parts=(location.hash||'#/overview').replace(/^#\/?/,'').split('/');
+  const v=parts[0]||'overview',arg=parts[1]?decodeURIComponent(parts[1]):null;
+  Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS});
+  if(v==='type'&&arg){state.view='type';state.typeId=arg;}
+  else if(v==='sit'){state.view=arg?'sit':'sit-all';state.sitGroupId=arg;}
+  else if(v==='run'&&arg){state.view='run';state.runId=arg;}
+  else if(v==='history'||v==='builds'||v==='baseline')state.view=v;
+  else state.view='overview';
+}
+async function onRoute(){
+  parseHash();renderSideNav();
+  const runId=state.runId;
+  if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
+  renderCurrentView();
+  window.scrollTo(0,0);
+  if(runId){await loadRun(runId);if(state.runId===runId)renderCurrentView();}
+}
+async function refreshAll(){
+  try{await Promise.all([loadSummary(),pollLive(),loadHealth()]);banner(null);renderBanner();renderSideNav();renderCurrentView();}
+  catch(e){banner('Failed to load: '+e.message);}
+}
 el('menuToggle').onclick=()=>el('sidebar').classList.toggle('open');
-el('refreshBtn').onclick=()=>refreshAll(true);
+el('refreshBtn').onclick=()=>refreshAll();
 el('detailClose').onclick=()=>el('detail').close();
-el('globalSearch').oninput=e=>{state.search=e.target.value;renderCurrentView();};
+el('detailBody').addEventListener('click',e=>{if(e.target.closest('[data-close]'))el('detail').close();else{const c=e.target.closest('[data-case]');if(c)openCase(c.dataset.case);}});
+el('envSelect').onchange=()=>{state.envId=el('envSelect').value||null;};
+el('globalSearch').oninput=debounce(e=>{state.search=e.target.value;state.rowLimit=ROWS;renderCurrentView();},120);
+el('sideNav').addEventListener('click',e=>{
+  const b=e.target.closest('.nav-item');if(!b)return;
+  const v=b.dataset.view,id=b.dataset.id;
+  location.hash=v==='type'?'#/type/'+encodeURIComponent(id):v==='sit'?'#/sit/'+encodeURIComponent(id):v==='sit-all'?'#/sit':v==='overview'?'#/overview':'#/'+v;
+  el('sidebar').classList.remove('open');
+});
+const content=el('content');
+content.addEventListener('click',e=>{
+  const t=e.target;
+  const act=t.closest('[data-action]');if(act){if(!act.disabled)handleAction(act.dataset.action,act);return;}
+  const tile=t.closest('[data-tile]');if(tile){toggleTile(tile.dataset.tile);return;}
+  const cs=t.closest('[data-case]');if(cs){openCase(cs.dataset.case);return;}
+  const run=t.closest('[data-run]');if(run&&!t.closest('a,button,input'))location.hash='#/run/'+encodeURIComponent(run.dataset.run);
+});
+content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
+content.addEventListener('change',e=>{
+  const cb=e.target.closest('[data-sel]');if(!cb)return;
+  if(cb.checked)state.selected.add(cb.dataset.sel);else state.selected.delete(cb.dataset.sel);
+  content.querySelectorAll('[data-action="run-selected"]').forEach(b=>{b.disabled=!state.selected.size;b.textContent=runSelLabel();});
+});
+content.addEventListener('toggle',e=>{const d=e.target;if(d.dataset&&d.dataset.keep){if(d.open)state.open.add(d.dataset.keep);else state.open.delete(d.dataset.keep);}},true);
 window.addEventListener('hashchange',onRoute);
-(async function init(){await loadHealth();parseHash();await refreshAll(true);onRoute();setInterval(()=>refreshAll(false),20000);setInterval(loadHealth,20000);})();
+window.addEventListener('resize',debounce(drawCharts,150));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)pollLive();});
+let tick=0;
+setInterval(()=>{
+  document.querySelectorAll('[data-elapsed]').forEach(n=>{n.textContent=dur(serverNow()-ms(n.dataset.elapsed));});
+  if(++tick%5===0)document.querySelectorAll('[data-ago]').forEach(n=>{n.textContent=ago(n.dataset.ago);});
+},1000);
+(async function init(){
+  parseHash();renderSideNav();renderCurrentView();       // skeleton paints before any data arrives
+  loadHealth();setInterval(loadHealth,60000);
+  try{await Promise.all([loadSummary(),pollLive()]);}catch(e){banner('Failed to load: '+e.message);return;}
+  renderBanner();onRoute();
+})();

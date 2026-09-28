@@ -351,6 +351,10 @@ CREATE TABLE IF NOT EXISTS execution_results (
 
 CREATE INDEX IF NOT EXISTS idx_execution_results_exec ON execution_results(execution_id);
 CREATE INDEX IF NOT EXISTS idx_execution_results_case ON execution_results(test_case_id);
+-- Latest result per case (console summary) and "changed since" polling.
+CREATE INDEX IF NOT EXISTS idx_execution_results_case_created ON execution_results(test_case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_execution_results_created ON execution_results(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executions_created ON executions(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS evidence (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

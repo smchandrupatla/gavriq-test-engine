@@ -2,10 +2,12 @@
 /**
  * GAVRIQ Test Engine — Control Plane API + Unified UI
  */
-import Fastify from 'fastify';
-import { readFileSync, existsSync } from 'node:fs';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import { migrate } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
 import { applicationRoutes } from './routes/applications.js';
@@ -23,6 +25,7 @@ import { evidenceRoutes } from './routes/evidence.js';
 import { sitCatalogRoutes } from './routes/sit-catalog.js';
 import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
+import { uiRoutes } from './routes/ui.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -56,10 +59,20 @@ function mimeFor(file: string): string {
   return 'application/octet-stream';
 }
 
-function readPublic(rel: string): { body: Buffer; type: string } | null {
+const gzipAsync = promisify(gzip);
+const COMPRESSIBLE = /^(application\/(json|javascript)|text\/(html|css|plain|javascript)|image\/svg)/;
+
+/** Serve a UI asset with a size/mtime ETag so repeat loads revalidate with a 304 instead of re-downloading. */
+function sendPublic(req: FastifyRequest, reply: FastifyReply, rel: string, notFound = 'Not found') {
   const file = path.normalize(path.join(publicDir, rel));
-  if (!file.startsWith(publicDir) || !existsSync(file)) return null;
-  return { body: readFileSync(file), type: mimeFor(file) };
+  if (!file.startsWith(publicDir) || !existsSync(file) || !statSync(file).isFile()) {
+    return reply.code(404).type('text/plain').send(notFound);
+  }
+  const st = statSync(file);
+  const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+  reply.header('etag', etag).header('cache-control', 'no-cache');
+  if (req.headers['if-none-match'] === etag) return reply.code(304).send();
+  return reply.type(mimeFor(file)).send(readFileSync(file));
 }
 
 async function main() {
@@ -85,6 +98,19 @@ async function main() {
     await resolveActorAsync(req);
   });
 
+  // gzip text responses (JSON catalog payloads shrink ~5-8x); streams and hijacked SSE are untouched.
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (typeof payload !== 'string' && !Buffer.isBuffer(payload)) return payload;
+    if (reply.getHeader('content-encoding')) return payload;
+    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return payload;
+    if (!COMPRESSIBLE.test(String(reply.getHeader('content-type') || ''))) return payload;
+    if (Buffer.byteLength(payload) < 1024) return payload;
+    reply.header('content-encoding', 'gzip');
+    reply.header('vary', 'accept-encoding');
+    reply.removeHeader('content-length');
+    return gzipAsync(payload);
+  });
+
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
@@ -99,47 +125,23 @@ async function main() {
   app.get('/ready', async () => ({ status: 'ready' }));
 
   // Unified shell at / (Overview · SIT · Catalog QA/QC)
-  app.get('/', async (_req, reply) => {
-    const file = readPublic('catalog/index.html');
-    if (!file) {
-      return reply.type('text/plain').send('Unified UI not found');
-    }
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/', async (req, reply) => sendPublic(req, reply, 'catalog/index.html', 'Unified UI not found'));
 
-  app.get('/console.js', async (_req, reply) => {
-    const file = readPublic('console.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
-  app.get('/console-ui.js', async (_req, reply) => {
-    const file = readPublic('console-ui.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
-  app.get('/console-pages.js', async (_req, reply) => {
-    const file = readPublic('console-pages.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/console.js', async (req, reply) => sendPublic(req, reply, 'console.js'));
+  app.get('/console-ui.js', async (req, reply) => sendPublic(req, reply, 'console-ui.js'));
+  app.get('/console-pages.js', async (req, reply) => sendPublic(req, reply, 'console-pages.js'));
 
   // Same shell also at /catalog/
   app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
-  app.get('/catalog/', async (_req, reply) => {
-    const file = readPublic('catalog/index.html');
-    if (!file) return reply.code(404).type('text/plain').send('Catalog UI not found');
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/catalog/', async (req, reply) => sendPublic(req, reply, 'catalog/index.html', 'Catalog UI not found'));
   app.get('/catalog/*', async (req, reply) => {
     const rel = String((req.params as { '*': string })['*'] || '').replace(/\.\./g, '');
-    const file = readPublic(path.join('catalog', rel));
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
+    return sendPublic(req, reply, path.join('catalog', rel));
   });
 
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
-      const pathName = req.url.split('?')[0];
+      const pathName = req.url.split('?')[0] ?? req.url;
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
@@ -148,7 +150,10 @@ async function main() {
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/ui/'))) {
+        return requirePermission('tests:read')(req, reply);
+      }
+      if (method === 'POST' && pathName === '/api/v1/ui/history') {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
@@ -177,6 +182,7 @@ async function main() {
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
   await app.register(buildStatusRoutes);
+  await app.register(uiRoutes);
   await app.register(opsRoutes);
 
   await app.listen({ port, host });
