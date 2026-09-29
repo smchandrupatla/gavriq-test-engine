@@ -6,10 +6,18 @@
 export interface PerfRunInput {
   baseUrl: string;
   script?: string;
+  /** Absolute or {{var}}-templated target; overrides baseUrl + path when set. */
+  url?: string;
+  vars?: Record<string, string>;
   path?: string;
   method?: string;
   concurrency?: number;
   requests?: number;
+  /**
+   * Soak mode: keep issuing requests for this long instead of stopping at a
+   * fixed request count (endurance cases). Capped at 15 minutes.
+   */
+  durationSeconds?: number;
   timeoutSeconds?: number;
   headers?: Record<string, string>;
   body?: unknown;
@@ -44,27 +52,34 @@ export interface PerfRunResult {
 function percentile(sorted: number[], p: number): number {
   if (!sorted.length) return 0;
   const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
-  return sorted[Math.max(0, idx)];
+  return sorted[Math.max(0, idx)] ?? 0;
 }
 
 export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult> {
   const start = Date.now();
   const concurrency = Math.max(1, Math.min(input.concurrency || 5, 50));
-  const total = Math.max(1, Math.min(input.requests || 20, 500));
+  const soakMs = input.durationSeconds ? Math.min(input.durationSeconds, 900) * 1000 : 0;
+  const deadline = soakMs ? start + soakMs : 0;
+  const limit = soakMs ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(input.requests || 20, 500));
   const path = input.path || (input.script === 'health' ? '/health' : '/');
   const method = (input.method || 'GET').toUpperCase();
-  const url = `${input.baseUrl.replace(/\/$/, '')}${path}`;
+  const vars: Record<string, string> = { base: input.baseUrl.replace(/\/$/, ''), ...(input.vars || {}) };
+  const url = input.url
+    ? input.url.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, name) => vars[name] ?? `{{${name}}}`)
+    : `${vars.base}${path}`;
   const timeout = (input.timeoutSeconds || 10) * 1000;
 
   const latencies: number[] = [];
   let success = 0;
   let failed = 0;
+  // First failure seen, so a fully failing run says why (unreachable target,
+  // 401, ...) instead of only reporting an error rate.
+  let firstError = '';
 
   let next = 0;
   async function worker() {
-    while (next < total) {
-      const i = next++;
-      if (i >= total) return;
+    while (next < limit && (!deadline || Date.now() < deadline)) {
+      next++;
       const t0 = Date.now();
       try {
         const res = await fetch(url, {
@@ -73,19 +88,27 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
           body: input.body !== undefined ? JSON.stringify(input.body) : undefined,
           signal: AbortSignal.timeout(timeout),
         });
+        // Drain the body so the connection returns to the pool.
+        await res.arrayBuffer().catch(() => undefined);
         const ms = Date.now() - t0;
         latencies.push(ms);
         if (res.ok) success++;
-        else failed++;
-      } catch {
+        else {
+          failed++;
+          firstError ||= `HTTP ${res.status}`;
+        }
+      } catch (err) {
         latencies.push(Date.now() - t0);
         failed++;
+        const e = err as Error & { cause?: { code?: string; message?: string } };
+        firstError ||= [e.message, e.cause?.code || e.cause?.message].filter(Boolean).join(': ');
       }
     }
   }
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
+  const total = success + failed;
   const duration = Date.now() - start;
   const sorted = [...latencies].sort((a, b) => a - b);
   const metrics = {
@@ -103,6 +126,19 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
     latency_p95_ms: percentile(sorted, 95),
     latency_p99_ms: percentile(sorted, 99),
   };
+
+  // Nothing answered at all: the target is unreachable or rejects the probe.
+  // That is an environment verdict, not a latency/SLA measurement.
+  if (total > 0 && failed === total) {
+    const unreachable = !/^HTTP \d+/.test(firstError);
+    return {
+      status: 'failed',
+      message: `perf ${method} ${url}: 0/${total} requests succeeded (${firstError || 'no response'})`,
+      duration_ms: duration,
+      classification: unreachable ? 'network_failure' : 'environment_problem',
+      metrics,
+    };
+  }
 
   const sla = input.sla || {};
   const violations: string[] = [];
@@ -127,10 +163,9 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
   }
 
   return {
-    status: failed === total ? 'failed' : 'passed',
-    message: `perf ${method} ${path}: ${success}/${total} ok, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
+    status: 'passed',
+    message: `perf ${method} ${input.url ? url : path}: ${success}/${total} ok${soakMs ? ` over ${Math.round(duration / 1000)}s` : ''}, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
     duration_ms: duration,
-    classification: failed === total ? 'environment_problem' : undefined,
     metrics,
   };
 }

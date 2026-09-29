@@ -200,6 +200,9 @@ details{margin-top:14px}details summary{cursor:pointer;font-size:12px;color:var(
 .rc-dur{text-align:right;font-variant-numeric:tabular-nums}
 .small-btn{padding:3px 8px;font-size:12px;margin-top:6px}
 .evidence{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.evidence img{max-height:120px;max-width:100%;border-radius:6px;border:1px solid var(--line)}
+.evidence-item{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.copy-btn{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}
+.copy-btn:hover{border-color:var(--gold);color:var(--text)}.copy-btn:disabled{opacity:.6;cursor:default}
 .mini-runs{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:4px}.mini-runs a{display:flex;gap:10px;align-items:center;color:var(--text)}
 a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold-text)}
 @media (prefers-reduced-motion: reduce){.pulse,.nav-dot.pulse-dot,.skel,.rc-icon.running,.progress-seg .rest.running{animation:none}}
@@ -233,7 +236,11 @@ dialog::backdrop{background:#000a}
       <h1 id="viewTitle">Overview</h1>
       <div class="topbar-actions">
         <input id="globalSearch" type="search" placeholder="Search cases…" aria-label="Search">
+        <label class="pill" style="border:none;background:none;padding-right:0">App</label>
+        <select id="appSelect" aria-label="Application under test"></select>
+        <label class="pill" style="border:none;background:none;padding-right:0">Env</label>
         <select id="envSelect" aria-label="Target environment"></select>
+        <label class="pill" id="headedToggle" title="Run browser-based tests with a visible window instead of headless"><input type="checkbox" id="headedCheck"> Show browser</label>
         <span id="livePill" class="pill" title="Live status poll">connecting…</span>
         <span id="workerPill" class="pill">workers —</span>
         <span id="healthPill" class="pill">checking…</span>

@@ -6,6 +6,7 @@
 // engine's cases run under.
 import { chromium, type Browser, type Page } from "playwright";
 import { ENV } from "./env.ts";
+import { gatePassword } from "./client.ts";
 
 // Unset in the shipped Docker image (playwright's own browser resolution finds the
 // version bundled in the base image); set only for running these cases outside that
@@ -26,19 +27,30 @@ export async function withConsolePage<T>(fn: (page: Page) => Promise<T>): Promis
   }
 }
 
-// The console auto-authenticates on load (apps/web/public/js/live-bind.js's enter()
-// runs on DOMContentLoaded) and mounts the SPA into #console-root once #gate is
-// hidden — that's the real, user-visible signal that sign-in and mount succeeded.
+// The console mounts the SPA into #console-root once #gate is hidden — that's the real,
+// user-visible signal that sign-in and mount succeeded. With the sign-in page off it gets
+// there by itself (live-bind.js's enter() runs on DOMContentLoaded); with it on
+// (config/login.json loginScreenEnabled) the gate waits for a person, so the case signs in
+// through the form as the SIT persona, the same way an operator would.
 export async function openConsole(page: Page): Promise<void> {
   await page.goto(`${ENV.webBase}/`, { waitUntil: "networkidle", timeout: 30000 });
+  const signIn = page.locator("#gate:not(.hidden) #login");
+  if ((await signIn.count()) && (await signIn.isVisible())) {
+    await page.fill("#gate #tenant", ENV.tenantSlug);
+    await page.fill("#gate #username", ENV.username);
+    const password = await gatePassword();
+    if (password) await page.fill("#gate #password", password);
+    await signIn.click();
+  }
   await page.waitForSelector("#gate", { state: "hidden", timeout: 20000 });
 }
 
 // Navigates the mounted console to the Configuration page by clicking the real sidebar
 // nav item (not a direct URL — this is a client-rendered SPA), then waits for the
-// Eventing panel the page injects once its title reads "Configuration".
+// Eventing submenu, which owns the delivery controls in the current navigation.
 export async function openConfigurationPage(page: Page): Promise<void> {
   await page.locator(".opsc-navitem", { hasText: "Configuration" }).first().click();
+  await page.locator('.opsc-subitem', { hasText: /^Eventing$/ }).click();
   await page.waitForSelector("#sbe-eventing-dummy", { timeout: 10000 });
 }
 

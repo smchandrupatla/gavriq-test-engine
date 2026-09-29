@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db/client.js';
+import { audit } from '../middleware/rbac.js';
 
 export async function environmentRoutes(app: FastifyInstance) {
   app.get('/api/v1/environments', async (_req, reply) => {
@@ -21,7 +22,7 @@ export async function environmentRoutes(app: FastifyInstance) {
     if (!b.key || !b.name) return reply.status(400).send({ error: 'key and name required' });
     const { rows } = await query(
       `INSERT INTO environments (key, name, env_type, base_url, config, secrets_ref, safety_policy, worker_affinity, created_by)
-       VALUES ($1,$2,COALESCE($3,'development'),$4,COALESCE($5,'{}'::jsonb),$6,COALESCE($7,'{}'::jsonb),$8,$9)
+       VALUES ($1,$2,COALESCE($3::environment_type,'development'),$4,COALESCE($5,'{}'::jsonb),$6,COALESCE($7,'{}'::jsonb),$8,$9)
        RETURNING *`,
       [
         b.key, b.name, b.env_type ?? null, b.base_url ?? null,
@@ -32,6 +33,73 @@ export async function environmentRoutes(app: FastifyInstance) {
     );
     return reply.status(201).send({ data: rows[0] });
   });
+
+  /**
+   * Partial update. `config` and `safety_policy` merge onto the existing
+   * value (one level deep for config.vars/config.secret_env) rather than
+   * replacing it wholesale, so a caller can patch e.g. just config.vars.password
+   * without resending the rest of the environment's configuration.
+   */
+  app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/v1/environments/:id',
+    async (req, reply) => {
+      const { rows: existing } = await query(
+        'SELECT * FROM environments WHERE id::text = $1 OR key = $1',
+        [req.params.id]
+      );
+      if (!existing[0]) return reply.status(404).send({ error: 'Environment not found' });
+      const b = req.body || {};
+
+      let config = existing[0].config || {};
+      if (b.config && typeof b.config === 'object') {
+        const patch = b.config as Record<string, unknown>;
+        config = { ...config, ...patch };
+        for (const key of ['vars', 'secret_env']) {
+          if (patch[key] && typeof patch[key] === 'object') {
+            config[key] = { ...(config[key] || {}), ...(patch[key] as Record<string, unknown>) };
+          }
+        }
+      }
+
+      let safetyPolicy = existing[0].safety_policy || {};
+      if (b.safety_policy && typeof b.safety_policy === 'object') {
+        safetyPolicy = { ...safetyPolicy, ...(b.safety_policy as Record<string, unknown>) };
+      }
+
+      const { rows } = await query(
+        `UPDATE environments SET
+           name = COALESCE($2, name),
+           env_type = COALESCE($3, env_type),
+           base_url = COALESCE($4, base_url),
+           config = $5::jsonb,
+           secrets_ref = COALESCE($6, secrets_ref),
+           safety_policy = $7::jsonb,
+           worker_affinity = COALESCE($8, worker_affinity),
+           status = COALESCE($9, status),
+           updated_by = COALESCE($10, updated_by),
+           updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [
+          existing[0].id,
+          typeof b.name === 'string' ? b.name : null,
+          typeof b.env_type === 'string' ? b.env_type : null,
+          typeof b.base_url === 'string' ? b.base_url : null,
+          JSON.stringify(config),
+          typeof b.secrets_ref === 'string' ? b.secrets_ref : null,
+          JSON.stringify(safetyPolicy),
+          Array.isArray(b.worker_affinity) ? b.worker_affinity : null,
+          typeof b.status === 'string' ? b.status : null,
+          typeof b.updated_by === 'string' ? b.updated_by : (req.actor?.id ?? null),
+        ]
+      );
+      await audit(req, 'environment.update', 'environment', rows[0]!.id, {
+        key: rows[0]!.key,
+        changed_fields: Object.keys(b),
+      });
+      return reply.send({ data: rows[0] });
+    }
+  );
 
   app.get<{ Params: { id: string } }>('/api/v1/environments/:id/policy', async (req, reply) => {
     const { rows } = await query(

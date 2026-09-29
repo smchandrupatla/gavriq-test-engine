@@ -9,7 +9,9 @@ export const ENV = {
   dbviewerBase: trimSlash(process.env.SIT_DBVIEWER_BASE || "http://dbviewer:8090"),
   tenantSlug: process.env.SIT_TENANT_SLUG || "acme-demo",
   username: process.env.SIT_USERNAME || "operator.acme",
-  password: process.env.SIT_PASSWORD || "DemoOnly!Operator-2026#Change",
+  // SIT_PASSWORD="" (explicit empty) opts into passwordless demo sign-in on
+  // development builds; unset falls back to the documented demo password.
+  password: process.env.SIT_PASSWORD !== undefined ? process.env.SIT_PASSWORD : "SandBenchDemo1234!",
   messageTypeCode: process.env.SIT_MESSAGE_TYPE || "pain.001.001.09",
   // Performance cases (91-performance-soak, 92-performance-burst) are bounded-duration by
   // design -- see those files for why. Defaults are kept short so they don't meaningfully

@@ -333,6 +333,8 @@ CREATE TABLE IF NOT EXISTS executions (
 
 CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
 CREATE INDEX IF NOT EXISTS idx_executions_env ON executions(environment_id);
+-- Runs are groups of executions sharing metadata.run_group (trigger API, run-all).
+CREATE INDEX IF NOT EXISTS idx_executions_run_group ON executions((metadata->>'run_group'));
 
 CREATE TABLE IF NOT EXISTS execution_results (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),

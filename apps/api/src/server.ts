@@ -26,6 +26,8 @@ import { sitCatalogRoutes } from './routes/sit-catalog.js';
 import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { uiRoutes } from './routes/ui.js';
+import { triggerRoutes } from './routes/trigger.js';
+import { registerEvidenceGate } from './evidence-gate.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -145,7 +147,13 @@ async function main() {
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
+      if (pathName === '/api/v1/evidence/upload' && method === 'POST') {
+        return requirePermission('workers:manage')(req, reply);
+      }
       if (pathName.startsWith('/api/v1/evidence')) return;
+      if (pathName.startsWith('/api/v1/runs')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
@@ -156,7 +164,7 @@ async function main() {
       if (method === 'POST' && pathName === '/api/v1/ui/history') {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
+      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
         return requirePermission('executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
@@ -167,6 +175,9 @@ async function main() {
       }
     });
   }
+
+  // Evidence is the exit criterion of a run: verified in front of the result endpoints.
+  registerEvidenceGate(app);
 
   await app.register(metaRoutes);
   await app.register(sitCatalogRoutes);
@@ -183,6 +194,7 @@ async function main() {
   await app.register(scheduleRoutes);
   await app.register(buildStatusRoutes);
   await app.register(uiRoutes);
+  await app.register(triggerRoutes);
   await app.register(opsRoutes);
 
   await app.listen({ port, host });
