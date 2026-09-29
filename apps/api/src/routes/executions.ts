@@ -103,7 +103,7 @@ export async function executionRoutes(app: FastifyInstance) {
       ]
     );
 
-    await audit(req, 'execution.queue', 'execution', rows[0].id, {
+    await audit(req, 'execution.queue', 'execution', rows[0]!.id, {
       key,
       case_count: resolvedIds.length,
       environment_id: environmentId,
@@ -111,6 +111,111 @@ export async function executionRoutes(app: FastifyInstance) {
     });
 
     return reply.status(202).send({ data: rows[0], message: 'Execution queued' });
+  });
+
+  /**
+   * On-demand "run everything" for one application: queues one execution per
+   * non-empty suite (cases deduped across suites so nothing runs twice),
+   * grouped under a shared metadata.run_group id. With dry_run=true it only
+   * returns the plan.
+   */
+  app.post<{ Body: Record<string, unknown> }>('/api/v1/executions/run-all', async (req, reply) => {
+    const b = req.body || {};
+    const appKey = typeof b.application_key === 'string' ? b.application_key : null;
+    const appId = typeof b.application_id === 'string' ? b.application_id : null;
+    if (!appKey && !appId) {
+      return reply.status(400).send({ error: 'Provide application_key or application_id' });
+    }
+
+    const appRow = await query(
+      `SELECT id, key, name FROM applications WHERE ${appId ? 'id::text = $1' : 'key = $1'}`,
+      [appId || appKey]
+    );
+    if (!appRow.rows[0]) return reply.status(404).send({ error: 'Application not found' });
+    const application = appRow.rows[0];
+
+    let environmentId: string | null = null;
+    if (typeof b.environment_id === 'string' && b.environment_id) {
+      const env = await query(
+        `SELECT id FROM environments WHERE id::text = $1 OR key = $1`,
+        [b.environment_id]
+      );
+      if (!env.rows[0]) return reply.status(404).send({ error: 'Environment not found' });
+      environmentId = env.rows[0].id;
+    }
+
+    const suites = await query(
+      `SELECT s.id, s.key, s.name, s.suite_type,
+              COALESCE(array_agg(m.test_case_id ORDER BY m.sort_order) FILTER (WHERE m.test_case_id IS NOT NULL), '{}') AS case_ids
+       FROM test_suites s
+       LEFT JOIN test_case_suites m ON m.test_suite_id = s.id
+       LEFT JOIN test_cases tc ON tc.id = m.test_case_id AND tc.lifecycle NOT IN ('deprecated','archived')
+       WHERE s.application_id = $1 AND tc.id IS NOT NULL
+       GROUP BY s.id
+       ORDER BY s.key`,
+      [application.id]
+    );
+
+    const seen = new Set<string>();
+    const plan: Array<{ suite_id: string; suite_key: string; suite_name: string; case_ids: string[] }> = [];
+    for (const s of suites.rows) {
+      const ids = (s.case_ids as string[]).filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      if (ids.length) plan.push({ suite_id: s.id, suite_key: s.key, suite_name: s.name, case_ids: ids });
+    }
+
+    const totalCases = plan.reduce((n, p) => n + p.case_ids.length, 0);
+    if (b.dry_run === true) {
+      return reply.send({
+        data: {
+          application: application.key,
+          environment_id: environmentId,
+          total_cases: totalCases,
+          suites: plan.map((p) => ({ key: p.suite_key, name: p.suite_name, cases: p.case_ids.length })),
+        },
+      });
+    }
+    if (!totalCases) return reply.status(400).send({ error: 'Application has no runnable cases' });
+
+    const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+    const created: any[] = [];
+    for (const p of plan) {
+      const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      const { rows } = await query(
+        `INSERT INTO executions (
+           key, requested_by, test_suite_id, test_case_ids, environment_id,
+           execution_location, status, trigger_source, metadata
+         ) VALUES ($1,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
+         RETURNING id, key, test_suite_id, test_case_ids, status, created_at`,
+        [
+          key, (b.requested_by as string) ?? req.actor?.id ?? null, p.suite_id, p.case_ids, environmentId,
+          (b.trigger_source as string) || 'run-all',
+          JSON.stringify({ run_group: runGroup, suite_key: p.suite_key, application_key: application.key }),
+        ]
+      );
+      created.push({ ...rows[0], suite_key: p.suite_key, suite_name: p.suite_name });
+    }
+
+    await audit(req, 'execution.run_all', 'application', application.id, {
+      run_group: runGroup,
+      executions: created.length,
+      total_cases: totalCases,
+      environment_id: environmentId,
+    });
+
+    return reply.status(202).send({
+      data: {
+        run_group: runGroup,
+        application: application.key,
+        environment_id: environmentId,
+        total_cases: totalCases,
+        executions: created,
+      },
+      message: `Queued ${created.length} suite executions (${totalCases} cases)`,
+    });
   });
 
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
@@ -130,6 +235,22 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const workerId = req.body?.worker_id;
       if (!workerId) return reply.status(400).send({ error: 'worker_id required' });
+
+      // A worker that died mid-job leaves its execution "running" forever
+      // (the live run screen never settles). Workers heartbeat every 15s even
+      // while a case is executing, so three silent minutes means it is gone.
+      await query(
+        `UPDATE executions e
+            SET status = 'error', finished_at = now(),
+                metadata = e.metadata || jsonb_build_object(
+                  'abandoned', true,
+                  'abandoned_reason', 'worker ' || COALESCE(e.worker_id, '(none)') || ' stopped reporting before the run completed')
+          WHERE e.status IN ('running','preparing')
+            AND e.started_at < now() - interval '3 minutes'
+            AND NOT EXISTS (
+              SELECT 1 FROM workers w
+               WHERE w.id = e.worker_id AND w.last_heartbeat > now() - interval '3 minutes')`
+      );
 
       const row = await withTransaction(async (client) => {
         const { rows } = await client.query(
@@ -187,7 +308,7 @@ export async function executionRoutes(app: FastifyInstance) {
             `INSERT INTO evidence (execution_result_id, evidence_type, storage_key, content_type, size_bytes, redacted, metadata)
              VALUES ($1,$2,$3,$4,$5,COALESCE($6,false),COALESCE($7,'{}'::jsonb))`,
             [
-              rows[0].id, ev.type, ev.storage_key, ev.content_type ?? null,
+              rows[0]!.id, ev.type, ev.storage_key, ev.content_type ?? null,
               ev.size_bytes ?? null, ev.redacted ?? false, JSON.stringify(ev.metadata ?? {}),
             ]
           );

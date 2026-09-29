@@ -3,10 +3,14 @@
  *
  * Priority:
  * 1. X-Worker-Key matches WORKER_API_KEY → worker role
- * 2. Authorization: Bearer <jwt> verified with JWT_SECRET (HS256) via jose
- * 3. x-actor-id / x-actor-roles headers (dev only unless RBAC_ALLOW_DEV_HEADERS=true)
+ * 2. X-Api-Key matches an entry of TRIGGER_API_KEYS ("name:key,name:key") →
+ *    automation_agent, acting as app:<name>. For callers that trigger runs
+ *    machine-to-machine (deploy pipelines, the application under test).
+ * 3. Authorization: Bearer <jwt> verified with JWT_SECRET (HS256) via jose
+ * 4. x-actor-id / x-actor-roles headers (dev only unless RBAC_ALLOW_DEV_HEADERS=true)
  */
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { jwtVerify } from 'jose';
 import { query } from '../db/client.js';
 
@@ -58,6 +62,24 @@ function parseRoles(raw: unknown): Role[] {
   return ['viewer'];
 }
 
+function sameSecret(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+function resolveApiKey(provided: string | undefined): { id: string; roles: Role[] } | null {
+  if (!provided) return null;
+  for (const entry of (process.env.TRIGGER_API_KEYS || '').split(',')) {
+    const at = entry.indexOf(':');
+    if (at < 1) continue;
+    const name = entry.slice(0, at).trim();
+    const key = entry.slice(at + 1).trim();
+    if (key.length >= 16 && sameSecret(provided, key)) return { id: `app:${name}`, roles: ['automation_agent'] };
+  }
+  return null;
+}
+
 async function verifyBearer(token: string): Promise<{ id: string; roles: Role[] } | null> {
   const secret = process.env.JWT_SECRET;
   if (!secret) return null;
@@ -95,6 +117,12 @@ export async function resolveActorAsync(req: FastifyRequest) {
   const providedKey = req.headers['x-worker-key'] as string | undefined;
   if (workerKey && providedKey && providedKey === workerKey) {
     req.actor = { id: 'worker', roles: ['worker', 'automation_agent'] };
+    return;
+  }
+
+  const caller = resolveApiKey(req.headers['x-api-key'] as string | undefined);
+  if (caller) {
+    req.actor = caller;
     return;
   }
 

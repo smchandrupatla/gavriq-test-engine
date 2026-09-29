@@ -4,6 +4,7 @@
  * Dispatches to Selenium, Playwright, HTTP, Performance, or SIT file runners.
  */
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
@@ -15,6 +16,25 @@ const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 4000);
 const DEFAULT_BASE_URL = process.env.TARGET_BASE_URL || 'http://127.0.0.1:8001';
 const WORKER_API_KEY = process.env.WORKER_API_KEY || '';
+
+/**
+ * Inside a container "127.0.0.1"/"localhost" is the worker itself, not the
+ * machine the deployment under test is published on. Environments written for
+ * a host worker (local-dev, sand-bench-local, engine-local) would therefore
+ * fail every case with "fetch failed" when a containerized worker claims the
+ * job. Such targets are re-pointed at the host gateway so any environment
+ * selected in the console runs on whichever worker is online.
+ * WORKER_LOOPBACK_HOST overrides the gateway name; set it to "off" to disable.
+ */
+const IN_CONTAINER = process.env.WORKER_IN_CONTAINER
+  ? process.env.WORKER_IN_CONTAINER === 'true'
+  : existsSync('/.dockerenv');
+const LOOPBACK_HOST = process.env.WORKER_LOOPBACK_HOST || (IN_CONTAINER ? 'host.docker.internal' : '');
+
+function reachable(value: string): string {
+  if (!LOOPBACK_HOST || LOOPBACK_HOST === 'off') return value;
+  return value.replace(/(\bhttps?:\/\/)(?:127\.0\.0\.1|localhost|\[::1\])(?=[:/]|$)/gi, `$1${LOOPBACK_HOST}`);
+}
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { 'content-type': 'application/json' };
@@ -87,15 +107,42 @@ type RunnerResult = {
   evidence?: any[];
 };
 
-async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
+/**
+ * Variables shared with runners: environment config.vars verbatim, plus any
+ * config.secret_env entries resolved from this worker's process environment
+ * (the DB stores which env var holds a secret, never the secret itself).
+ */
+function buildVars(env: any): Record<string, string> {
+  const vars: Record<string, string> = {};
+  const cfg = env?.config || {};
+  for (const [k, v] of Object.entries(cfg.vars || {})) vars[k] = reachable(String(v));
+  for (const [k, envName] of Object.entries(cfg.secret_env || {})) {
+    const resolved = process.env[String(envName)];
+    if (resolved !== undefined) vars[k] = resolved;
+  }
+  return vars;
+}
+
+async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean): Promise<RunnerResult> {
   const method = (tc?.execution_method || 'selenium').toLowerCase();
   const script = tc?.script || '';
+  const rules = tc?.validation_rules || {};
+  const vars = buildVars(env);
+  const viewport =
+    rules.viewport && Number(rules.viewport.width) > 0
+      ? { width: Number(rules.viewport.width), height: Number(rules.viewport.height) || 800 }
+      : undefined;
+  // Priority: an explicit per-run request (execution.metadata.headless) beats
+  // the case's own validation_rules.headless, which beats each runner's default.
+  const headless =
+    typeof headlessOverride === 'boolean' ? headlessOverride : typeof rules.headless === 'boolean' ? rules.headless : undefined;
 
   // Imported SIT catalog entries
   if (isSitScript(script) || method === 'sit') {
     const r = await runSit({
       script,
       baseUrl,
+      vars,
       timeoutSeconds: tc?.timeout_seconds || 120,
     });
     return {
@@ -113,18 +160,25 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
     script: script || undefined,
     baseUrl,
     timeoutSeconds: tc?.timeout_seconds || 30,
-    steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
+    steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
+    vars,
   };
 
   if (method === 'playwright') {
-    const r = await runPlaywright(common);
+    const r = await runPlaywright({
+      ...common,
+      browser: rules.browser || 'chromium',
+      viewport,
+      headless,
+    });
     return {
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
       classification: r.classification || null,
-      evidence: [{ type: 'log', storage_key: `evidence/pw-${Date.now()}.log`, content_type: 'text/plain' }],
+      metrics: r.metrics || {},
+      evidence: r.evidence || [],
     };
   }
 
@@ -137,19 +191,21 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
       message: r.message,
       classification: r.classification || null,
       metrics: r.metrics || {},
-      evidence: [],
+      evidence: (r as { evidence?: any[] }).evidence || [],
     };
   }
 
-  if (method === 'performance' || method === 'load' || method === 'k6') {
-    const rules = tc?.validation_rules || {};
+  if (method === 'performance' || method === 'load' || method === 'k6' || method === 'endurance' || method === 'soak') {
     const r = await runPerformance({
       baseUrl,
+      vars,
       script: tc?.script,
+      url: rules.url,
       path: rules.path || '/health',
       method: rules.method || 'GET',
       concurrency: rules.concurrency || 5,
       requests: rules.requests || 20,
+      durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
       timeoutSeconds: tc?.timeout_seconds || 15,
       sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
     });
@@ -164,7 +220,7 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
     };
   }
 
-  const r = await runSelenium(common);
+  const r = await runSelenium({ ...common, viewport, headless });
   return {
     status: r.status,
     verdict: r.status === 'passed' ? 'pass' : 'fail',
@@ -179,13 +235,14 @@ async function runJob(execution: any) {
   console.log(`[worker] claimed ${execution.key}`);
   const caseIds: string[] = execution.test_case_ids || [];
   const env = await fetchEnvironment(execution.environment_id);
-  const baseUrl = env?.base_url || DEFAULT_BASE_URL;
+  const baseUrl = reachable(env?.base_url || DEFAULT_BASE_URL);
+  const headlessOverride = typeof execution?.metadata?.headless === 'boolean' ? execution.metadata.headless : undefined;
   let anyFailed = false;
 
   for (const caseId of caseIds) {
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
-    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl);
+    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride);
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
 
     await api(`/api/v1/executions/${execution.id}/results`, {

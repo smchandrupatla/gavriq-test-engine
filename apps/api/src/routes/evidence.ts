@@ -1,13 +1,25 @@
 /**
- * Evidence listing + static file serve from EVIDENCE_DIR.
- * Workers write screenshots under EVIDENCE_DIR; storage_key is e.g. evidence/fail-….png
+ * Evidence listing, upload, and file serve from the evidence store.
+ * Workers upload artefacts per execution (storage_key evidence/<execution-id>/<file>);
+ * legacy flat keys (evidence/fail-….png, written into a shared volume) still resolve.
  */
 import type { FastifyInstance } from 'fastify';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { query } from '../db/client.js';
+import { evidenceUrl, saveEvidence, statEvidence } from '../evidence-store.js';
 
-const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
+const CONTENT_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.json': 'application/json',
+  '.txt': 'text/plain; charset=utf-8',
+  '.log': 'text/plain; charset=utf-8',
+  '.tap': 'text/plain; charset=utf-8',
+  '.html': 'text/plain; charset=utf-8', // never rendered: captured pages are served as source
+};
 
 export async function evidenceRoutes(app: FastifyInstance) {
   // Evidence for one execution result
@@ -19,10 +31,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
         [req.params.resultId]
       );
       return reply.send({
-        data: rows.map((r) => ({
-          ...r,
-          url: r.storage_key ? `/api/v1/evidence/file?key=${encodeURIComponent(r.storage_key)}` : null,
-        })),
+        data: rows.map((r) => ({ ...r, url: evidenceUrl(r.storage_key) })),
       });
     }
   );
@@ -46,34 +55,55 @@ export async function evidenceRoutes(app: FastifyInstance) {
         [exec.rows[0].id]
       );
       return reply.send({
-        data: rows.map((r) => ({
-          ...r,
-          url: r.storage_key ? `/api/v1/evidence/file?key=${encodeURIComponent(r.storage_key)}` : null,
-        })),
+        data: rows.map((r) => ({ ...r, url: evidenceUrl(r.storage_key) })),
       });
     }
   );
 
-  // Serve a file by storage_key (path under EVIDENCE_DIR; only basename-safe keys)
+  /**
+   * Worker upload. The artefact is stored under the execution it belongs to and
+   * only becomes evidence once a result references the returned storage_key.
+   * `probe: true` is the worker's preflight write test.
+   */
+  app.post<{ Body: Record<string, unknown> }>('/api/v1/evidence/upload', async (req, reply) => {
+    const b = req.body || {};
+    const name = typeof b.name === 'string' ? b.name : '';
+    const encoded = typeof b.content_base64 === 'string' ? b.content_base64 : '';
+    if (!name || !encoded) return reply.status(400).send({ error: 'name and content_base64 required' });
+
+    let folder = '_probe';
+    if (b.probe !== true) {
+      const exec = await query(
+        `SELECT id, status FROM executions WHERE id::text = $1 OR key = $1`,
+        [String(b.execution_id || '')]
+      );
+      if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
+      folder = exec.rows[0].id;
+    }
+
+    try {
+      const saved = saveEvidence(folder, name, Buffer.from(encoded, 'base64'));
+      if (typeof b.sha256 === 'string' && b.sha256 && b.sha256 !== saved.sha256) {
+        return reply.status(422).send({ error: 'sha256 mismatch — upload corrupted', expected: b.sha256, actual: saved.sha256 });
+      }
+      return reply.status(201).send({ data: { ...saved, url: evidenceUrl(saved.storage_key) } });
+    } catch (err) {
+      return reply.status(400).send({ error: (err as Error).message });
+    }
+  });
+
+  // Serve a file by storage_key (resolved inside the evidence store only)
   app.get('/api/v1/evidence/file', async (req, reply) => {
     const q = req.query as { key?: string };
     const key = q.key || '';
-    // storage_key like evidence/fail-123.png → file at EVIDENCE_DIR/fail-123.png
-    const base = path.basename(key.replace(/^evidence\//, ''));
-    if (!base || base.includes('..')) {
-      return reply.status(400).send({ error: 'Invalid key' });
+    const found = key ? statEvidence(key) : null;
+    if (!found) {
+      return reply.status(404).send({ error: 'File not found', key: path.basename(key) });
     }
-    const full = path.join(EVIDENCE_DIR, base);
-    if (!existsSync(full)) {
-      return reply.status(404).send({ error: 'File not found', path: base });
-    }
-    const ext = path.extname(base).toLowerCase();
-    const type =
-      ext === '.png' ? 'image/png' :
-      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-      ext === '.webp' ? 'image/webp' :
-      ext === '.json' ? 'application/json' :
-      'application/octet-stream';
-    return reply.type(type).send(createReadStream(full));
+    const type = CONTENT_TYPES[path.extname(found.path).toLowerCase()] || 'application/octet-stream';
+    return reply
+      .header('x-content-type-options', 'nosniff')
+      .type(type)
+      .send(createReadStream(found.path));
   });
 }

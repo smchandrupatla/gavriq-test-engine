@@ -1,9 +1,9 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { seleniumReady, withBrowser, saveShot, recordSkip } from "../lib/selenium/webdriver.mjs";
 import { enterConsole, clickLabel, sourceHas, bootFailed } from "../lib/selenium/console.mjs";
 
-async function needChrome(t, name) {
+async function needChrome(t: TestContext, name: string) {
   if (await seleniumReady()) return true;
   await recordSkip(name, "selenium down");
   t.skip("Selenium Chrome is optional");

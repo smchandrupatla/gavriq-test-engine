@@ -52,13 +52,20 @@ export async function uiRoutes(app: FastifyInstance) {
            FROM execution_results er WHERE er.test_case_id = tc.id
            ORDER BY er.created_at DESC LIMIT 1
          ) lr ON true
-         ORDER BY tc.key`
+         WHERE tc.application_id = (SELECT id FROM applications WHERE key = $1)
+         ORDER BY tc.key`,
+        [appKey]
       ),
-      query(`SELECT id, key, name, suite_type FROM test_suites ORDER BY name`),
+      query(
+        `SELECT id, key, name, suite_type FROM test_suites
+         WHERE application_id = (SELECT id FROM applications WHERE key = $1)
+         ORDER BY name`,
+        [appKey]
+      ),
       query(`SELECT id, key, name FROM environments ORDER BY name`),
       query(
         `SELECT id, key, name, metadata->'sandbench_types' AS types
-         FROM applications ORDER BY (key = $1) DESC, name LIMIT 1`,
+         FROM applications WHERE key = $1`,
         [appKey]
       ),
       query(
@@ -135,7 +142,15 @@ export async function uiRoutes(app: FastifyInstance) {
          ORDER BY e.created_at DESC`,
         [limit]
       ),
-      query(`SELECT id, name, status, last_heartbeat, current_load FROM workers ORDER BY name`),
+      query(
+        // A worker whose heartbeat is stale is offline no matter what it last
+        // reported — dozens of dead registrations otherwise show "online" forever.
+        `SELECT id, name,
+                CASE WHEN last_heartbeat IS NULL OR last_heartbeat < now() - interval '60 seconds'
+                     THEN 'offline' ELSE status END AS status,
+                last_heartbeat, current_load
+         FROM workers ORDER BY name`
+      ),
       since
         ? query(
             // Margin covers results whose insert committed after an earlier poll's snapshot.

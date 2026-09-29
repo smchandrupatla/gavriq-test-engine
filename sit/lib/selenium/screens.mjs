@@ -1,17 +1,33 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { ENV } from "../env.ts";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+// officialNav()/ensureOfficialNav() live in live-bind-parts/part-00.js, the part that
+// live-bind.js loads. The Sand Bench repository reads it from its own source tree; this
+// engine ships without the application's sources and tests a deployment, so it reads the
+// file the deployed web host actually serves -- which is also the navigation an operator
+// gets. Fetched once, when a case file imports this module.
+async function fetchOfficialNavSource() {
+  const url = `${ENV.webBase}/js/live-bind-parts/part-00.js`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`official navigation source not served: GET ${url} -> ${res.status}`);
+  const src = await res.text();
+  if (!src.includes("function officialNav")) throw new Error(`${url} no longer defines officialNav()`);
+  return src;
+}
+
+const NAV_SOURCE = await fetchOfficialNavSource();
+
+function officialNavSource() {
+  return NAV_SOURCE;
+}
 
 export function officialPageIds() {
-  const src = readFileSync(path.join(root, "apps/web/public/js/live-bind.js"), "utf8");
+  const src = officialNavSource();
   const block = src.slice(src.indexOf("function officialNav"), src.indexOf("function ensureOfficialNav"));
-  return [...block.matchAll(/page:\s*"([^"]+)"/g)].map((m) => m[1]);
+  return [...new Set([...block.matchAll(/page:\s*"([^"]+)"/g)].map((m) => m[1]))];
 }
 
 export function officialNavLabels() {
-  const src = readFileSync(path.join(root, "apps/web/public/js/live-bind.js"), "utf8");
+  const src = officialNavSource();
   const block = src.slice(src.indexOf("function officialNav"), src.indexOf("function ensureOfficialNav"));
   return [...block.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
 }
@@ -38,6 +54,10 @@ export const SCREEN_CONTRACTS = {
   msgDataFiles: { family: "Message Designer", texts: ["Saved test data"], controls: ["Download"] },
   msgImportSchema: { family: "Message Designer", texts: ["Import schema", "XSD"], controls: ["Upload"], fields: ["name"] },
   msgExportTemplate: { family: "Message Designer", texts: ["Export template"], controls: ["Download"] },
+  msgSchemaRegister: { family: "Message Designer", texts: ["Schema register"], controls: ["Imported schemes"] },
+  schemeDefinitions: { family: "Message Designer", texts: ["Scheme definitions"], controls: ["Import Scheme", "Download"] },
+  msgCreateSchema: { family: "Message Designer", texts: ["Create schema"], controls: ["Generate schema"] },
+  msgSchemaCanvas: { family: "Message Designer", texts: ["Schema canvas"], controls: ["Add child", "Generate"] },
   trActive: { family: "Test Runs", texts: ["Active"], controls: ["New test run"] },
   trAll: { family: "Test Runs", texts: ["All test runs"], controls: ["New test run"] },
   trHistory: { family: "Test Runs", texts: ["history"], controls: ["Open"] },
@@ -46,6 +66,8 @@ export const SCREEN_CONTRACTS = {
   dsNew: { family: "Datasets", texts: ["Create new dataset"], fields: ["name"], controls: ["Save"] },
   tcPool: { family: "Test Cases", texts: ["All test cases"], controls: ["New test case"] },
   tcNew: { family: "Test Cases", texts: ["New test case"], fields: ["name"], controls: ["Save"] },
+  testCasesBrowse: { family: "Test Cases", texts: ["Test cases"], controls: ["Run selected", "Select all"] },
+  testCasesNew: { family: "Test Cases", texts: ["New test case"], fields: ["name"], controls: ["Save draft", "Create and close"] },
   tsAll: { family: "Test Suites", texts: ["All test suites"], controls: ["New test suite"] },
   tsNew: { family: "Test Suites", texts: ["New test suite"], fields: ["name"], controls: ["Save"] },
   schUpcoming: { family: "Schedules", texts: ["Upcoming"], controls: ["New schedule"] },
@@ -58,8 +80,20 @@ export const SCREEN_CONTRACTS = {
   repCompliance: { family: "Reports", texts: ["Compliance"], controls: ["Download"] },
   repScheduled: { family: "Reports", texts: ["Scheduled exports"], controls: ["New"] },
   configuration: { family: "Configuration", texts: ["Configuration", "MQ", "Kafka"], controls: ["Test connection", "Save"] },
+  configurationEnvironmentDefaults: { family: "Configuration", texts: ["Environment defaults"], controls: ["ON", "OFF"] },
+  configurationNotifications: { family: "Configuration", texts: ["Notifications"], controls: ["ON", "OFF"] },
+  configurationApiAccess: { family: "Configuration", texts: ["API access"], controls: ["ON", "OFF"] },
+  configurationDataRetention: { family: "Configuration", texts: ["Data retention"], controls: ["ON", "OFF"] },
+  configurationUserRoles: { family: "Configuration", texts: ["User roles"], controls: ["ON", "OFF"] },
+  configurationEventing: { family: "Configuration", texts: ["Eventing"], controls: ["ON", "OFF"] },
+  configurationAppConfigs: { family: "Configuration", texts: ["App configs"], controls: ["ON", "OFF"] },
+  functionalAccess: { family: "Configuration", texts: ["Functional access"], controls: ["ON", "OFF"] },
   naming: { family: "Configuration", texts: ["Naming"], fields: ["prefix"], controls: ["Save"] },
   externalSystems: { family: "Configuration", texts: ["External systems"], controls: ["Create", "Save"] },
+  useCaseTemplates: { family: "Configuration", texts: ["Use-case templates"], controls: ["Download use-case template"] },
+  featureIds: { family: "Configuration", texts: ["Feature IDs"], controls: ["Save"] },
+  useCaseReview: { family: "Configuration", texts: ["Use-case review"], controls: ["Review all use cases"] },
+  applicationEvents: { family: "Configuration", texts: ["Application Events"], controls: ["Filter events"] },
 };
 
 export function contractFor(pageId) {

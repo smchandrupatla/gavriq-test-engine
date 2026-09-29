@@ -103,7 +103,7 @@ export async function opsRoutes(app: FastifyInstance) {
     try {
       const { spawn } = await import('node:child_process');
       await new Promise<void>((resolve, reject) => {
-        const child = spawn('npx', ['tsx', 'apps/api/src/seed-sandbench-catalog.ts'], {
+        const child = spawn('npx', ['tsx', 'apps/api/src/seed-realistic-catalog.ts'], {
           stdio: 'inherit',
           env: process.env,
         });

@@ -41,7 +41,8 @@ export async function openSession() {
       alwaysMatch: {
         browserName: "chrome",
         "goog:chromeOptions": {
-          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,900"],
+          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,900",
+            ...(process.env.BASELINE_CONTAINER === '1' ? ['--host-resolver-rules=MAP unpkg.com ~NOTFOUND'] : [])],
         },
       },
     },
@@ -112,6 +113,14 @@ export async function recordSkip(name, reason) {
   return file;
 }
 
+/** @typedef {ReturnType<typeof session>} Session */
+
+/**
+ * Run `fn` in a fresh WebDriver session, or report a skip when Selenium is down.
+ * @template T
+ * @param {(sess: Session) => Promise<T>} fn
+ * @returns {Promise<{ skipped: true, reason: string } | { skipped: false, result: T }>}
+ */
 export async function withBrowser(fn) {
   const ready = await seleniumReady();
   if (!ready) {

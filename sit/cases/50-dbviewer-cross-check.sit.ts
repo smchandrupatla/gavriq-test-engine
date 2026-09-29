@@ -18,8 +18,18 @@ test("a completed run is independently visible through the db viewer", async () 
   assert.equal(run.status, 202);
   assert.equal(run.body.status, "completed");
 
+  // The viewer pages oldest-first, 100 rows at most, so a run created a moment ago is on
+  // the LAST page. Reading only page 1 stopped finding new runs as soon as the table
+  // outgrew one page -- the row was there, the case was looking in the wrong place.
+  const newestRows = async () => {
+    const first = await dbviewerJson<DbRows<{ id: string; status: string }>>(`/api/rows?table=test_runs&page_size=100`);
+    const lastPage = Math.max(1, Math.ceil((first.body.total || 0) / 100));
+    return lastPage === 1
+      ? first
+      : dbviewerJson<DbRows<{ id: string; status: string }>>(`/api/rows?table=test_runs&page_size=100&page=${lastPage}`);
+  };
   const rows = await pollUntil(
-    () => dbviewerJson<DbRows<{ id: string; status: string }>>(`/api/rows?table=test_runs&page_size=100`),
+    newestRows,
     (result) => result.body.data?.some((row) => row.id === run.body.runId),
     { timeoutMs: 6000 }
   );

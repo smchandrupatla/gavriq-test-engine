@@ -18,6 +18,16 @@
 - Console `esc()` mapped `&<>"'` to themselves, so case names were inserted into the page unescaped
 - Restored two fixes lost in merge `427a122`: queueing an execution failed with `execution_location ... is of type text` (0.3.1), and `POST /api/v1/executions/:id/complete` failed with `text = uuid`, so workers could never finish a run (0.3.2)
 
+**Added — realistic catalog, generic console, run-everything**
+- Realistic executable catalog (`apps/api/src/catalog/`): 102 Sand Bench cases across 18 QA/QC suites (smoke, field-fidelity units, channel round trips, screens, use-case contracts, regression, data quality via db-viewer, Selenium baseline, performance/endurance SLAs, upgrade compatibility, robustness, exposure scanning, negative-auth pen tests, cross-browser/viewport matrix, chaos, compliance, DR) — every case has verified endpoints/selectors, executable steps, preconditions, data used and a data profile. `npm run seed` (seed-realistic-catalog) upserts them and **deletes** the old display-only dummy cases, the legacy TC-SB login flows and the my-app/test-app placeholders; the dummy seeders and `data/sandbench-catalog*.json` are removed
+- The engine registers itself as application #2 (`gavriq-test-engine`) with a runnable API self-test suite — the multi-application proof
+- Application selector in the console top bar (persisted, next to the environment selector); every view, tile, KPI, build panel and poll is scoped to the selected application; SIT sections appear only for applications that have SIT cases
+- **Run everything**: `POST /api/v1/executions/run-all {application_key, environment_id, dry_run?}` queues one execution per non-empty suite (cases deduped across suites) under a shared `metadata.run_group`; ▶ button on the Overview header
+- HTTP runner: absolute/`{{var}}`-templated URLs from `environments.config.vars` (`{{web}} {{api}} {{testhub}} {{dbviewer}} {{engine}}` …), per-run `{{ts}}/{{rand}}` correlation ids, variable capture between steps (`save`), JSON-path assertions (`expect_json` equals/contains/exists/min/min_length), header assertions, raw bodies for malformed-payload tests, and poll-until steps for async round trips; secrets resolve from worker env via `config.secret_env`, never from the DB
+- Playwright runner: browser engine choice (chromium/firefox/webkit), explicit viewports, `wait_for`/`wait_for_hidden`/`assert_selector_text`/`assert_no_horizontal_overflow` steps, screenshot-on-failure evidence; Selenium runner: window size + the same step vocabulary; performance runner: templated absolute targets
+- `GET /api/v1/ui/summary` now actually filters cases and suites by `application_key`; `/api/v1/workers` derives `offline` for stale heartbeats (dead registrations no longer show online forever)
+- `npm run docs:catalog` generates `docs/TEST-CASE-CATALOG.md` from the live repository (per category: description, steps, data used, data profile, expected result for every case); `dev/scripts/run-catalog-local.ts` executes catalog definitions directly through the runners for authoring
+
 ## [0.3.3] — 2026-09-18
 
 **Added**

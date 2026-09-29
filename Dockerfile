@@ -1,8 +1,8 @@
-# Consolidated Test Engine (control-plane API + dashboard) and SIT console — one
+﻿# Consolidated Test Engine (control-plane API + dashboard) and SIT console â€” one
 # image/container, one external port. scripts/consolidated-entrypoint.mjs runs both as
 # independent Node child processes behind a small reverse proxy (/sit/* -> console,
 # everything else -> API), so a crash in one doesn't take the other down even though
-# they now ship together — see that script's header comment for the reasoning.
+# they now ship together â€” see that script's header comment for the reasoning.
 #
 # Based on the Playwright image (not the plain node:22 base the worker uses) because the
 # SIT console's UI-phase cases (sit/cases/60/70/80-*.sit.ts) need a real, version-matched
@@ -13,7 +13,7 @@
 #     image's own Debian package repository, in the same apt transaction so the two
 #     stay a matching pair (Selenium's ChromeDriver refuses to drive a Chrome build
 #     from a different major version).
-FROM mcr.microsoft.com/playwright:v1.55.1-noble
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends chromium chromium-driver \

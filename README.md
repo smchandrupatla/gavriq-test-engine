@@ -9,7 +9,10 @@ Enterprise Test Engineering & Validation platform — central repository, on-dem
 | Capability | Description |
 |------------|-------------|
 | **Test Repository** | Application → Suite → Case hierarchy with versioning, tags, lifecycle |
-| **On-demand runs** | Selenium, Playwright, HTTP/API, and concurrent performance runners |
+| **Realistic catalog** | Every registered case is executable — verified endpoints/selectors, steps, data + data profile (`apps/api/src/catalog/`, docs in `docs/TEST-CASE-CATALOG.md`) |
+| **Multi-application** | Application + environment selectors in the console; the engine itself is registered as application #2 with an API self-test suite |
+| **On-demand runs** | Selenium, Playwright (chromium/firefox/webkit × viewports), HTTP/API with capture/poll/JSON-path assertions, and concurrent performance runners |
+| **Run everything** | `POST /api/v1/executions/run-all` — one execution per suite for an application, grouped and deduped; ▶ button on the console Overview |
 | **In-container status** | CI posts build results; engine displays them (does not re-run them) |
 | **Workers** | Distributed claim/result protocol |
 | **Schedules** | Interval (`every:N`) and event triggers (`after_build`, …) |
@@ -46,8 +49,9 @@ TARGET_BASE_URL=http://host.docker.internal:8001 docker compose --profile worker
 export DATABASE_URL=postgres://sitconsole:sitconsole@127.0.0.1:5432/sitconsole
 npm install
 npm run migrate
-npm run seed              # Sand Bench main-flow Selenium + health cases
+npm run seed              # realistic executable catalog (Sand Bench + engine self-tests); removes dummy cases
 npm run import:sit        # register sit/cases/*.sit.ts into the repository
+npm run docs:catalog      # regenerate docs/TEST-CASE-CATALOG.md from the live repository
 npm run start:api         # :8787
 npm run start:worker      # optional
 npm run start:scheduler   # optional

@@ -19,7 +19,7 @@ async function sendAndVerify(channel: "mq" | "kafka" | "api") {
     await openConfigurationPage(page);
     return sendDummyMessage(page, channel);
   });
-  assert.equal(status, "Dummy sent", `console did not report success sending over ${channel}: "${status}"`);
+  assert.match(status, new RegExp(`^Dummy sent on ${channel} \\S+`), `console did not report channel and destination for ${channel}: "${status}"`);
 
   const after = await pollUntil(
     () => testhubJson<{ total: number; data: Array<{ channel: string; payload: Record<string, unknown> }> }>(`/hub/inbox?channel=${channel}`),

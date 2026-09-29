@@ -13,6 +13,7 @@
 import { Builder, By, Select, until, type WebDriver, type WebElement } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { ENV } from "./env.ts";
+import { gatePassword } from "./client.ts";
 
 // Unset in the shipped Docker image — sit/Dockerfile installs a version-matched
 // chromium/chromium-driver pair from the base image's own package repository and
@@ -31,6 +32,7 @@ function buildChromeOptions() {
     "--window-size=1280,1000"
   );
   if (CHROME_BINARY) options.setChromeBinaryPath(CHROME_BINARY);
+  if (process.env.BASELINE_CONTAINER === '1') options.addArguments('--host-resolver-rules=MAP unpkg.com ~NOTFOUND');
   return options;
 }
 
@@ -49,17 +51,46 @@ export async function withDriver<T>(fn: (driver: WebDriver) => Promise<T>): Prom
   }
 }
 
-// The console auto-authenticates on load and mounts the SPA into #console-root once
-// #gate is hidden (apps/web/public/js/live-bind.js's enter() adds the "hidden" class
-// to #gate on success) — the same real, user-visible signal sit/lib/ui.ts waits on.
+// With the sign-in page on (config/login.json loginScreenEnabled) the gate waits for a
+// person: sign in through the form as the SIT persona. Returns without touching anything
+// when the gate is off or already hidden.
+async function signInThroughGate(driver: WebDriver): Promise<void> {
+  const shown = async () => {
+    const buttons = await driver.findElements(By.css("#gate:not(.hidden) #login"));
+    return buttons.length > 0 && (await buttons[0].isDisplayed());
+  };
+  // The gate decides whether to show itself after fetching its config; give it a moment.
+  const deadline = Date.now() + 3000;
+  while (!(await shown())) {
+    const mounted = await driver.findElements(By.css("#console-root .opsc-sidebar"));
+    if (mounted.length || Date.now() > deadline) return;
+    await driver.sleep(200);
+  }
+  const fill = async (css: string, value: string) => {
+    const el = await driver.findElement(By.css(css));
+    await el.clear();
+    await el.sendKeys(value);
+  };
+  await fill("#gate #tenant", ENV.tenantSlug);
+  await fill("#gate #username", ENV.username);
+  const password = await gatePassword();
+  if (password) await fill("#gate #password", password);
+  await driver.findElement(By.css("#gate #login")).click();
+}
+
+// The console mounts the SPA into #console-root once #gate is hidden
+// (apps/web/public/js/live-bind.js's enter() adds the "hidden" class to #gate on
+// success) — the same real, user-visible signal sit/lib/ui.ts waits on.
 export async function openConsole(driver: WebDriver): Promise<void> {
   await driver.get(`${ENV.webBase}/`);
+  await signInThroughGate(driver);
   await driver.wait(async () => {
     const gates = await driver.findElements(By.id("gate"));
     if (!gates.length) return true;
     const cls = (await gates[0].getAttribute("class")) || "";
     return cls.split(/\s+/).includes("hidden");
   }, 20000, "console gate never hid — sign-in/mount did not complete");
+  await driver.wait(until.elementLocated(By.css('#console-root .opsc-sidebar')), 20000, 'console sidebar did not mount');
 }
 
 async function firstWithText(driver: WebDriver, css: string, text: string): Promise<WebElement> {

@@ -1,4 +1,4 @@
-# Dedicated image for the SIT engine (sit + sit-console) — separate from the main
+﻿# Dedicated image for the SIT engine (sit + sit-console) â€” separate from the main
 # app/worker image (root Dockerfile). It carries two independent browser-automation
 # frameworks for the UI-phase cases (sit/cases/60-*.sit.ts and 70/80-*.sit.ts), which
 # the lightweight node:22 image the rest of the platform runs on doesn't have;
@@ -7,11 +7,11 @@
 #     must match package.json's "playwright" version exactly.
 #   - Selenium WebDriver, via chromium + chromium-driver installed from the base
 #     image's own Debian package repository. Installing both from the same apt
-#     transaction is what keeps them a matching pair — Selenium's ChromeDriver
+#     transaction is what keeps them a matching pair â€” Selenium's ChromeDriver
 #     refuses to drive a Chrome build from a different major version, and a
 #     manually-paired download is not reproducible across rebuilds the way an apt
 #     package pin is.
-FROM mcr.microsoft.com/playwright:v1.55.1-noble
+FROM mcr.microsoft.com/playwright:v1.63.0-noble
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends chromium chromium-driver \
