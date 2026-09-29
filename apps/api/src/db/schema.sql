@@ -535,6 +535,66 @@ CREATE TABLE IF NOT EXISTS defect_ingests (
 );
 
 -- ---------------------------------------------------------------------------
+-- Security scans: one row per scan a project posts (Sand Bench's commit-gate
+-- security stage), and a register of findings with open/accepted/fixed status.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS security_scans (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key             TEXT NOT NULL UNIQUE,              -- SS-20260929-4f1a2b
+  ingest_key      TEXT NOT NULL UNIQUE,              -- dedupes a retried post
+  project         TEXT NOT NULL,
+  repository      TEXT,
+  branch          TEXT,
+  commit_sha      TEXT,
+  dirty           BOOLEAN NOT NULL DEFAULT false,
+  trigger         TEXT NOT NULL DEFAULT 'manual',    -- gate|manual|scheduled
+  result          TEXT NOT NULL,                     -- passed|failed|error
+  fail_on         TEXT NOT NULL DEFAULT 'medium',
+  started_at      TIMESTAMPTZ NOT NULL,
+  finished_at     TIMESTAMPTZ NOT NULL,
+  duration_ms     INT NOT NULL DEFAULT 0,
+  total           INT NOT NULL DEFAULT 0,
+  new_count       INT NOT NULL DEFAULT 0,
+  accepted_count  INT NOT NULL DEFAULT 0,
+  blocking_count  INT NOT NULL DEFAULT 0,
+  by_severity     JSONB NOT NULL DEFAULT '{}',
+  tools           JSONB NOT NULL DEFAULT '[]',
+  findings        JSONB NOT NULL DEFAULT '[]',
+  blocking        JSONB NOT NULL DEFAULT '[]',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_scans_project ON security_scans(project, finished_at DESC);
+
+CREATE TABLE IF NOT EXISTS security_findings (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project             TEXT NOT NULL,
+  fingerprint         TEXT NOT NULL,
+  rule                TEXT NOT NULL,
+  category            TEXT NOT NULL,
+  severity            TEXT NOT NULL,
+  title               TEXT NOT NULL,
+  file                TEXT,
+  line                INT NOT NULL DEFAULT 0,
+  detail              TEXT,
+  url                 TEXT,
+  status              TEXT NOT NULL,                 -- open|accepted|fixed
+  accepted_reason     TEXT,
+  reference           TEXT,
+  occurrences         INT NOT NULL DEFAULT 1,
+  reopen_count        INT NOT NULL DEFAULT 0,
+  first_seen_scan_id  UUID REFERENCES security_scans(id) ON DELETE SET NULL,
+  last_seen_scan_id   UUID REFERENCES security_scans(id) ON DELETE SET NULL,
+  fixed_scan_id       UUID REFERENCES security_scans(id) ON DELETE SET NULL,
+  first_seen          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  fixed_at            TIMESTAMPTZ,
+  UNIQUE (project, fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_findings_status ON security_findings(project, status, severity);
+
+-- ---------------------------------------------------------------------------
 -- Test Packs (Prompt 10)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS test_packs (
