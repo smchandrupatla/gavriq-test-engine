@@ -8,3 +8,4 @@ data/
 secrets/
 
 .docker-results/
+evidence/kafka-test/

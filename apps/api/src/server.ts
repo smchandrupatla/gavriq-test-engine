@@ -24,6 +24,7 @@ import { sitCatalogRoutes } from './routes/sit-catalog.js';
 import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { defectRoutes } from './routes/defects.js';
+import { kafkaTestRoutes } from './routes/kafka-test.js';
 import { startScheduler } from './schedule/service.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
@@ -150,7 +151,7 @@ async function main() {
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/defect') || pathName.startsWith('/api/v1/schedule'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/defect') || pathName.startsWith('/api/v1/schedule') || pathName.startsWith('/api/v1/kafka-test'))) {
         return requirePermission('tests:read')(req, reply);
       }
       if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedule'))) {
@@ -184,6 +185,7 @@ async function main() {
   await app.register(buildStatusRoutes);
   await app.register(opsRoutes);
   await app.register(defectRoutes);
+  await app.register(kafkaTestRoutes);
 
   await app.listen({ port, host });
   startScheduler();
