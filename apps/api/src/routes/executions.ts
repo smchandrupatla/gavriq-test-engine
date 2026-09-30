@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 import { ingestExecution } from '../defects/service.js';
+import { notifyCompleted } from '../notify/webhooks.js';
 
 export async function executionRoutes(app: FastifyInstance) {
   app.get('/api/v1/executions', async (req, reply) => {
@@ -123,6 +124,7 @@ export async function executionRoutes(app: FastifyInstance) {
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Execution not found or not cancellable' });
     await audit(req, 'execution.cancel', 'execution', rows[0].id, {});
+    await notifyCompleted(rows[0].id, req.log);
     return reply.send({ data: rows[0] });
   });
 
@@ -225,6 +227,8 @@ export async function executionRoutes(app: FastifyInstance) {
       } catch (err) {
         req.log.warn({ err }, 'defect ingest failed');
       }
+      // Tell subscribed external parties (the Sand Bench agent) the run is finished.
+      await notifyCompleted(rows[0].id, req.log);
       return reply.send({ data: rows[0], defects });
     }
   );

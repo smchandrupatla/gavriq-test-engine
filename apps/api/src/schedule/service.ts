@@ -71,7 +71,7 @@ export async function resolveTarget(db: Db, target: RunTarget): Promise<string[]
 
 export type FireInput = {
   target: RunTarget;
-  trigger: 'schedule' | 'manual' | 'event';
+  trigger: 'schedule' | 'manual' | 'event' | 'api';
   requested_by: string;
   environment_id?: string | null;
   schedule?: { id: string; name: string; last_execution_id?: string | null } | null;
@@ -120,7 +120,7 @@ export async function fire(db: Db, input: FireInput): Promise<FireResult> {
   }
 
   const env = await environmentId(db, input.environment_id);
-  const prefix = input.trigger === 'schedule' ? 'sched' : input.trigger === 'event' ? 'evt' : 'run';
+  const prefix = input.trigger === 'schedule' ? 'sched' : input.trigger === 'event' ? 'evt' : input.trigger === 'api' ? 'api' : 'run';
   const key = `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const { rows } = await db.query(
     `INSERT INTO executions (key, requested_by, test_case_ids, environment_id, status, trigger_source, metadata)
@@ -242,7 +242,7 @@ export async function deleteSchedule(id: string) {
 }
 
 /** Fire one schedule now (the Run button, or the ticker). */
-export async function runSchedule(id: string, trigger: 'schedule' | 'manual', by: string, dueBy?: Date): Promise<FireResult | null> {
+export async function runSchedule(id: string, trigger: 'schedule' | 'manual' | 'api', by: string, dueBy?: Date): Promise<FireResult | null> {
   return withTransaction(async (db) => {
     const { rows } = await db.query(`SELECT * FROM schedules WHERE id::text = $1 FOR UPDATE`, [id]);
     const s = rows[0];
