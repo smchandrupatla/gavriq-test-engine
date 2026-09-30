@@ -373,6 +373,9 @@ CREATE TABLE IF NOT EXISTS evidence (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Evidence is always read per result (run screen, evidence gate, reports).
+CREATE INDEX IF NOT EXISTS idx_evidence_result ON evidence(execution_result_id);
+
 CREATE TABLE IF NOT EXISTS defect_links (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   execution_result_id UUID NOT NULL REFERENCES execution_results(id) ON DELETE CASCADE,
@@ -483,6 +486,31 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_by         TEXT
 );
 INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Quality Insights: versioned reviews of an application's test quality.
+-- snapshot holds the facts the engine computed, analysis the review written
+-- over them; a version is never rewritten and outlives run retention.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS quality_insights (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id  UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  version         INT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'generating',  -- generating|ready|failed
+  analyst         TEXT,                                 -- Claude | Built-in rules | name of an external agent
+  model           TEXT,
+  trigger_source  TEXT NOT NULL DEFAULT 'manual',       -- manual|agent
+  requested_by    TEXT,
+  window_days     INT NOT NULL DEFAULT 30,
+  snapshot        JSONB NOT NULL,
+  analysis        JSONB,
+  notice          TEXT,
+  error           TEXT,
+  usage           JSONB NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at    TIMESTAMPTZ,
+  UNIQUE (application_id, version)
+);
 
 -- ---------------------------------------------------------------------------
 -- Seed baseline application (Sand Bench)

@@ -10,7 +10,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
-import { defaultTimeZone, isValidExpression, nextFire } from '../cron.js';
+import { defaultTimeZone, isValidExpression, nextFire, parseOneTime } from '../cron.js';
 import { queueRun } from './trigger.js';
 
 async function resolveId(table: 'applications' | 'environments', ref: unknown): Promise<string | null | undefined> {
@@ -21,13 +21,17 @@ async function resolveId(table: 'applications' | 'environments', ref: unknown): 
 }
 
 function withNextRun(s: any, tz: string) {
-  return {
-    ...s,
-    next_run_at: s.enabled && s.cron_expression && !/^every:/i.test(s.cron_expression)
-      ? nextFire(s.cron_expression, new Date(), tz)?.toISOString() ?? null
-      : s.next_run_at ?? null,
-    time_zone: tz,
-  };
+  const oneTime = s.cron_expression ? parseOneTime(s.cron_expression) : null;
+  let next: string | null;
+  if (oneTime) {
+    // A one-time schedule's "next" is its timestamp until it fires, then nothing.
+    next = s.enabled && !s.last_run_at ? oneTime.toISOString() : null;
+  } else if (s.enabled && s.cron_expression && !/^every:/i.test(s.cron_expression)) {
+    next = nextFire(s.cron_expression, new Date(), tz)?.toISOString() ?? null;
+  } else {
+    next = s.next_run_at ?? null;
+  }
+  return { ...s, next_run_at: next, time_zone: tz };
 }
 
 /** Queue whatever a schedule targets. Returns the HTTP status and body to answer with. */
@@ -95,7 +99,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'cron_expression or event_trigger required' });
     }
     if (b.cron_expression && !isValidExpression(String(b.cron_expression))) {
-      return reply.status(400).send({ error: 'cron_expression must be five cron fields ("0 2 * * *"), @hourly/@daily/@weekly, or every:N' });
+      return reply.status(400).send({ error: 'cron_expression must be five cron fields ("0 2 * * *"), @hourly/@daily/@weekly, every:N, or at:<ISO date-time> for a one-time run' });
     }
 
     const applicationId = await resolveId('applications', b.application ?? b.application_key ?? b.application_id);
@@ -190,19 +194,45 @@ export async function scheduleRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
-  /** Fire a schedule now (the poller, a person, or a deploy hook). */
-  app.post<{ Params: { id: string }; Body?: { requested_by?: string; environment?: string } }>(
+  /**
+   * Fire a schedule now (the poller, a person, or a deploy hook).
+   *
+   * The poller sends `expected_last_run_at` — the last_run_at it saw when it
+   * judged the schedule due. The run is then claimed with a compare-and-set, so
+   * two overlapping polls (or two pollers) that both saw "due" queue one run,
+   * not two; the loser gets 409. A person pressing "Run now" sends no such field
+   * and always fires.
+   */
+  app.post<{ Params: { id: string }; Body?: { requested_by?: string; environment?: string; expected_last_run_at?: string | null } }>(
     '/api/v1/schedules/:id/run',
     async (req, reply) => {
       const { rows } = await query('SELECT * FROM schedules WHERE id = $1', [req.params.id]);
       if (!rows[0]) return reply.status(404).send({ error: 'Schedule not found' });
       const environmentId = await resolveId('environments', req.body?.environment);
       if (environmentId === undefined && req.body?.environment) return reply.status(404).send({ error: 'Environment not found' });
+
+      const claiming = !!req.body && 'expected_last_run_at' in req.body;
+      const expected = claiming ? req.body!.expected_last_run_at ?? null : null;
+      if (claiming) {
+        // JSON carries milliseconds; the column holds microseconds.
+        const claimed = await query(
+          `UPDATE schedules SET last_run_at = now()
+           WHERE id = $1 AND date_trunc('milliseconds', last_run_at) IS NOT DISTINCT FROM date_trunc('milliseconds', $2::timestamptz)
+           RETURNING id`,
+          [rows[0].id, expected]
+        );
+        if (!claimed.rows[0]) return reply.status(409).send({ error: 'Schedule was already fired for this occurrence', code: 'already_fired' });
+      }
+
       const outcome = await fire(rows[0], {
         requested_by: req.body?.requested_by || req.actor?.id || 'scheduler',
         trigger_source: 'schedule',
         environment_id: environmentId ?? null,
       });
+      // Nothing was queued: give the claim back so the occurrence is not silently consumed.
+      if (claiming && outcome.status !== 202) {
+        await query(`UPDATE schedules SET last_run_at = $2::timestamptz WHERE id = $1`, [rows[0].id, expected]);
+      }
       if (outcome.status === 202) await audit(req, 'schedule.run', 'schedule', rows[0].id, outcome.queued || {});
       return reply.status(outcome.status).send(outcome.body);
     }

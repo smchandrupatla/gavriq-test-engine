@@ -17,6 +17,8 @@ const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 4000);
 const DEFAULT_BASE_URL = process.env.TARGET_BASE_URL || 'http://127.0.0.1:8001';
 const WORKER_API_KEY = process.env.WORKER_API_KEY || '';
+/** How often a running job asks whether it has been cancelled. */
+const CANCEL_POLL_MS = Number(process.env.WORKER_CANCEL_POLL_MS || 5000);
 
 /**
  * Inside a container "127.0.0.1"/"localhost" is the worker itself, not the
@@ -126,7 +128,7 @@ function buildVars(env: any): Record<string, string> {
   return vars;
 }
 
-async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean): Promise<RunnerResult> {
+async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean, signal?: AbortSignal): Promise<RunnerResult> {
   const method = (tc?.execution_method || 'selenium').toLowerCase();
   const script = tc?.script || '';
   const rules = tc?.validation_rules || {};
@@ -147,6 +149,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       baseUrl,
       vars,
       timeoutSeconds: tc?.timeout_seconds || 120,
+      signal,
     });
     return {
       status: r.status === 'skipped' ? 'skipped' : r.status,
@@ -174,6 +177,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       browser: rules.browser || 'chromium',
       viewport,
       headless,
+      signal,
     });
     return {
       status: r.status,
@@ -190,7 +194,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
     const r = await runHttp(common);
     return {
       status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : 'fail',
+      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
       classification: r.classification || null,
@@ -224,7 +228,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
     };
   }
 
-  const r = await runSelenium({ ...common, viewport, headless });
+  const r = await runSelenium({ ...common, viewport, headless, signal });
   return {
     status: r.status,
     verdict: r.status === 'passed' ? 'pass' : 'fail',
@@ -267,10 +271,32 @@ async function runJob(execution: any) {
   }
   const secrets = secretValues(buildVars(env));
 
+  // Cancelling a run in the console must stop the work, not just relabel it:
+  // the execution's status is watched while the job runs, and a cancel aborts
+  // the case in hand (its browser is closed) and skips the rest.
+  const cancel = new AbortController();
+  const watch = setInterval(async () => {
+    try {
+      const res = await api(`/api/v1/executions/${execution.id}/status`);
+      if (res?.data?.status === 'cancelled') cancel.abort();
+    } catch {
+      /* an API that cannot answer is not a cancel */
+    }
+  }, CANCEL_POLL_MS);
+  const stopped = async () => {
+    console.log(`[worker] ${execution.key} was cancelled — stopped`);
+    // Frees this worker's slot; the API keeps the status "cancelled".
+    await api(`/api/v1/executions/${execution.id}/complete`, { method: 'POST', body: JSON.stringify({ status: 'cancelled' }) }).catch(() => undefined);
+  };
+
+  try {
   for (const caseId of caseIds) {
+    if (cancel.signal.aborted) return stopped();
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
-    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride);
+    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, cancel.signal);
+    // The result of a case that was cut short is not a verdict: it is not reported.
+    if (cancel.signal.aborted) return stopped();
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
 
     const evidence = await publishEvidence(
@@ -285,21 +311,30 @@ async function runJob(execution: any) {
       { api: API, headers: headers(), executionId: execution.id, caseKey: tc?.key }
     );
 
-    await api(`/api/v1/executions/${execution.id}/results`, {
-      method: 'POST',
-      body: JSON.stringify({
-        test_case_id: caseId,
-        status: result.status,
-        verdict: result.verdict,
-        duration_ms: result.duration_ms,
-        started_at: started,
-        finished_at: new Date().toISOString(),
-        message: result.message,
-        classification: result.classification,
-        metrics: result.metrics || {},
-        evidence,
-      }),
-    });
+    try {
+      await api(`/api/v1/executions/${execution.id}/results`, {
+        method: 'POST',
+        body: JSON.stringify({
+          test_case_id: caseId,
+          status: result.status,
+          verdict: result.verdict,
+          duration_ms: result.duration_ms,
+          started_at: started,
+          finished_at: new Date().toISOString(),
+          message: result.message,
+          classification: result.classification,
+          metrics: result.metrics || {},
+          evidence,
+        }),
+      });
+    } catch (err) {
+      // The API refuses results for a cancelled run (409): same outcome as the watcher noticing.
+      if (String((err as Error).message).includes('execution_cancelled')) return stopped();
+      throw err;
+    }
+  }
+  } finally {
+    clearInterval(watch);
   }
 
   await api(`/api/v1/executions/${execution.id}/complete`, {

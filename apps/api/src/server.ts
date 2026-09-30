@@ -28,6 +28,8 @@ import { opsRoutes } from './routes/ops.js';
 import { uiRoutes } from './routes/ui.js';
 import { triggerRoutes } from './routes/trigger.js';
 import { settingsRoutes } from './routes/settings.js';
+import { reportRoutes } from './routes/reports.js';
+import { insightRoutes } from './routes/insights.js';
 import { registerEvidenceGate } from './evidence-gate.js';
 import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
 import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
@@ -164,13 +166,13 @@ async function main() {
       if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/ui/'))) {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && pathName === '/api/v1/ui/history') {
+      if (method === 'POST' && (pathName === '/api/v1/ui/history' || pathName === '/api/v1/reports')) {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs')) {
         return requirePermission('executions:run')(req, reply);
       }
-      if (pathName.startsWith('/api/v1/schedules')) {
+      if (pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/insights')) {
         return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
@@ -202,6 +204,8 @@ async function main() {
   await app.register(uiRoutes);
   await app.register(triggerRoutes);
   await app.register(settingsRoutes);
+  await app.register(reportRoutes);
+  await app.register(insightRoutes);
   await app.register(opsRoutes);
 
   await app.listen({ port, host });

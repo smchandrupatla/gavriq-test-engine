@@ -9,8 +9,8 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   app.put<{ Body: { run_retention_days?: unknown } }>('/api/v1/settings', async (req, reply) => {
     const days = Number(req.body?.run_retention_days);
-    if (!Number.isInteger(days) || days < 1 || days > 365) {
-      return reply.status(400).send({ error: 'run_retention_days must be an integer between 1 and 365' });
+    if (!Number.isInteger(days) || days < 5 || days > 365) {
+      return reply.status(400).send({ error: 'run_retention_days must be a whole number between 5 and 365' });
     }
     const { rows } = await query(
       `UPDATE settings SET run_retention_days = $1, updated_at = now(), updated_by = $2

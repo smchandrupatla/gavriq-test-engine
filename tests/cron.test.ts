@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { cronMatches, isDue, isValidExpression, lastFire, nextFire, parseCron, partsIn } from '../apps/api/src/cron.js';
+import { cronMatches, isDue, isValidExpression, lastFire, nextFire, parseCron, parseOneTime, partsIn } from '../apps/api/src/cron.js';
 
 const utc = (iso: string) => new Date(iso);
 
@@ -66,5 +66,20 @@ describe('cron expressions', () => {
     assert.equal(isDue(s, utc('2026-09-30T11:29:00Z'), 'UTC'), false);
     assert.equal(isDue(s, utc('2026-09-30T11:30:00Z'), 'UTC'), true);
     assert.equal(isDue({ ...s, last_run_at: null }, utc('2026-09-30T11:00:00Z'), 'UTC'), true, 'an interval schedule starts at once');
+  });
+
+  it('fires a one-time at:<iso> schedule exactly once', () => {
+    assert.equal(isValidExpression('at:2026-10-05T14:00:00Z'), true);
+    assert.equal(isValidExpression('at:not-a-date'), false);
+    assert.equal(isValidExpression('at:'), false);
+    assert.deepEqual(parseOneTime('at:2026-10-05T14:00:00Z'), utc('2026-10-05T14:00:00Z'));
+    assert.equal(parseOneTime('0 2 * * *'), null, 'cron expressions are not one-time');
+
+    const once = { cron_expression: 'at:2026-10-05T14:00:00Z', enabled: true, last_run_at: null };
+    assert.equal(isDue(once, utc('2026-10-05T13:59:59Z'), 'UTC'), false, 'not yet');
+    assert.equal(isDue(once, utc('2026-10-05T14:00:00Z'), 'UTC'), true, 'due at the timestamp');
+    assert.equal(isDue(once, utc('2026-10-06T09:00:00Z'), 'UTC'), true, 'still due while never fired, even if the poller was down');
+    assert.equal(isDue({ ...once, last_run_at: '2026-10-05T14:00:10Z' }, utc('2026-10-06T09:00:00Z'), 'UTC'), false, 'never again once fired');
+    assert.equal(isDue({ ...once, enabled: false }, utc('2026-10-05T14:00:00Z'), 'UTC'), false);
   });
 });

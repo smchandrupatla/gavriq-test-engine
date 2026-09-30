@@ -17,6 +17,7 @@ import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 import { gateMode } from '../evidence-gate.js';
 import { evidenceUrl } from '../evidence-store.js';
+import { humanDateTime } from '../lib/naming.js';
 
 const ACTIVE = ['queued', 'preparing', 'running'];
 const VERDICT_STATUSES = new Set(['passed', 'failed']);
@@ -311,15 +312,19 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   const source = typeof r.trigger_source === 'string' && /^[\w-]{1,40}$/.test(r.trigger_source) ? r.trigger_source : 'api';
   const callerMeta = r.metadata && typeof r.metadata === 'object' ? r.metadata : {};
   const created: any[] = [];
+  // Display name, same shape as console-queued runs: "<what> — <timestamp>".
+  const stamp = humanDateTime(new Date());
+  const scheduleName = typeof (callerMeta as any).schedule_name === 'string' ? String((callerMeta as any).schedule_name) : null;
 
   for (const g of groups) {
     const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const what = scheduleName ? (groups.length > 1 ? `${scheduleName} · ${g.suite_name}` : scheduleName) : g.suite_name;
     const { rows } = await query(
       `INSERT INTO executions (
-         key, requested_by, test_suite_id, test_case_ids, environment_id,
+         key, name, requested_by, test_suite_id, test_case_ids, environment_id,
          execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
-       RETURNING id, key, status, created_at`,
+       ) VALUES ($1,$8,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
+       RETURNING id, key, name, status, created_at`,
       [
         key, requestedBy, g.suite_id, g.case_ids, environment.id, source,
         JSON.stringify({
@@ -330,6 +335,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
           environment_key: environment.key,
           trigger: { reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : null, scope },
         }),
+        `${what} — ${stamp}`,
       ]
     );
     created.push({ ...rows[0], suite_key: g.suite_key, cases: g.case_ids.length });

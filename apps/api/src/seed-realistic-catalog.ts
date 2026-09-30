@@ -5,18 +5,26 @@
  *
  *   - Replaces the 102 `sandbench-seed` display cases (no steps, not really
  *     runnable) with the verified executable catalog in ./catalog/*.
- *   - Registers the Test Engine itself as application #2 with a real API
- *     self-test suite (generic multi-application proof).
+ *   - Registers the Test Engine itself as application #2 with its own
+ *     self-test catalogue across the same test types (./catalog/engine-*).
  *   - Creates one environment per deployment, scoped to the application that
  *     runs there; config.vars carry every target URL the cases template
  *     against ({{web}}, {{api}}, {{testhub}}, {{dbviewer}}, {{engine}}).
  *     Targets are written for the host (127.0.0.1); a containerized worker
- *     re-points them at the host gateway. The staging environment is
- *     registered by deploy/staging/deploy.mjs when staging is deployed.
+ *     re-points them at the host gateway. The staging environments are
+ *     registered when staging is deployed: Sand Bench by
+ *     deploy/staging/deploy.mjs, the engine itself by
+ *     deploy/engine-staging/deploy.mjs.
  *   - Removes the placeholder applications (my-app, test-app) so no dummy
  *     content remains in the repository.
  *
  * Idempotent: re-running upserts definitions in place.
+ *
+ *   --app <key>    seed one application only (its cases, types and environment);
+ *                  nothing of any other application is touched
+ *   --no-suites    upsert cases only: no suite rows are created and existing
+ *                  suite membership is left as it is (for an engine whose
+ *                  suites are maintained by hand)
  */
 import { pool, query, migrate } from './db/client.js';
 import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
@@ -59,6 +67,12 @@ const SAFETY = {
   security_scan: 'allowed',
 };
 
+const APPLICATIONS = ['sand-bench', 'gavriq-test-engine'];
+const argv = process.argv.slice(2);
+const ONLY_APP = argv.includes('--app') ? argv[argv.indexOf('--app') + 1] : undefined;
+const WITH_SUITES = !argv.includes('--no-suites');
+const wanted = (appKey: string) => !ONLY_APP || ONLY_APP === appKey;
+
 async function upsertApplication(key: string, name: string, description: string, types: TypeMeta[], suites: SuiteDef[], cases: CaseDef[]) {
   const counts = new Map<string, number>();
   for (const c of cases) {
@@ -68,7 +82,7 @@ async function upsertApplication(key: string, name: string, description: string,
   const meta = {
     sandbench_types: types.map((t) => ({
       key: t.key, label: t.label, subtitle: t.subtitle, category: t.category,
-      suiteCount: suites.filter((s) => s.typeKey === t.key).length,
+      suiteCount: WITH_SUITES ? suites.filter((s) => s.typeKey === t.key).length : 0,
       caseCount: counts.get(t.key) || 0,
     })),
   };
@@ -100,7 +114,7 @@ async function upsertEnvironment(key: string, name: string, envType: string, bas
 
 async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: CaseDef[]) {
   const suiteIds = new Map<string, string>();
-  for (const s of suites) {
+  for (const s of WITH_SUITES ? suites : []) {
     const { rows } = await query(
       `INSERT INTO test_suites (key, name, description, application_id, suite_type, created_by)
        VALUES ($1, $2, $3, $4, $5, 'realistic-catalog')
@@ -116,8 +130,8 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
   let n = 0;
   for (const c of cases) {
     const suiteId = suiteIds.get(c.suiteKey);
-    if (!suiteId) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
-    const suite = suites.find((s) => s.key === c.suiteKey)!;
+    const suite = suites.find((s) => s.key === c.suiteKey);
+    if (!suite || (WITH_SUITES && !suiteId)) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
     const validationRules = {
       ...(c.validationRules || {}),
       data_profile: c.dataProfile,
@@ -163,72 +177,80 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
         JSON.stringify({ suite: suite.key, type: suite.typeKey }),
       ]
     );
-    // reset membership so cases moved between suites don't keep stale links
-    await query(`DELETE FROM test_case_suites WHERE test_case_id = $1`, [rows[0]!.id]);
-    await query(
-      `INSERT INTO test_case_suites (test_case_id, test_suite_id, sort_order)
-       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-      [rows[0]!.id, suiteId, n]
-    );
+    if (suiteId) {
+      // reset membership so cases moved between suites don't keep stale links
+      await query(`DELETE FROM test_case_suites WHERE test_case_id = $1`, [rows[0]!.id]);
+      await query(
+        `INSERT INTO test_case_suites (test_case_id, test_suite_id, sort_order)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [rows[0]!.id, suiteId, n]
+      );
+    }
     n++;
   }
   return n;
 }
 
 async function main() {
+  if (ONLY_APP && !APPLICATIONS.includes(ONLY_APP)) {
+    throw new Error(`--app must be one of ${APPLICATIONS.join(', ')} (got "${ONLY_APP}")`);
+  }
   await migrate();
 
-  // 1) Remove the display-only dummy catalog (cases + their suites).
-  const delCases = await query(
-    `DELETE FROM test_cases WHERE created_by = 'sandbench-seed' RETURNING key`
-  );
-  const delSuites = await query(
-    `DELETE FROM test_suites WHERE created_by = 'sandbench-seed' RETURNING key`
-  );
-  console.log(`Removed dummy display catalog: ${delCases.rowCount} cases, ${delSuites.rowCount} suites`);
+  if (!ONLY_APP) {
+    // 1) Remove the display-only dummy catalog (cases + their suites).
+    const delCases = await query(
+      `DELETE FROM test_cases WHERE created_by = 'sandbench-seed' RETURNING key`
+    );
+    const delSuites = await query(
+      `DELETE FROM test_suites WHERE created_by = 'sandbench-seed' RETURNING key`
+    );
+    console.log(`Removed dummy display catalog: ${delCases.rowCount} cases, ${delSuites.rowCount} suites`);
 
-  // 2) Remove legacy generic-app flow cases replaced by the new baseline.
-  const legacy = await query(
-    `DELETE FROM test_cases WHERE key = ANY($1) RETURNING key`,
-    [['TC-SB-DASHBOARD-WIDGETS', 'TC-SB-NAV-LOGIN', 'TC-SB-LOGIN-FORM', 'TC-SB-LOGIN-SUBMIT', 'TC-SB-FULL-SMOKE']]
-  );
-  await query(`DELETE FROM test_suites WHERE key = 'smoke-main-flows'`);
-  console.log(`Removed legacy generic-app flows: ${legacy.rowCount} cases`);
+    // 2) Remove legacy generic-app flow cases replaced by the new baseline.
+    const legacy = await query(
+      `DELETE FROM test_cases WHERE key = ANY($1) RETURNING key`,
+      [['TC-SB-DASHBOARD-WIDGETS', 'TC-SB-NAV-LOGIN', 'TC-SB-LOGIN-FORM', 'TC-SB-LOGIN-SUBMIT', 'TC-SB-FULL-SMOKE']]
+    );
+    await query(`DELETE FROM test_suites WHERE key = 'smoke-main-flows'`);
+    console.log(`Removed legacy generic-app flows: ${legacy.rowCount} cases`);
 
-  // 3) Remove placeholder applications (their suites/cases cascade).
-  const delApps = await query(
-    `DELETE FROM applications WHERE key IN ('my-app', 'test-app') RETURNING key`
-  );
-  console.log(`Removed placeholder applications: ${delApps.rows.map((r: any) => r.key).join(', ') || 'none'}`);
+    // 3) Remove placeholder applications (their suites/cases cascade).
+    const delApps = await query(
+      `DELETE FROM applications WHERE key IN ('my-app', 'test-app') RETURNING key`
+    );
+    console.log(`Removed placeholder applications: ${delApps.rows.map((r: any) => r.key).join(', ') || 'none'}`);
 
-  // 4) Applications.
-  const sbId = await upsertApplication(
-    'sand-bench', 'Sand Bench',
-    'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
-    SANDBENCH_TYPES, SANDBENCH_SUITES, SANDBENCH_CASES
-  );
-  const teId = await upsertApplication(
-    'gavriq-test-engine', 'GAVRIQ Test Engine',
-    'The test engine itself, registered as an application under test (API self-tests).',
-    ENGINE_TYPES, ENGINE_SUITES, ENGINE_CASES
-  );
-  console.log('Applications:', sbId, teId);
+    const retired = await query(
+      `UPDATE environments SET status = 'retired', updated_at = now()
+       WHERE key = ANY($1) AND status <> 'retired' RETURNING key`,
+      [RETIRED_ENVIRONMENTS]
+    );
+    console.log(`Retired environments: ${retired.rows.map((r: any) => r.key).join(', ') || 'none'}`);
+  }
 
-  // 5) Environments.
-  await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
-  await upsertEnvironment('engine-local', 'Test Engine · local Docker', 'docker', HOST_VARS.engine, HOST_VARS, ['gavriq-test-engine']);
-  const retired = await query(
-    `UPDATE environments SET status = 'retired', updated_at = now()
-     WHERE key = ANY($1) AND status <> 'retired' RETURNING key`,
-    [RETIRED_ENVIRONMENTS]
-  );
-  console.log(`Retired environments: ${retired.rows.map((r: any) => r.key).join(', ') || 'none'}`);
-
-  // 6) Suites + cases.
-  const sbCount = await seedSuitesAndCases(sbId, SANDBENCH_SUITES, SANDBENCH_CASES);
-  const teCount = await seedSuitesAndCases(teId, ENGINE_SUITES, ENGINE_CASES);
-  console.log(`Seeded ${sbCount} Sand Bench cases across ${SANDBENCH_SUITES.length} suites.`);
-  console.log(`Seeded ${teCount} Test Engine self-test cases across ${ENGINE_SUITES.length} suites.`);
+  // 4) Applications, each with the environment it is developed on and its suites + cases.
+  const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
+  if (wanted('sand-bench')) {
+    const sbId = await upsertApplication(
+      'sand-bench', 'Sand Bench',
+      'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
+      SANDBENCH_TYPES, SANDBENCH_SUITES, SANDBENCH_CASES
+    );
+    await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
+    const sbCount = await seedSuitesAndCases(sbId, SANDBENCH_SUITES, SANDBENCH_CASES);
+    console.log(`Seeded ${sbCount} Sand Bench cases across ${SANDBENCH_SUITES.length} ${grouping}.`);
+  }
+  if (wanted('gavriq-test-engine')) {
+    const teId = await upsertApplication(
+      'gavriq-test-engine', 'GAVRIQ Test Engine',
+      'The test engine itself as an application under test: control-plane API, console, worker protocol, scheduler and evidence store.',
+      ENGINE_TYPES, ENGINE_SUITES, ENGINE_CASES
+    );
+    await upsertEnvironment('engine-local', 'Test Engine · local Docker (development)', 'docker', HOST_VARS.engine, HOST_VARS, ['gavriq-test-engine']);
+    const teCount = await seedSuitesAndCases(teId, ENGINE_SUITES, ENGINE_CASES);
+    console.log(`Seeded ${teCount} Test Engine self-test cases across ${ENGINE_SUITES.length} ${grouping}.`);
+  }
   console.log('Every case is executable: http/playwright/selenium/performance steps verified against the live deployment.');
 
   await pool.end();

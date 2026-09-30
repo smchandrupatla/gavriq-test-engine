@@ -17,6 +17,8 @@ export interface SeleniumRunInput {
   vars?: Record<string, string>;
   /** Run with a visible browser window instead of headless. Defaults to headless, overridable via SELENIUM_HEADLESS=false. */
   headless?: boolean;
+  /** Aborted when the run is cancelled: the browser is quit at once instead of finishing the case. */
+  signal?: AbortSignal;
 }
 
 export interface SeleniumRunResult {
@@ -225,8 +227,14 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
   };
   const sub = (v: string) => v.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, name) => vars[name] ?? `{{${name}}}`);
 
+  // Cancelling quits the browser; the command in flight then fails and the finally below cleans up.
+  const onAbort = () => { driver?.quit().catch(() => undefined); };
+  input.signal?.addEventListener('abort', onAbort, { once: true });
+
   try {
+    if (input.signal?.aborted) throw new Error('Run cancelled');
     driver = await buildDriver(input.viewport, input.headless);
+    if (input.signal?.aborted) throw new Error('Run cancelled');
     const timeout = (input.timeoutSeconds || 30) * 1000;
     await driver.manage().setTimeouts({ pageLoad: timeout, implicit: 5000 });
 
@@ -288,6 +296,22 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
                 const el = await driver.findElement(By.css(step.selector));
                 await el.clear();
                 await el.sendKeys(step.value || '');
+              }
+              break;
+            case 'select':
+              // Option by value or by label, whichever the <select> has.
+              if (!step.selector) throw new Error('select requires selector');
+              {
+                const options = await driver.findElements(By.css(`${step.selector} option`));
+                let chosen = null;
+                for (const option of options) {
+                  if ((await option.getAttribute('value')) === step.value || (await option.getText()).trim() === step.value) {
+                    chosen = option;
+                    break;
+                  }
+                }
+                if (!chosen) throw new Error(`select: "${step.selector}" has no option "${step.value}"`);
+                await chosen.click();
               }
               break;
             case 'wait_for':
@@ -395,6 +419,7 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
       evidence,
     };
   } finally {
+    input.signal?.removeEventListener('abort', onAbort);
     if (driver) {
       try {
         await driver.quit();

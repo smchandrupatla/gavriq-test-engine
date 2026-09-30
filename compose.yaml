@@ -39,6 +39,9 @@ services:
       EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-0}
       SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
       TRIGGER_API_KEYS: ${TRIGGER_API_KEYS:-}
+      # Quality Insights: with a key "Refresh insights" is written by Claude, without one by the built-in rules.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INSIGHTS_MODEL: ${INSIGHTS_MODEL:-claude-opus-5}
       LOG_DIR: /var/log/sandbench
       LOG_SERVICE: sit-console
       SIT_CONSOLE_STORE: /data/history.json

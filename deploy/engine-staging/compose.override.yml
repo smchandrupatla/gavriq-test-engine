@@ -1,0 +1,39 @@
+# Staging overlay for the Test Engine itself.
+#
+# Applied on top of the compose.yaml of an exported, pinned commit of this
+# repository (see deploy.mjs) under the compose project
+# "gavriq-test-engine-staging", so it shares no containers, network, volumes,
+# images or host ports with the engine that runs the tests (project
+# "gavriq-test-engine" on 8797).
+#
+# Differences from the development engine:
+#   - images are tagged gavriq-test-engine-staging:<commit>, never the :local tags
+#   - the API is published on 127.0.0.1:18797 only; the database has no host port
+#   - no worker: staging is the application under test, not a test runner. The
+#     worker-protocol cases act as the worker themselves, which needs a queue
+#     nothing else drains.
+#   - the evidence gate is enforced, as on the development engine
+#   - the embedded SIT console points at the Sand Bench staging stack
+services:
+  test-engine:
+    image: gavriq-test-engine-staging:${GTE_STAGING_TAG:?set by deploy.mjs}
+    ports: !override
+      - "127.0.0.1:${STAGING_ENGINE_PORT:-18797}:8787"
+    environment:
+      EVIDENCE_GATE: enforce
+      EVIDENCE_RETENTION_DAYS: "0"
+      AUTO_SEED: "true"
+      RBAC_ENABLED: "false"
+      TRIGGER_API_KEYS: ""
+      SCHEDULER_TZ: UTC
+      SIT_API_BASE: http://host.docker.internal:18787
+      SIT_WEB_BASE: http://host.docker.internal:18080
+      SIT_TESTHUB_BASE: http://host.docker.internal:18091
+      SIT_DBVIEWER_BASE: http://host.docker.internal:18090
+
+  scheduler:
+    image: gavriq-test-engine-staging:${GTE_STAGING_TAG}
+    environment:
+      SCHEDULER_TZ: UTC
+      # The scheduler-daemon case waits for one poll; a minute would double its run time.
+      SCHEDULER_POLL_MS: "15000"
