@@ -10,6 +10,7 @@ import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
 import { runPerformance } from './runners/performance.js';
 import { runSit, isSitScript } from './runners/sit.js';
+import { ensureEvidence, evidencePreflight, publishEvidence, secretValues } from './evidence.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
@@ -105,6 +106,8 @@ type RunnerResult = {
   classification?: string | null;
   metrics?: Record<string, unknown>;
   evidence?: any[];
+  /** Raw runner output (SIT TAP), turned into log evidence when the runner wrote no file of its own. */
+  output?: string;
 };
 
 /**
@@ -153,6 +156,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       classification: r.classification || null,
       metrics: r.metrics || {},
       evidence: [],
+      output: r.output,
     };
   }
 
@@ -239,11 +243,47 @@ async function runJob(execution: any) {
   const headlessOverride = typeof execution?.metadata?.headless === 'boolean' ? execution.metadata.headless : undefined;
   let anyFailed = false;
 
+  // No evidence, no run: a case whose proof cannot be stored is not executed.
+  const store = await evidencePreflight(API, headers());
+  if (!store.ok) {
+    console.error(`[worker] ${execution.key} blocked — ${store.reason}`);
+    for (const caseId of caseIds) {
+      await api(`/api/v1/executions/${execution.id}/results`, {
+        method: 'POST',
+        body: JSON.stringify({
+          test_case_id: caseId,
+          status: 'blocked',
+          duration_ms: 0,
+          message: `Not run: ${store.reason}`,
+          classification: 'infrastructure_failure',
+        }),
+      });
+    }
+    await api(`/api/v1/executions/${execution.id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ status: 'blocked' }),
+    });
+    return;
+  }
+  const secrets = secretValues(buildVars(env));
+
   for (const caseId of caseIds) {
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
     const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride);
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
+
+    const evidence = await publishEvidence(
+      ensureEvidence(result, {
+        method: isSitScript(tc?.script) ? 'sit' : String(tc?.execution_method || 'selenium').toLowerCase(),
+        caseKey: tc?.key,
+        caseName: tc?.name,
+        target: baseUrl,
+        rules: tc?.validation_rules,
+        secrets,
+      }),
+      { api: API, headers: headers(), executionId: execution.id, caseKey: tc?.key }
+    );
 
     await api(`/api/v1/executions/${execution.id}/results`, {
       method: 'POST',
@@ -257,7 +297,7 @@ async function runJob(execution: any) {
         message: result.message,
         classification: result.classification,
         metrics: result.metrics || {},
-        evidence: result.evidence || [],
+        evidence,
       }),
     });
   }

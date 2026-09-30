@@ -7,5 +7,7 @@ coverage/
 data/*
 !data/iso20022-upload/
 secrets/
+# Runner output of a host worker; the engine's evidence store is the record
+evidence/
 
 .docker-results/

@@ -2,6 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
+import { humanDateTime } from '../lib/naming.js';
+
+/** "<case name> — <timestamp>" for a single case, "<suite name> — <timestamp>" for many, else "Run — <timestamp>". */
+function runName(caseNames: string[], suiteName: string | null, at: Date): string {
+  const stamp = humanDateTime(at);
+  if (caseNames.length === 1) return `${caseNames[0]} — ${stamp}`;
+  if (suiteName) return `${suiteName} — ${stamp}`;
+  return `Run — ${stamp}`;
+}
 
 export async function executionRoutes(app: FastifyInstance) {
   app.get('/api/v1/executions', async (req, reply) => {
@@ -89,17 +98,43 @@ export async function executionRoutes(app: FastifyInstance) {
       environmentId = envRow.rows[0]?.id ?? null;
     }
 
+    const [caseRows, suiteRow] = await Promise.all([
+      resolvedIds.length
+        ? query(
+            `SELECT tc.name, a.key AS app_key FROM test_cases tc
+             JOIN applications a ON a.id = tc.application_id
+             WHERE tc.id = ANY($1::uuid[])`,
+            [resolvedIds]
+          )
+        : Promise.resolve({ rows: [] as any[] }),
+      b.test_suite_id
+        ? query(
+            `SELECT s.name, a.key AS app_key FROM test_suites s
+             JOIN applications a ON a.id = s.application_id
+             WHERE s.id = $1`,
+            [b.test_suite_id]
+          )
+        : Promise.resolve({ rows: [] as any[] }),
+    ]);
+    const caseNames = caseRows.rows.map((r: any) => r.name);
+    const suiteName = suiteRow.rows[0]?.name ?? null;
+    // application_key drives the console's env/app-scoped run filtering (routes/ui.ts /ui/live) —
+    // derived from the actual case/suite rather than trusted from the caller.
+    const applicationKey = caseRows.rows[0]?.app_key ?? suiteRow.rows[0]?.app_key ?? null;
+    const name = runName(caseNames, suiteName, new Date());
+    const metadata = { ...(b.metadata && typeof b.metadata === 'object' ? b.metadata : {}), ...(applicationKey ? { application_key: applicationKey } : {}) };
+
     const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const { rows } = await query(
       `INSERT INTO executions (
-         key, requested_by, test_plan_id, test_suite_id, test_case_ids,
+         key, name, requested_by, test_plan_id, test_suite_id, test_case_ids,
          environment_id, execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::execution_location,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::execution_location,'out_of_container'),'queued',COALESCE($9,'manual'),$10::jsonb)
        RETURNING *`,
       [
-        key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
+        key, name, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
         resolvedIds, environmentId, b.execution_location ?? null,
-        b.trigger_source ?? null, JSON.stringify(b.metadata ?? {}),
+        b.trigger_source ?? null, JSON.stringify(metadata),
       ]
     );
 
@@ -181,17 +216,19 @@ export async function executionRoutes(app: FastifyInstance) {
     if (!totalCases) return reply.status(400).send({ error: 'Application has no runnable cases' });
 
     const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+    const batchAt = new Date();
     const created: any[] = [];
     for (const p of plan) {
       const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      const name = runName([], p.suite_name, batchAt);
       const { rows } = await query(
         `INSERT INTO executions (
-           key, requested_by, test_suite_id, test_case_ids, environment_id,
+           key, name, requested_by, test_suite_id, test_case_ids, environment_id,
            execution_location, status, trigger_source, metadata
-         ) VALUES ($1,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
-         RETURNING id, key, test_suite_id, test_case_ids, status, created_at`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,'out_of_container','queued',$7,$8::jsonb)
+         RETURNING id, key, name, test_suite_id, test_case_ids, status, created_at`,
         [
-          key, (b.requested_by as string) ?? req.actor?.id ?? null, p.suite_id, p.case_ids, environmentId,
+          key, name, (b.requested_by as string) ?? req.actor?.id ?? null, p.suite_id, p.case_ids, environmentId,
           (b.trigger_source as string) || 'run-all',
           JSON.stringify({ run_group: runGroup, suite_key: p.suite_key, application_key: application.key }),
         ]

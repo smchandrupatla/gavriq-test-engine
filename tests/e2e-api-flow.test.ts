@@ -60,8 +60,10 @@ describe('e2e api flow', () => {
     }
 
     const cases = await api('/api/v1/test-cases?limit=50');
+    // A plain HTTP case: imported SIT files are catalogued as http too, but are
+    // evidenced by their SIT output, not by the transcript this test uploads.
     const healthCase = (cases.body.data || []).find(
-      (c: any) => c.key === 'TC-SB-HEALTH' || c.execution_method === 'http'
+      (c: any) => c.key === 'TC-SB-HEALTH' || (c.execution_method === 'http' && !String(c.script || '').includes('.sit.ts'))
     );
     if (!healthCase) {
       t.skip('No HTTP test case — run npm run seed');

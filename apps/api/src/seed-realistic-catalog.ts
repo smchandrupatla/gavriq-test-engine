@@ -7,10 +7,12 @@
  *     runnable) with the verified executable catalog in ./catalog/*.
  *   - Registers the Test Engine itself as application #2 with a real API
  *     self-test suite (generic multi-application proof).
- *   - Creates environments whose config.vars carry every target URL the
- *     cases template against ({{web}}, {{api}}, {{testhub}}, {{dbviewer}},
- *     {{engine}}), for both a host worker (127.0.0.1) and a containerized
- *     worker (host.docker.internal).
+ *   - Creates one environment per deployment, scoped to the application that
+ *     runs there; config.vars carry every target URL the cases template
+ *     against ({{web}}, {{api}}, {{testhub}}, {{dbviewer}}, {{engine}}).
+ *     Targets are written for the host (127.0.0.1); a containerized worker
+ *     re-points them at the host gateway. The staging environment is
+ *     registered by deploy/staging/deploy.mjs when staging is deployed.
  *   - Removes the placeholder applications (my-app, test-app) so no dummy
  *     content remains in the repository.
  *
@@ -39,14 +41,9 @@ const HOST_VARS = {
   password: '',
 };
 
-const CONTAINER_VARS = {
-  ...HOST_VARS,
-  web: 'http://host.docker.internal:8080',
-  api: 'http://host.docker.internal:8787',
-  testhub: 'http://host.docker.internal:8091',
-  dbviewer: 'http://host.docker.internal:8090',
-  engine: 'http://host.docker.internal:8797',
-};
+// Duplicates of sand-bench-local from before the worker re-pointed loopback
+// targets itself. Retired, not deleted: past executions still reference them.
+const RETIRED_ENVIRONMENTS = ['sand-bench-container', 'local-dev'];
 
 const SECRET_ENV = { password: 'SB_DEMO_PASSWORD' };
 
@@ -87,14 +84,16 @@ async function upsertApplication(key: string, name: string, description: string,
   return rows[0]!.id as string;
 }
 
-async function upsertEnvironment(key: string, name: string, envType: string, baseUrl: string, vars: Record<string, string>) {
+async function upsertEnvironment(key: string, name: string, envType: string, baseUrl: string, vars: Record<string, string>, applications: string[]) {
   await query(
+    // config is merged so keys the seed does not own (e.g. deployment) survive a reseed.
     `INSERT INTO environments (key, name, env_type, base_url, config, safety_policy, status)
      VALUES ($1, $2, $3::environment_type, $4, $5::jsonb, $6::jsonb, 'active')
      ON CONFLICT (key) DO UPDATE SET
-       name = EXCLUDED.name, base_url = EXCLUDED.base_url,
-       config = EXCLUDED.config, safety_policy = EXCLUDED.safety_policy, updated_at = now()`,
-    [key, name, envType, baseUrl, JSON.stringify({ vars, secret_env: SECRET_ENV }), JSON.stringify(SAFETY)]
+       name = EXCLUDED.name, env_type = EXCLUDED.env_type, base_url = EXCLUDED.base_url,
+       config = environments.config || EXCLUDED.config,
+       safety_policy = EXCLUDED.safety_policy, status = 'active', updated_at = now()`,
+    [key, name, envType, baseUrl, JSON.stringify({ applications, vars, secret_env: SECRET_ENV }), JSON.stringify(SAFETY)]
   );
   console.log('Environment:', key, '→', baseUrl);
 }
@@ -216,11 +215,14 @@ async function main() {
   console.log('Applications:', sbId, teId);
 
   // 5) Environments.
-  await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (host worker)', 'docker', HOST_VARS.web, HOST_VARS);
-  await upsertEnvironment('sand-bench-container', 'Sand Bench · local Docker (containerized worker)', 'docker', CONTAINER_VARS.web, CONTAINER_VARS);
-  await upsertEnvironment('engine-local', 'Test Engine · local (self-test)', 'localhost', HOST_VARS.engine, HOST_VARS);
-  // Repair the legacy default env (used to point at a dead port 8001).
-  await upsertEnvironment('local-dev', 'Local Development', 'localhost', HOST_VARS.web, HOST_VARS);
+  await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
+  await upsertEnvironment('engine-local', 'Test Engine · local Docker', 'docker', HOST_VARS.engine, HOST_VARS, ['gavriq-test-engine']);
+  const retired = await query(
+    `UPDATE environments SET status = 'retired', updated_at = now()
+     WHERE key = ANY($1) AND status <> 'retired' RETURNING key`,
+    [RETIRED_ENVIRONMENTS]
+  );
+  console.log(`Retired environments: ${retired.rows.map((r: any) => r.key).join(', ') || 'none'}`);
 
   // 6) Suites + cases.
   const sbCount = await seedSuitesAndCases(sbId, SANDBENCH_SUITES, SANDBENCH_CASES);

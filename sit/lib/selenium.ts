@@ -10,6 +10,7 @@
 // console through the same DOM a real operator clicks (nav items, form fields, buttons
 // identified by their visible label/aria-label) and confirms effects through the
 // public API or the db viewer. The application has no idea Selenium is involved.
+import assert from "node:assert/strict";
 import { Builder, By, Select, until, type WebDriver, type WebElement } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { ENV } from "./env.ts";
@@ -93,13 +94,24 @@ export async function openConsole(driver: WebDriver): Promise<void> {
   await driver.wait(until.elementLocated(By.css('#console-root .opsc-sidebar')), 20000, 'console sidebar did not mount');
 }
 
-async function firstWithText(driver: WebDriver, css: string, text: string): Promise<WebElement> {
-  const els: WebElement[] = await driver.findElements(By.css(css));
-  for (const el of els) {
-    const t = ((await el.getText()) || "").trim();
-    if (t.includes(text)) return el;
+// Several screens are separate documents (/v/<id>): opening one reloads the console
+// shell, so for a moment after a click the sidebar is not in the DOM at all. Looked up
+// until it is back rather than once.
+async function firstWithText(driver: WebDriver, css: string, text: string, timeoutMs = 10000): Promise<WebElement> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const els: WebElement[] = await driver.findElements(By.css(css));
+      for (const el of els) {
+        const t = ((await el.getText()) || "").trim();
+        if (t.includes(text)) return el;
+      }
+    } catch {
+      // stale element while the shell re-renders — look again
+    }
+    if (Date.now() >= deadline) throw new Error(`no element matching "${css}" contains text "${text}"`);
+    await driver.sleep(250);
   }
-  throw new Error(`no element matching "${css}" contains text "${text}"`);
 }
 
 async function subnavElements(driver: WebDriver, text: string): Promise<WebElement[]> {
@@ -128,21 +140,113 @@ export async function openNav(driver: WebDriver, topLabel: string, subLabel?: st
   if (!subEls.length) {
     const parent = await firstWithText(driver, ".opsc-navitem", topLabel);
     await parent.click();
-    await driver.sleep(300);
-    subEls = await subnavElements(driver, subLabel);
+    // The group expands after the click; a fixed short sleep raced it on slower hosts.
+    const deadline = Date.now() + 4000;
+    do {
+      await driver.sleep(200);
+      subEls = await subnavElements(driver, subLabel);
+    } while (!subEls.length && Date.now() < deadline);
   }
   if (!subEls.length) throw new Error(`sub-nav item "${subLabel}" under "${topLabel}" never appeared`);
   await subEls[0].click();
   await driver.sleep(250);
 }
 
-// Every leaf page (list/form/settings templates and the two hero-style pages) renders
-// its real title through one of these two classes — see PageHeader and the Overview /
-// Message Designer hero markup in ops-console-preview.js.
+// The page's own header. Template pages (list/form/settings, and the two hero-style
+// pages) render it through .opsc-pagehead-title / .opsc-hero-title; the pages the console
+// now serves as standalone screens (Datasets, Test Cases, Test Suites, Saved message
+// definitions, ...) render a plain <h1>. Either is the real, visible page header.
 export async function pageTitle(driver: WebDriver): Promise<string> {
-  const els = await driver.findElements(By.css(".opsc-pagehead-title, .opsc-hero-title"));
-  if (!els.length) return "";
-  return ((await els[0].getText()) || "").trim();
+  const els: WebElement[] = await driver.findElements(By.css(".opsc-pagehead-title, .opsc-hero-title, h1"));
+  for (const el of els) {
+    if (!(await el.isDisplayed().catch(() => false))) continue;
+    const text = ((await el.getText().catch(() => "")) || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+// Pages load after the click (the console fetches each screen on demand), so the header
+// is read until it becomes the expected one or the wait runs out — then whatever is
+// showing is returned, for the caller to assert on and report.
+export async function waitForPageTitle(driver: WebDriver, expected: string, timeoutMs = 10000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let title = await pageTitle(driver);
+  while (title !== expected && Date.now() < deadline) {
+    await driver.sleep(250);
+    title = await pageTitle(driver);
+  }
+  return title;
+}
+
+async function namedControl(driver: WebDriver, name: string): Promise<WebElement> {
+  const el = await driver.wait(until.elementLocated(By.css(`[name="${name}"]`)), 10000, `form control "${name}" never appeared`);
+  await driver.wait(until.elementIsVisible(el), 4000);
+  return el;
+}
+
+// The console's forms are real forms now: every control carries a name attribute, which
+// is also the field name the form submits — a steadier handle than the label text.
+export async function setNamedField(driver: WebDriver, name: string, value: string): Promise<void> {
+  const el = await namedControl(driver, name);
+  await el.clear();
+  await el.sendKeys(value);
+}
+
+export async function selectNamedOption(driver: WebDriver, name: string, optionText: string): Promise<void> {
+  const el = await namedControl(driver, name);
+  // Some option lists are filled by a request made when the form opens.
+  await driver.wait(async () => {
+    const options: WebElement[] = await el.findElements(By.css("option"));
+    for (const option of options) {
+      if (((await option.getText()) || "").trim() === optionText) return true;
+    }
+    return false;
+  }, 8000, `"${name}" never offered the option "${optionText}"`);
+  await new Select(el).selectByVisibleText(optionText);
+}
+
+// Picks the first real choice of a list whose entries are data (suites, connections),
+// skipping the "Choose…" placeholder, and returns its visible text.
+export async function selectFirstNamedOption(driver: WebDriver, name: string): Promise<string> {
+  const el = await namedControl(driver, name);
+  let picked = "";
+  await driver.wait(async () => {
+    const options: WebElement[] = await el.findElements(By.css("option"));
+    for (const option of options) {
+      const value = (await option.getAttribute("value")) || "";
+      const disabled = await option.getAttribute("disabled");
+      if (value && !disabled) {
+        picked = ((await option.getText()) || "").trim();
+        await option.click();
+        return true;
+      }
+    }
+    return false;
+  }, 8000, `"${name}" never offered anything to choose`);
+  return picked;
+}
+
+// Every screen has one primary action button (#screen-action: "Save rule", "Start run",
+// "Create schedule", ...) and reports the outcome in #screen-status.
+export async function submitScreen(driver: WebDriver, buttonText: string): Promise<string> {
+  const button = await driver.wait(until.elementLocated(By.css("#screen-action")), 10000, "the screen has no primary action button");
+  assert.equal(((await button.getText()) || "").trim(), buttonText, "the screen's primary action is not the expected one");
+  // The same line also carries the screen's idle text ("Up to date · 21 records"), so
+  // the outcome is whatever it changes to after the click, not whatever it says.
+  const read = async () => {
+    const els: WebElement[] = await driver.findElements(By.css("#screen-status"));
+    return els.length ? ((await els[0].getText().catch(() => "")) || "").trim() : "";
+  };
+  const before = await read();
+  await button.click();
+  const deadline = Date.now() + 10000;
+  let after = await read();
+  while ((after === before || after === "") && Date.now() < deadline) {
+    await driver.sleep(200);
+    after = await read();
+  }
+  return after;
 }
 
 async function fieldContainer(driver: WebDriver, label: string): Promise<WebElement> {

@@ -102,6 +102,7 @@ export interface Environment {
 export interface Execution {
   id: string;
   key: string;
+  name?: string;
   requested_by?: string;
   test_plan_id?: string;
   test_suite_id?: string;

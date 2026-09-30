@@ -8,7 +8,8 @@
  * served from one place even when the worker runs on another machine.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
@@ -210,6 +211,8 @@ export async function publishEvidence(items: EvidenceItem[], ctx: PublishContext
         size_bytes: body.data.size_bytes,
         metadata: { ...(item.metadata || {}), sha256: body.data.sha256 },
       });
+      // The engine holds the record now; the local copy was only scratch.
+      rmSync(local, { force: true });
     } catch (err) {
       console.warn(`[evidence] upload of ${name} failed: ${(err as Error).message} — dropped`);
     }
@@ -230,14 +233,16 @@ export async function evidencePreflight(api: string, headers: Record<string, str
     contentType: 'text/plain',
   });
   if (!probe) return { ok: false, reason: `evidence dir ${EVIDENCE_DIR} is not writable` };
+  const local = path.join(EVIDENCE_DIR, path.basename(probe.storage_key));
   try {
-    const buf = readFileSync(path.join(EVIDENCE_DIR, path.basename(probe.storage_key)));
+    const buf = readFileSync(local);
     const res = await fetch(`${api}/api/v1/evidence/upload`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         probe: true,
-        name: path.basename(probe.storage_key),
+        // One probe file per worker host on the engine, overwritten each time.
+        name: `probe-${os.hostname().replace(/[^A-Za-z0-9._-]/g, '-') || 'worker'}.txt`,
         evidence_type: 'log',
         content_type: 'text/plain',
         content_base64: buf.toString('base64'),
@@ -254,5 +259,7 @@ export async function evidencePreflight(api: string, headers: Record<string, str
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: `evidence store unreachable: ${(err as Error).message}` };
+  } finally {
+    rmSync(local, { force: true });
   }
 }

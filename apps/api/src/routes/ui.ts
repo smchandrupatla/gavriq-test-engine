@@ -13,6 +13,9 @@ import { query } from '../db/client.js';
  *   GET  /api/v1/ui/executions/:id   run screen: per-case results without evidence bodies
  *   POST /api/v1/ui/history          tile graph: per-run pass/fail for a set of cases
  *   GET  /api/v1/ui/build-history    tile graph: per-build pass/fail for in-container results
+ *
+ * summary, live and history take environment_id (id or key): case statuses
+ * and run history are then those recorded on that environment only.
  */
 
 const ACTIVE = `('queued','preparing','running')`;
@@ -30,10 +33,25 @@ function parseSince(v: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/**
+ * A case's status is a fact about one deployment: the same case can pass on
+ * staging and fail on development. Accepts an environment id or key; an
+ * unknown or absent value means "latest result on any environment".
+ */
+async function resolveEnvironmentId(v: unknown): Promise<string | null> {
+  if (typeof v !== 'string' || !v) return null;
+  const { rows } = await query(
+    UUID.test(v) ? 'SELECT id FROM environments WHERE id = $1::uuid' : 'SELECT id FROM environments WHERE key = $1',
+    [v]
+  );
+  return rows[0]?.id ?? null;
+}
+
 export async function uiRoutes(app: FastifyInstance) {
   app.get('/api/v1/ui/summary', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
+    const envId = await resolveEnvironmentId(q.environment_id);
 
     const [cases, suites, envs, application, build, stats] = await Promise.all([
       query(
@@ -49,12 +67,15 @@ export async function uiRoutes(app: FastifyInstance) {
          ) m ON true
          LEFT JOIN LATERAL (
            SELECT er.status, er.finished_at, er.created_at, er.duration_ms
-           FROM execution_results er WHERE er.test_case_id = tc.id
+           FROM execution_results er
+           JOIN executions ex ON ex.id = er.execution_id
+           WHERE er.test_case_id = tc.id
+             AND ($2::uuid IS NULL OR ex.environment_id = $2::uuid)
            ORDER BY er.created_at DESC LIMIT 1
          ) lr ON true
          WHERE tc.application_id = (SELECT id FROM applications WHERE key = $1)
          ORDER BY tc.key`,
-        [appKey]
+        [appKey, envId]
       ),
       query(
         `SELECT id, key, name, suite_type FROM test_suites
@@ -62,7 +83,16 @@ export async function uiRoutes(app: FastifyInstance) {
          ORDER BY name`,
         [appKey]
       ),
-      query(`SELECT id, key, name FROM environments ORDER BY name`),
+      query(
+        // config.applications lists the applications deployed there; an
+        // environment without the list is offered to every application.
+        `SELECT id, key, name, env_type, base_url, config->'deployment' AS deployment
+         FROM environments
+         WHERE status = 'active'
+           AND (NOT (config ? 'applications') OR config->'applications' ? $1)
+         ORDER BY name`,
+        [appKey]
+      ),
       query(
         `SELECT id, key, name, metadata->'sandbench_types' AS types
          FROM applications WHERE key = $1`,
@@ -97,6 +127,7 @@ export async function uiRoutes(app: FastifyInstance) {
       data: {
         now: stats.rows[0]?.now,
         application: application.rows[0] || null,
+        environment_id: envId,
         cases: cases.rows,
         suites: suites.rows,
         environments: envs.rows,
@@ -111,10 +142,13 @@ export async function uiRoutes(app: FastifyInstance) {
     const appKey = q.application_key || 'sand-bench';
     const limit = clampInt(q.limit, 50, 200);
     const since = parseSince(q.since);
+    const envId = await resolveEnvironmentId(q.environment_id);
 
     const [executions, workers, changed, sig] = await Promise.all([
       query(
-        `SELECT e.id, e.key, e.status, e.trigger_source, e.test_suite_id, e.worker_id,
+        `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.test_suite_id, e.worker_id,
+                e.environment_id,
+                (SELECT env.name FROM environments env WHERE env.id = e.environment_id) AS environment_name,
                 e.created_at, e.started_at, e.finished_at,
                 cardinality(e.test_case_ids)::int AS total,
                 COALESCE(r.done, 0)::int AS done,
@@ -137,10 +171,12 @@ export async function uiRoutes(app: FastifyInstance) {
                   max(created_at) AS last_at
            FROM execution_results WHERE execution_id = e.id
          ) r ON true
-         WHERE e.status IN ${ACTIVE}
-            OR e.id IN (SELECT id FROM executions ORDER BY created_at DESC LIMIT $1)
+         WHERE (e.status IN ${ACTIVE}
+            OR e.id IN (SELECT id FROM executions WHERE ($2::uuid IS NULL OR environment_id = $2::uuid) AND metadata->>'application_key' = $3 ORDER BY created_at DESC LIMIT $1))
+            AND ($2::uuid IS NULL OR e.environment_id = $2::uuid)
+            AND e.metadata->>'application_key' = $3
          ORDER BY e.created_at DESC`,
-        [limit]
+        [limit, envId, appKey]
       ),
       query(
         // A worker whose heartbeat is stale is offline no matter what it last
@@ -154,12 +190,14 @@ export async function uiRoutes(app: FastifyInstance) {
       since
         ? query(
             // Margin covers results whose insert committed after an earlier poll's snapshot.
-            `SELECT DISTINCT ON (test_case_id)
-                    test_case_id, status, COALESCE(finished_at, created_at) AS last_at, duration_ms
-             FROM execution_results
-             WHERE created_at > $1::timestamptz - interval '10 seconds'
-             ORDER BY test_case_id, created_at DESC`,
-            [since]
+            `SELECT DISTINCT ON (er.test_case_id)
+                    er.test_case_id, er.status, COALESCE(er.finished_at, er.created_at) AS last_at, er.duration_ms
+             FROM execution_results er
+             JOIN executions ex ON ex.id = er.execution_id
+             WHERE er.created_at > $1::timestamptz - interval '10 seconds'
+               AND ($2::uuid IS NULL OR ex.environment_id = $2::uuid)
+             ORDER BY er.test_case_id, er.created_at DESC`,
+            [since, envId]
           )
         : Promise.resolve({ rows: [] as any[] }),
       query(
@@ -187,7 +225,7 @@ export async function uiRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/ui/executions/:id', async (req, reply) => {
     const { rows } = await query(
-      `SELECT e.id, e.key, e.status, e.trigger_source, e.test_suite_id, e.test_case_ids, e.worker_id,
+      `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.test_suite_id, e.test_case_ids, e.worker_id,
               e.environment_id, e.created_at, e.started_at, e.finished_at, e.requested_by,
               env.name AS environment_name, s.name AS suite_name
        FROM executions e
@@ -217,15 +255,16 @@ export async function uiRoutes(app: FastifyInstance) {
     return reply.send({ data: { ...exec, results: results.rows, cases: cases.rows } });
   });
 
-  app.post<{ Body: { case_ids?: unknown; limit?: unknown } }>('/api/v1/ui/history', async (req, reply) => {
+  app.post<{ Body: { case_ids?: unknown; limit?: unknown; environment_id?: unknown } }>('/api/v1/ui/history', async (req, reply) => {
     const raw = Array.isArray(req.body?.case_ids) ? req.body.case_ids : [];
     const ids = [...new Set(raw.map(String).filter((id) => UUID.test(id)))];
     const limit = clampInt(req.body?.limit, 20, 100);
     if (!ids.length) return reply.send({ data: { runs: [], top_failing: [], totals: { cases_run: 0, results: 0 } } });
+    const envId = await resolveEnvironmentId(req.body?.environment_id);
 
     const [runs, top, totals] = await Promise.all([
       query(
-        `SELECT e.id, e.key, e.status, e.trigger_source, e.created_at, e.started_at, e.finished_at,
+        `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.created_at, e.started_at, e.finished_at,
                 count(*)::int AS total,
                 count(*) FILTER (WHERE er.status = 'passed')::int AS passed,
                 count(*) FILTER (WHERE er.status IN ${FAILED})::int AS failed,
@@ -234,10 +273,11 @@ export async function uiRoutes(app: FastifyInstance) {
          FROM execution_results er
          JOIN executions e ON e.id = er.execution_id
          WHERE er.test_case_id = ANY($1::uuid[])
+           AND ($3::uuid IS NULL OR e.environment_id = $3::uuid)
          GROUP BY e.id
          ORDER BY e.created_at DESC
          LIMIT $2`,
-        [ids, limit]
+        [ids, limit, envId]
       ),
       query(
         `SELECT er.test_case_id, tc.key, tc.name,
@@ -245,18 +285,23 @@ export async function uiRoutes(app: FastifyInstance) {
                 count(*) FILTER (WHERE er.status IN ${FAILED})::int AS failures,
                 max(er.created_at) FILTER (WHERE er.status IN ${FAILED}) AS last_failed_at
          FROM execution_results er
+         JOIN executions e ON e.id = er.execution_id
          JOIN test_cases tc ON tc.id = er.test_case_id
          WHERE er.test_case_id = ANY($1::uuid[])
+           AND ($2::uuid IS NULL OR e.environment_id = $2::uuid)
          GROUP BY er.test_case_id, tc.key, tc.name
          HAVING count(*) FILTER (WHERE er.status IN ${FAILED}) > 0
          ORDER BY failures DESC, last_failed_at DESC
          LIMIT 5`,
-        [ids]
+        [ids, envId]
       ),
       query(
-        `SELECT count(DISTINCT test_case_id)::int AS cases_run, count(*)::int AS results, min(created_at) AS first_at
-         FROM execution_results WHERE test_case_id = ANY($1::uuid[])`,
-        [ids]
+        `SELECT count(DISTINCT er.test_case_id)::int AS cases_run, count(*)::int AS results, min(er.created_at) AS first_at
+         FROM execution_results er
+         JOIN executions e ON e.id = er.execution_id
+         WHERE er.test_case_id = ANY($1::uuid[])
+           AND ($2::uuid IS NULL OR e.environment_id = $2::uuid)`,
+        [ids, envId]
       ),
     ]);
 

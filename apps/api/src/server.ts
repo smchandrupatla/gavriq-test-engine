@@ -27,7 +27,10 @@ import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { uiRoutes } from './routes/ui.js';
 import { triggerRoutes } from './routes/trigger.js';
+import { settingsRoutes } from './routes/settings.js';
 import { registerEvidenceGate } from './evidence-gate.js';
+import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
+import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -147,7 +150,7 @@ async function main() {
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
-      if (pathName === '/api/v1/evidence/upload' && method === 'POST') {
+      if ((pathName === '/api/v1/evidence/upload' || pathName === '/api/v1/evidence/prune') && method === 'POST') {
         return requirePermission('workers:manage')(req, reply);
       }
       if (pathName.startsWith('/api/v1/evidence')) return;
@@ -164,8 +167,11 @@ async function main() {
       if (method === 'POST' && pathName === '/api/v1/ui/history') {
         return requirePermission('tests:read')(req, reply);
       }
-      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedules'))) {
+      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs')) {
         return requirePermission('executions:run')(req, reply);
+      }
+      if (pathName.startsWith('/api/v1/schedules')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
         return requirePermission('tests:write')(req, reply);
@@ -195,9 +201,31 @@ async function main() {
   await app.register(buildStatusRoutes);
   await app.register(uiRoutes);
   await app.register(triggerRoutes);
+  await app.register(settingsRoutes);
   await app.register(opsRoutes);
 
   await app.listen({ port, host });
+
+  // Evidence retention: once shortly after boot, then daily.
+  if (EVIDENCE_RETENTION_DAYS > 0) {
+    const prune = () =>
+      pruneEvidence(EVIDENCE_RETENTION_DAYS)
+        .then((r) => app.log.info(r, 'evidence retention'))
+        .catch((err) => app.log.warn({ err }, 'evidence retention failed'));
+    setTimeout(prune, 60_000).unref();
+    setInterval(prune, 24 * 60 * 60_000).unref();
+  }
+
+  // Run retention: reads the configured window fresh each tick, so a change made in the
+  // Configuration UI takes effect without a restart.
+  const pruneRunsTick = () =>
+    currentRunRetentionDays()
+      .then((days) => pruneRuns(days))
+      .then((r) => app.log.info(r, 'run retention'))
+      .catch((err) => app.log.warn({ err }, 'run retention failed'));
+  setTimeout(pruneRunsTick, 90_000).unref();
+  setInterval(pruneRunsTick, 60 * 60_000).unref();
+
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
   console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
 }

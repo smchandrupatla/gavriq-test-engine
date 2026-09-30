@@ -1,5 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db/client.js';
+import { uniqueName } from '../lib/naming.js';
+
+/** Case names are unique across the board (case-insensitive); `excludeId` lets a rename check against every other case. */
+async function nameExists(name: string, excludeId?: string): Promise<boolean> {
+  const { rows } = await query(
+    excludeId
+      ? `SELECT 1 FROM test_cases WHERE lower(name) = lower($1) AND id <> $2 LIMIT 1`
+      : `SELECT 1 FROM test_cases WHERE lower(name) = lower($1) LIMIT 1`,
+    excludeId ? [name, excludeId] : [name]
+  );
+  return rows.length > 0;
+}
 
 export async function testCaseRoutes(app: FastifyInstance) {
   // List with filters
@@ -53,6 +65,8 @@ export async function testCaseRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'key, name, application_id are required' });
     }
 
+    const name = await uniqueName(String(b.name), (n) => nameExists(n));
+
     const row = await withTransaction(async (client) => {
       const { rows } = await client.query(
         `INSERT INTO test_cases (
@@ -63,14 +77,15 @@ export async function testCaseRoutes(app: FastifyInstance) {
            severity, priority, tags, owner_id, author_id, automation_status, lifecycle,
            created_by
          ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'other'),$10,$11,COALESCE($12,'[]'::jsonb),
+           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::test_type,'other'),$10,$11,COALESCE($12,'[]'::jsonb),
            $13,COALESCE($14,'{}'::jsonb),$15,$16,$17,COALESCE($18,'[]'::jsonb),$19,
            COALESCE($20,'[]'::jsonb),COALESCE($21,'{}'::jsonb),COALESCE($22,300),
-           COALESCE($23,'{"max":0}'::jsonb),COALESCE($24,'medium'),COALESCE($25,'p2'),
-           COALESCE($26,'{}'),$27,$28,COALESCE($29,'manual'),COALESCE($30,'draft'),$31
+           COALESCE($23,'{"max":0}'::jsonb),COALESCE($24::severity,'medium'),COALESCE($25::priority,'p2'),
+           COALESCE($26::text[],'{}'),$27,$28,COALESCE($29::automation_status,'manual'),
+           COALESCE($30::test_lifecycle,'draft'),$31
          ) RETURNING *`,
         [
-          b.key, b.name, b.description ?? null, b.application_id,
+          b.key, name, b.description ?? null, b.application_id,
           b.component_id ?? null, b.feature_id ?? null, b.requirement_id ?? null,
           b.scenario_id ?? null, b.test_type ?? null, b.test_level ?? null,
           b.preconditions ?? null, JSON.stringify(b.dependencies ?? []),
@@ -122,6 +137,10 @@ export async function testCaseRoutes(app: FastifyInstance) {
 
       const tc = existing.rows[0];
       const newVersion = tc.version + 1;
+      const newName =
+        typeof b.name === 'string' && b.name && b.name !== tc.name
+          ? await uniqueName(b.name, (n) => nameExists(n, tc.id))
+          : null;
 
       const row = await withTransaction(async (client) => {
         const { rows } = await client.query(
@@ -146,7 +165,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
            WHERE id = $1
            RETURNING *`,
           [
-            tc.id, b.name ?? null, b.description ?? null, b.test_type ?? null,
+            tc.id, newName, b.description ?? null, b.test_type ?? null,
             b.preconditions ?? null, b.script ?? null,
             b.steps ? JSON.stringify(b.steps) : null,
             b.assertions ? JSON.stringify(b.assertions) : null,
@@ -181,6 +200,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
 
       const src = rows[0];
       const newKey = (req.body as any)?.key || `${src.key}-clone-${Date.now().toString(36)}`;
+      const newName = await uniqueName(`Clone of ${src.name}`, (n) => nameExists(n));
       const { rows: created } = await query(
         `INSERT INTO test_cases (
            key, name, description, application_id, component_id, feature_id, requirement_id,
@@ -192,7 +212,7 @@ export async function testCaseRoutes(app: FastifyInstance) {
                 expected_results, severity, priority, tags, automation_status, 'draft', $4, $4
          FROM test_cases WHERE id = $1
          RETURNING *`,
-        [src.id, newKey, `Clone of ${src.name}`, (req.body as any)?.created_by ?? null]
+        [src.id, newKey, newName, (req.body as any)?.created_by ?? null]
       );
 
       return reply.status(201).send({ data: created[0] });
