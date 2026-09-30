@@ -9,6 +9,8 @@
 | `RBAC_ENABLED` | recommended | `true` in production |
 | `WORKER_API_KEY` | recommended | Shared secret; workers send `X-Worker-Key` |
 | `JWT_SECRET` | optional | For gateway-validated Bearer tokens |
+| `AGENT_API_KEY` | for the agent API | Secret the Sand Bench agent sends as `X-Agent-Key` (or Bearer). Unset: `/api/v1/agent/*` answers 503. See [AGENT-API.md](AGENT-API.md) |
+| `WEBHOOK_ALLOWED_HOSTS` | optional | Comma list; only these hosts may receive completion webhooks |
 | `AUTO_SEED` | no | Only for empty/dev environments |
 | `TARGET_BASE_URL` | worker | Default target under test |
 

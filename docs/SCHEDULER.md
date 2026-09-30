@@ -76,3 +76,7 @@ npm test    # includes tests/scheduler-cron.test.ts
 # against a disposable engine started with SCHEDULER_TICK_MS=2000:
 ENGINE_IT_BASE=http://127.0.0.1:8897 npx tsx --test tests/scheduler-api.test.ts
 ```
+
+## External trigger and completion notice
+
+An external party (the Sand Bench agent) can trigger schedules, be notified when a run ends and read the results through the key-protected agent API: see [AGENT-API.md](AGENT-API.md).

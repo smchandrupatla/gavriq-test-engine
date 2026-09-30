@@ -563,3 +563,38 @@ VALUES (
   '{"functional_smoke":"allowed","read_only_api":"allowed","write_api":"allowed","load":"approval_required","stress":"prohibited","chaos":"prohibited","destructive_db":"prohibited"}'::jsonb
 )
 ON CONFLICT (key) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Agent API: completion notifications (webhooks) for external parties
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          TEXT NOT NULL,
+  url           TEXT NOT NULL,
+  secret        TEXT NOT NULL,                       -- HMAC-SHA256 key; shown once on create
+  events        TEXT[] NOT NULL DEFAULT '{execution.completed}',
+  schedule_id   UUID REFERENCES schedules(id) ON DELETE CASCADE,  -- null = every execution
+  label         TEXT,                                -- only executions started with this label
+  enabled       BOOLEAN NOT NULL DEFAULT true,
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscription_id  UUID REFERENCES webhook_subscriptions(id) ON DELETE CASCADE,  -- null = per-run callback_url
+  execution_id     UUID REFERENCES executions(id) ON DELETE CASCADE,
+  event            TEXT NOT NULL,
+  url              TEXT NOT NULL,
+  payload          JSONB NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'pending',  -- pending|delivered|dead
+  attempts         INT NOT NULL DEFAULT 0,
+  next_attempt_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_status_code INT,
+  last_error       TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at     TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due ON webhook_deliveries(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_exec ON webhook_deliveries(execution_id);

@@ -7,6 +7,7 @@
  * 3. x-actor-id / x-actor-roles headers (dev only unless RBAC_ALLOW_DEV_HEADERS=true)
  */
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { jwtVerify } from 'jose';
 import { query } from '../db/client.js';
 
@@ -73,6 +74,16 @@ async function verifyBearer(token: string): Promise<{ id: string; roles: Role[] 
   }
 }
 
+/** True when the request carries AGENT_API_KEY (X-Agent-Key, or Authorization: Bearer <key>). */
+export function hasAgentKey(req: FastifyRequest): boolean {
+  const key = process.env.AGENT_API_KEY;
+  if (!key) return false;
+  const auth = req.headers.authorization;
+  const given = String(req.headers['x-agent-key'] || (auth?.startsWith('Bearer ') ? auth.slice(7).trim() : ''));
+  const a = Buffer.from(given), b = Buffer.from(key);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function resolveActor(req: FastifyRequest) {
   const workerKey = process.env.WORKER_API_KEY;
   const providedKey = req.headers['x-worker-key'] as string | undefined;
@@ -91,6 +102,10 @@ export function resolveActor(req: FastifyRequest) {
 }
 
 export async function resolveActorAsync(req: FastifyRequest) {
+  if (hasAgentKey(req)) {
+    req.actor = { id: 'sandbench-agent', roles: ['automation_agent'] };
+    return;
+  }
   const workerKey = process.env.WORKER_API_KEY;
   const providedKey = req.headers['x-worker-key'] as string | undefined;
   if (workerKey && providedKey && providedKey === workerKey) {

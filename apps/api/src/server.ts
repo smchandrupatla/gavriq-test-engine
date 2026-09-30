@@ -17,6 +17,8 @@ import { suitePlanRoutes } from './routes/suites-plans.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
+import { agentRoutes } from './routes/agent.js';
+import { startWebhookDispatcher } from './notify/webhooks.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
@@ -184,9 +186,11 @@ async function main() {
   await app.register(buildStatusRoutes);
   await app.register(opsRoutes);
   await app.register(defectRoutes);
+  await app.register(agentRoutes);
 
   await app.listen({ port, host });
   startScheduler();
+  startWebhookDispatcher();
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
   console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
 }
