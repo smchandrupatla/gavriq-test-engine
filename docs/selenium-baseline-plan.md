@@ -63,6 +63,7 @@ Every leaf page in the sidebar, validated for correct page header render.
 | Message Designer | Create schema | (check for "Generate schema" control) |
 | Message Designer | Schema canvas | (check for "Add child" control) |
 | Datasets | Datasets | "Datasets" |
+| Data Feeders | New feeder | "New data feeder" — tabs Dataset, Target system, Window & pacing (deep checks: `sit/cases/95-selenium-data-feeder.sit.ts`) |
 | Test Cases | All test cases | "All test cases" |
 | Test Cases | New test case | "New test case" |
 | Test Suites | All test suites | "All test suites" |
