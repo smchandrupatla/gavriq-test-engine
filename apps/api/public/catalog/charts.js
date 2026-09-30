@@ -2,7 +2,8 @@
 /**
  * Dependency-free SVG charts for the console's history panels.
  *   Charts.stacked(host, runs, { onSelect })  passed / failed / other per run (columns, oldest -> newest)
- *   Charts.rate(host, runs)                   pass rate per run (line, 0-100%)
+ *   Charts.rate(host, runs, opts)             pass rate per run (line, 0-100%)
+ *   Charts.hbars(host, rows, { series })      one horizontal bar per category, stacked by series
  * runs: [{ id, key, created_at, passed, failed, other }]
  * Colours come from CSS tokens (--viz-pass / --viz-fail / --viz-other / --viz-rate) in index.html.
  */
@@ -18,6 +19,8 @@ const Charts = (() => {
   const stamp = (d) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const shortStamp = (d) => new Date(d).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   const totalOf = (r) => r.passed + r.failed + r.other;
+  // Tooltip heading: a run is named by its time and key; callers charting other buckets (days) pass opts.title.
+  const titleOf = (r, opts) => (opts && opts.title ? opts.title(r) : `${stamp(r.created_at)} · ${r.key}`);
 
   function node(tag, attrs, parent) {
     const n = document.createElementNS(NS, tag);
@@ -31,11 +34,12 @@ const Charts = (() => {
     t.textContent = str;
     return t;
   }
+  // Smallest round ceiling whose half is also a round tick (the axis labels 0, max/2, max).
   function niceMax(v) {
     if (v <= 4) return 4;
     const p = Math.pow(10, Math.floor(Math.log10(v)));
     const m = v / p;
-    return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+    return (p < 10 ? [6, 8, 10] : [1, 2, 3, 4, 5, 6, 8, 10]).find((s) => m <= s) * p;
   }
 
   // Sized from the host's real width so text stays at its true pixel size.
@@ -130,11 +134,11 @@ const Charts = (() => {
       // Hit target is the whole band, not just the painted column.
       const hit = node('rect', {
         x: PAD.l + band * i, y: PAD.t, width: band, height: ph, class: 'hit', tabindex: 0,
-        'aria-label': `${stamp(r.created_at)}: ${r.passed} passed, ${r.failed} failed, ${r.other} other`,
+        'aria-label': `${titleOf(r, opts)}: ${r.passed} passed, ${r.failed} failed, ${r.other} other`,
       }, g);
       const show = () => {
         g.classList.add('hot');
-        showTip(host, cx(i), y(totalOf(r)), `${stamp(r.created_at)} · ${r.key}`, SERIES.map(([k, name, color]) => [r[k], name, color]));
+        showTip(host, cx(i), y(totalOf(r)), titleOf(r, opts), SERIES.map(([k, name, color]) => [r[k], name, color]));
       };
       const hide = () => { g.classList.remove('hot'); hideTip(host); };
       hit.addEventListener('pointerenter', show);
@@ -150,7 +154,7 @@ const Charts = (() => {
     xLabels(svg, runs, cx, pw);
   }
 
-  function rate(host, runs) {
+  function rate(host, runs, opts) {
     const { svg, w, pw, ph } = frame(host, `Pass rate per run across ${runs.length} runs`);
     const y = (v) => PAD.t + ph - v * ph;
     yAxis(svg, w, [0, 0.5, 1], y, (v) => Math.round(v * 100) + '%');
@@ -183,9 +187,9 @@ const Charts = (() => {
       cross.setAttribute('x2', p.x);
       hot.setAttribute('cx', p.x);
       hot.setAttribute('cy', p.y);
-      showTip(host, p.x, p.y, `${stamp(p.r.created_at)} · ${p.r.key}`, [
+      showTip(host, p.x, p.y, titleOf(p.r, opts), [
         [Math.round(p.v * 100) + '%', 'pass rate', 'var(--viz-rate)'],
-        [`${p.r.passed}/${totalOf(p.r)}`, 'cases passed', 'var(--viz-pass)'],
+        [`${p.r.passed}/${totalOf(p.r)}`, (opts && opts.noun) || 'cases passed', 'var(--viz-pass)'],
       ]);
     };
     const hide = () => {
@@ -208,5 +212,61 @@ const Charts = (() => {
     });
   }
 
-  return { stacked, rate };
+  // Row bar segment; the last segment gets the rounded data-end, the baseline (left) stays square.
+  function rowPath(x, y, w, h, round) {
+    const r = round ? Math.min(RADIUS, h / 2, w) : 0;
+    if (!r) return `M${x},${y}H${x + w}V${y + h}H${x}Z`;
+    return `M${x},${y}H${x + w - r}A${r},${r} 0 0 1 ${x + w},${y + r}V${y + h - r}A${r},${r} 0 0 1 ${x + w - r},${y + h}H${x}Z`;
+  }
+
+  /**
+   * Horizontal bars, one row per category, value at the tip; several series stack left to right.
+   *   rows: [{ label, values: { <key>: n } }]   opts.series: [[key, name, color], ...]
+   * The chart is as tall as its rows, so it suits category counts a column chart would cramp.
+   */
+  function hbars(host, rows, opts) {
+    const series = opts.series, ROW = 26, BAR = 12, TOP = 4, CHAR = 6.3;
+    host.replaceChildren();
+    const w = Math.max(host.clientWidth, 240);
+    const val = (r, k) => Number(r.values[k]) || 0;
+    const sum = (r) => series.reduce((a, [k]) => a + val(r, k), 0);
+    const max = Math.max(1, ...rows.map(sum));
+    const labelW = Math.min(Math.max(...rows.map((r) => r.label.length)) * CHAR + 12, w * 0.5, 300);
+    const tipW = String(max).length * 7 + 12;
+    const pw = w - labelW - tipW;
+    const h = rows.length * ROW + TOP * 2;
+    const svg = node('svg', { width: w, height: h, viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': `${series.map((s) => s[1]).join(', ')} across ${rows.length} rows` }, host);
+    node('line', { x1: labelW + 0.5, x2: labelW + 0.5, y1: TOP, y2: h - TOP, class: 'axis' }, svg);
+    // Long names often differ only at the end ("… (staging)" / "… (development)"), so cut the middle.
+    const fit = Math.max(6, Math.floor((labelW - 12) / CHAR));
+    const clip = (s) => (s.length > fit ? s.slice(0, Math.ceil((fit - 1) / 2)) + '…' + s.slice(s.length - Math.floor((fit - 1) / 2)) : s);
+
+    rows.forEach((r, i) => {
+      const g = node('g', { class: 'col' }, svg);
+      const cy = TOP + i * ROW + ROW / 2;
+      const name = label(g, labelW - 8, cy + 4, clip(r.label), 'end');
+      if (r.label.length > fit) node('title', {}, name).textContent = r.label;
+      const segs = series.filter(([k]) => val(r, k) > 0);
+      let x = labelW + 1;
+      segs.forEach(([k, , color], j) => {
+        const full = (val(r, k) / max) * pw, gap = j ? GAP : 0;
+        node('path', { d: rowPath(x + gap, cy - BAR / 2, Math.max(full - gap, 1), BAR, j === segs.length - 1), fill: color, class: 'mark' }, g);
+        x += full;
+      });
+      label(g, x + 6, cy + 4, String(sum(r)), 'start', 'end-label');
+      const parts = series.map(([k, n]) => `${val(r, k)} ${n}`).join(', ');
+      const hit = node('rect', { x: 0, y: cy - ROW / 2, width: w, height: ROW, class: 'hit', tabindex: 0, 'aria-label': `${r.label}: ${parts}` }, g);
+      const show = () => {
+        g.classList.add('hot');
+        showTip(host, Math.min(labelW + pw / 2, w - 90), cy - ROW / 2, r.label, series.map(([k, n, color]) => [val(r, k), n, color]));
+      };
+      const hide = () => { g.classList.remove('hot'); hideTip(host); };
+      hit.addEventListener('pointerenter', show);
+      hit.addEventListener('pointerleave', hide);
+      hit.addEventListener('focus', show);
+      hit.addEventListener('blur', hide);
+    });
+  }
+
+  return { stacked, rate, hbars };
 })();

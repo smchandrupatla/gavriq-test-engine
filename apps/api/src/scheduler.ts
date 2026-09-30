@@ -25,7 +25,12 @@ async function api(path: string, opts: RequestInit = {}) {
   return body;
 }
 
+let ticking = false;
+
 async function tick() {
+  // A slow poll must not overlap the next one: both would see the same schedule as due.
+  if (ticking) return;
+  ticking = true;
   try {
     const { data: schedules } = await api('/api/v1/schedules');
     const now = new Date();
@@ -33,17 +38,22 @@ async function tick() {
       if (!isDue(s, now, TZ)) continue;
       console.log(`[scheduler] firing "${s.name}" (${s.cron_expression}) — next ${nextFire(s.cron_expression, now, TZ)?.toISOString() ?? 'n/a'}`);
       try {
+        // expected_last_run_at makes the API claim this occurrence atomically (409 if another poll got there first).
         const fired = await api(`/api/v1/schedules/${s.id}/run`, {
           method: 'POST',
-          body: JSON.stringify({ requested_by: 'scheduler-daemon' }),
+          body: JSON.stringify({ requested_by: 'scheduler-daemon', expected_last_run_at: s.last_run_at ?? null }),
         });
         console.log(`[scheduler] "${s.name}" → ${fired?.data?.run_id || fired?.data?.key || 'queued'}`);
       } catch (err) {
-        console.warn(`[scheduler] "${s.name}" failed to fire:`, (err as Error).message);
+        const msg = (err as Error).message;
+        if (msg.includes('already_fired')) console.log(`[scheduler] "${s.name}" was already fired for this occurrence`);
+        else console.warn(`[scheduler] "${s.name}" failed to fire:`, msg);
       }
     }
   } catch (err) {
     console.warn('[scheduler]', (err as Error).message);
+  } finally {
+    ticking = false;
   }
 }
 

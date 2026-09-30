@@ -34,6 +34,8 @@ export interface PlaywrightRunInput {
   vars?: Record<string, string>;
   /** Run with a visible browser window instead of headless. Defaults to headless. */
   headless?: boolean;
+  /** Aborted when the run is cancelled: the browser is closed at once instead of finishing the case. */
+  signal?: AbortSignal;
 }
 
 export interface PlaywrightRunResult {
@@ -157,12 +159,18 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
     if (shot) evidence.push(shot);
   };
 
+  // Cancelling closes the browser; the action in flight then fails and the finally below cleans up.
+  const onAbort = () => { browser?.close().catch(() => undefined); };
+  input.signal?.addEventListener('abort', onAbort, { once: true });
+
   try {
+    if (input.signal?.aborted) throw new Error('Run cancelled');
     browser = await engine.launch({
       headless: input.headless ?? true,
       executablePath: engineName === 'chromium' ? process.env.CHROME_BIN || undefined : undefined,
       args: engineName === 'chromium' ? ['--no-sandbox', '--disable-dev-shm-usage'] : [],
     });
+    if (input.signal?.aborted) throw new Error('Run cancelled');
     const context = await browser.newContext({
       viewport: input.viewport || { width: 1280, height: 800 },
     });
@@ -235,6 +243,11 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             case 'type':
               if (!step.selector) throw new Error('type requires selector');
               await page.locator(step.selector).first().fill(step.value || '');
+              break;
+            case 'select':
+              // Option by value or by label, whichever the <select> has.
+              if (!step.selector) throw new Error('select requires selector');
+              await page.locator(step.selector).first().selectOption(step.value || '');
               break;
             case 'wait_for':
               if (!step.selector) throw new Error('wait_for requires selector');
@@ -351,6 +364,7 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
       evidence,
     };
   } finally {
+    input.signal?.removeEventListener('abort', onAbort);
     if (browser) await browser.close().catch(() => undefined);
   }
 }

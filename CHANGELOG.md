@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+**Added — Quality Insights**
+- Console screen **Quality insights** (`#/insights`): a versioned review per application — verdict and headline, quality score with its six components, results and pass rate per day, one card per environment (build under test, pass rate, coverage, flaky / regressed / never-passed cases), findings, failure themes, coverage by test type, checks stated per case, cases needing attention, prioritised suggestions and the version history
+- **Refresh insights** writes a new version: by Claude when `ANTHROPIC_API_KEY` is set (`INSIGHTS_MODEL`, default `claude-opus-5`), by the built-in rules otherwise; an agent can post its own review of `GET /api/v1/insights/snapshot`. Versions are stored with the facts they were written from (`quality_insights`), so they outlive run retention
+- Runs record the build they test: on claim the environment's registered deployment is copied to `executions.metadata.build`
+- Index on `evidence(execution_result_id)`
+- See `docs/QUALITY-INSIGHTS.md`
+
 **Fixed — cases that failed instantly or "never ran" (137 of 414)**
 - Worker image had no `sit/` folder, so all 92 imported SIT cases failed in milliseconds with `SIT file not found`. `Dockerfile.worker` now ships `sit/`, `dev/`, `docs/use-cases` and the report helpers the security cases import (`apps/secportal/*`)
 - Worker image had no Firefox or WebKit, so 12 cells of the browser matrix failed with `Executable doesn't exist`. The image installs both for the pinned Playwright version; worker `shm_size` raised to 1gb; Firefox/WebKit cases get a 120s step budget

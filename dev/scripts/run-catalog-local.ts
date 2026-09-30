@@ -4,7 +4,10 @@
  * worker runners, without the engine/queue in between. For validating that
  * case steps really run against a live deployment while writing them.
  *
- *   npx tsx dev/scripts/run-catalog-local.ts [--method http] [--suite sb-smoke] [--key SB-...]
+ *   npx tsx dev/scripts/run-catalog-local.ts [--app sand-bench] [--method http] [--suite sb-smoke] [--key SB-...]
+ *
+ * The engine self-test cases (--app gavriq-test-engine) target TE_BASE:
+ *   TE_BASE=http://127.0.0.1:18797 npx tsx dev/scripts/run-catalog-local.ts --app gavriq-test-engine
  */
 import { runHttp } from '../../apps/worker/src/runners/http.js';
 import { runPlaywright } from '../../apps/worker/src/runners/playwright.js';
@@ -34,8 +37,10 @@ const methodFilter = opt('method');
 const suiteFilter = opt('suite');
 const keyFilter = opt('key');
 
+const ENGINE_KEYS = new Set(ENGINE_CASES.map((c) => c.key));
+
 async function runCase(c: CaseDef) {
-  const baseUrl = VARS.web;
+  const baseUrl = ENGINE_KEYS.has(c.key) ? VARS.engine : VARS.web;
   const rules = (c.validationRules || {}) as any;
   const common = { baseUrl, vars: VARS, timeoutSeconds: c.timeoutSeconds || 60, steps: c.steps as any };
   if (c.method === 'http') return runHttp(common);
@@ -45,32 +50,36 @@ async function runCase(c: CaseDef) {
     return runPerformance({
       baseUrl, vars: VARS, url: rules.url, path: rules.path, method: rules.method,
       requests: rules.requests, concurrency: rules.concurrency, sla: rules.sla,
+      durationSeconds: rules.duration_seconds,
       timeoutSeconds: c.timeoutSeconds || 120,
     });
   return { status: 'error' as const, message: `unknown method ${c.method}`, duration_ms: 0 };
 }
 
-const all = [...SANDBENCH_CASES, ...ENGINE_CASES].filter(
+const appFilter = opt('app');
+const pool = appFilter === 'gavriq-test-engine' ? ENGINE_CASES : appFilter === 'sand-bench' ? SANDBENCH_CASES : [...SANDBENCH_CASES, ...ENGINE_CASES];
+const all = pool.filter(
   (c) =>
     (!methodFilter || c.method === methodFilter) &&
     (!suiteFilter || c.suiteKey === suiteFilter) &&
     (!keyFilter || c.key === keyFilter)
 );
 
-let passed = 0, failed = 0;
+let passed = 0, failed = 0, skipped = 0;
 const failures: string[] = [];
 for (const c of all) {
   const t0 = Date.now();
   try {
     const r = await runCase(c);
     const ok = r.status === 'passed';
-    if (ok) passed++; else { failed++; failures.push(`${c.key}: ${r.message}`); }
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.key}  (${Date.now() - t0}ms)${ok ? '' : `\n      ${r.message}`}`);
+    const skip = (r.status as string) === 'skipped';
+    if (ok) passed++; else if (skip) skipped++; else { failed++; failures.push(`${c.key}: ${r.message}`); }
+    console.log(`${ok ? 'PASS' : skip ? 'SKIP' : 'FAIL'}  ${c.key}  (${Date.now() - t0}ms)${ok ? '' : `\n      ${r.message}`}`);
   } catch (err) {
     failed++;
     failures.push(`${c.key}: ${(err as Error).message}`);
     console.log(`ERR   ${c.key}: ${(err as Error).message}`);
   }
 }
-console.log(`\n${passed} passed, ${failed} failed of ${all.length}`);
+console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped of ${all.length}`);
 if (failures.length) process.exitCode = 1;

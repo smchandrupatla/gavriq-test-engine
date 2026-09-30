@@ -6,6 +6,8 @@
  *                        (*, lists, ranges, steps, jan-dec / sun-sat names, 7 = sunday)
  *   @hourly @daily @midnight @weekly, hourly, daily      cron shorthands
  *   every:N              every N minutes since the last run (interval, not aligned)
+ *   at:<ISO-8601>         one-time: due once now >= the timestamp, never again
+ *                        once last_run_at is set (see isDue)
  */
 export interface CronSpec {
   minute: Set<number>;
@@ -187,9 +189,19 @@ export function nextFire(expr: string, from: Date, tz: string, lookaheadMinutes 
   return null;
 }
 
+/** Parses `at:<ISO-8601>`; null if the expression isn't that form or the timestamp is unparseable. */
+export function parseOneTime(expr: string): Date | null {
+  const m = /^at:(.+)$/i.exec(expr.trim());
+  if (!m) return null;
+  const d = new Date(m[1]!.trim());
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function isValidExpression(expr: string | null | undefined): boolean {
   if (!expr) return false;
-  if (/^every:\d+$/i.test(expr.trim())) return Number(expr.trim().slice(6)) > 0;
+  const trimmed = expr.trim();
+  if (/^every:\d+$/i.test(trimmed)) return Number(trimmed.slice(6)) > 0;
+  if (/^at:/i.test(trimmed)) return parseOneTime(trimmed) !== null;
   return parseCron(expr) !== null;
 }
 
@@ -217,6 +229,12 @@ export function isDue(schedule: ScheduleLike, now: Date, tz: string): boolean {
     if (!mins) return false;
     if (!schedule.last_run_at) return true;
     return now.getTime() - new Date(schedule.last_run_at).getTime() >= mins * 60_000;
+  }
+
+  const at = parseOneTime(expr);
+  if (at) {
+    if (schedule.last_run_at) return false; // one-shot: already fired
+    return now.getTime() >= at.getTime();
   }
 
   const fire = lastFire(expr, now, tz);

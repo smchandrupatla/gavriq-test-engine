@@ -1,109 +1,64 @@
 /**
- * GAVRIQ Test Engine — self-test catalog (application #2).
+ * GAVRIQ Test Engine — self-test catalog.
  *
- * Proves the engine is a generic, multi-application platform by registering
- * itself as an application under test. Every case is a real HTTP check
- * against the engine's own control-plane API ({{engine}} from the selected
- * environment's config.vars).
+ * The engine registered as an application under test, with the same taxonomy
+ * a customer application gets. Every case targets {{engine}} from the selected
+ * environment's config.vars: the staging engine (a pinned commit, deployed by
+ * deploy/engine-staging/deploy.mjs) or the development engine.
+ *
+ *   engine-functional-cases.ts   smoke, api, integration, use case, regression, data quality
+ *   engine-ui-cases.ts           screen, Selenium baseline, browser compatibility
+ *   engine-quality-cases.ts      performance, endurance, upgrade, robustness, security,
+ *                                chaos, compliance, recovery
+ *
+ * engine-case-kit.ts explains what a case needs from its target (read-only,
+ * sandbox, isolated) and how it skips where that is missing.
  */
 import type { CaseDef, SuiteDef, TypeMeta } from './types.js';
+import { ENGINE_FUNCTIONAL_CASES } from './engine-functional-cases.js';
+import { ENGINE_UI_CASES } from './engine-ui-cases.js';
+import { ENGINE_QUALITY_CASES } from './engine-quality-cases.js';
 
 export const ENGINE_TYPES: TypeMeta[] = [
-  { key: 'smoke', label: 'Smoke tests', subtitle: 'Engine control plane answers.', category: 'qa' },
-  { key: 'api', label: 'API tests', subtitle: 'Repository, execution and readiness APIs behave to contract.', category: 'qa' },
+  { key: 'smoke', label: 'Smoke tests', subtitle: 'Control plane, console and SIT console answer after a deploy.', category: 'qa' },
+  { key: 'api', label: 'API tests', subtitle: 'Every control-plane endpoint behaves to its contract.', category: 'qa' },
+  { key: 'integration', label: 'Integration tests', subtitle: 'Repository, run planner, worker protocol, schedules and build reports working together.', category: 'qa' },
+  { key: 'screen', label: 'Screen tests', subtitle: 'Real-browser rendering of the unified console.', category: 'qa' },
+  { key: 'usecase', label: 'Use case driven tests', subtitle: 'What a pipeline, an operator and a release manager do with the engine, end to end.', category: 'qa' },
+  { key: 'regression', label: 'Regression tests', subtitle: 'Response shapes, error copy and fixed defects that must not drift.', category: 'qa' },
+  { key: 'dataQuality', label: 'Data quality tests', subtitle: 'The engine\'s own records agree across its read paths.', category: 'qa' },
+  { key: 'selenium-baseline', label: 'Selenium Baseline', subtitle: 'Selenium WebDriver baseline against the unified console.', category: 'qa' },
+  { key: 'performance', label: 'Performance tests', subtitle: 'Latency benchmarks with explicit SLAs on the endpoints the console and workers poll.', category: 'qc' },
+  { key: 'endurance', label: 'Endurance tests', subtitle: 'Bounded soak: the load an open console and a polling worker put on the engine all day.', category: 'qc' },
+  { key: 'rollingUpgrade', label: 'Rolling upgrade tests', subtitle: 'Contracts an older worker, console or CI reporter depends on stay intact.', category: 'qc' },
+  { key: 'nonFunctional', label: 'Non-functional tests', subtitle: 'Bad input fails cleanly: a 4xx with a reason, never a 500.', category: 'qc' },
+  { key: 'vulnerabilityScanning', label: 'Vulnerability scanning', subtitle: 'Exposure probes: secret files, traversal, error leakage, header hygiene.', category: 'qc' },
+  { key: 'penTesting', label: 'Penetration tests', subtitle: 'Forged results, hostile uploads and injection against the write surface.', category: 'qc' },
+  { key: 'compatibility', label: 'Compatibility tests', subtitle: 'The console in Chromium, Firefox and WebKit across four screen sizes.', category: 'qc' },
+  { key: 'chaos', label: 'Chaos & failover tests', subtitle: 'Misbehaving workers and request storms do not corrupt a run.', category: 'qc' },
+  { key: 'compliance', label: 'Compliance tests', subtitle: 'Audit trail, evidence gate, safety policy and secrets handling.', category: 'qc' },
+  { key: 'drRecovery', label: 'DR recovery & self-healing', subtitle: 'Abandoned runs recover; what was written stays readable everywhere.', category: 'qc' },
 ];
 
 export const ENGINE_SUITES: SuiteDef[] = [
-  { key: 'te-smoke', name: 'Engine smoke', description: 'The control plane and its UI shell are up.', typeKey: 'smoke', category: 'qa' },
-  { key: 'te-self-api', name: 'Engine API self-tests', description: 'The engine\'s own repository/execution/readiness APIs verified over HTTP — the engine testing itself like any other application.', typeKey: 'api', category: 'qa' },
+  { key: 'te-smoke', name: 'Engine smoke', description: 'The control plane, its database, the console shell and the embedded SIT console are up.', typeKey: 'smoke', category: 'qa' },
+  { key: 'te-self-api', name: 'Engine API contracts', description: 'The engine\'s own repository, execution, run and read-model APIs verified over HTTP.', typeKey: 'api', category: 'qa' },
+  { key: 'te-integration', name: 'Engine component flows', description: 'Case lifecycle, suite membership, run planning, the worker protocol, schedules and build-result ingest.', typeKey: 'integration', category: 'qa' },
+  { key: 'te-screen', name: 'Console screens', description: 'Playwright-rendered checks of the unified console.', typeKey: 'screen', category: 'qa' },
+  { key: 'te-usecase', name: 'Engine use cases', description: 'Pipeline-triggered runs, failure triage, release readiness and agent access, end to end.', typeKey: 'usecase', category: 'qa' },
+  { key: 'te-regression', name: 'Engine behavior contracts', description: 'Shapes, copy and fixed defects re-checked on every run.', typeKey: 'regression', category: 'qa' },
+  { key: 'te-data-quality', name: 'Engine data consistency', description: 'Counts, enums, references and integrity hashes agree across the engine\'s read paths.', typeKey: 'dataQuality', category: 'qa' },
+  { key: 'te-selenium-baseline', name: 'Console Selenium baseline', description: 'Selenium WebDriver baseline: the console loads, navigates and lists its applications.', typeKey: 'selenium-baseline', category: 'qa' },
+  { key: 'te-performance', name: 'Engine latency benchmarks', description: 'Short concurrent benchmarks with explicit p95 / error-rate SLAs.', typeKey: 'performance', category: 'qc' },
+  { key: 'te-endurance', name: 'Engine bounded soak', description: 'Sustained request streams; the engine must stay healthy throughout.', typeKey: 'endurance', category: 'qc' },
+  { key: 'te-rolling-upgrade', name: 'Engine upgrade compatibility', description: 'Addressing schemes, legacy fields and feature-detection contracts older clients rely on.', typeKey: 'rollingUpgrade', category: 'qc' },
+  { key: 'te-non-functional', name: 'Engine robustness', description: 'Malformed, out-of-range and misrouted requests fail cleanly.', typeKey: 'nonFunctional', category: 'qc' },
+  { key: 'te-vuln-scan', name: 'Engine exposure scanning', description: 'Secret-file probes, path traversal, error leakage and response headers.', typeKey: 'vulnerabilityScanning', category: 'qc' },
+  { key: 'te-pen', name: 'Engine write-surface attacks', description: 'Forged results, hostile evidence uploads, mass assignment and injection.', typeKey: 'penTesting', category: 'qc' },
+  { key: 'te-compat-browsers', name: 'Console browser & viewport matrix', description: 'Chromium, Firefox and WebKit at desktop/laptop/tablet/mobile sizes.', typeKey: 'compatibility', category: 'qc' },
+  { key: 'te-chaos', name: 'Engine graceful degradation', description: 'Duplicate, late and partial worker reports, error floods and read storms.', typeKey: 'chaos', category: 'qc' },
+  { key: 'te-compliance', name: 'Engine compliance evidence', description: 'Audit events, exit criteria, safety policy and secrets by reference.', typeKey: 'compliance', category: 'qc' },
+  { key: 'te-dr', name: 'Engine durability & recovery', description: 'Abandoned-run recovery, idempotent re-reports and multi-path read consistency.', typeKey: 'drRecovery', category: 'qc' },
 ];
 
-const C: CaseDef[] = [];
-
-function api(key: string, name: string, description: string, steps: unknown[], opts: Partial<CaseDef> = {}): CaseDef {
-  return {
-    key, name, description,
-    suiteKey: 'te-self-api', testType: 'api', method: 'http',
-    severity: 'high', priority: 'p1',
-    preconditions: 'Test Engine API reachable at the environment\'s {{engine}} base URL.',
-    steps,
-    tags: ['api', 'test-engine', 'self-test'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: 'Documented contract holds.',
-    ...opts,
-  };
-}
-
-C.push(
-  api('TE-SMOKE-HEALTH', 'Engine health endpoint answers', 'GET {{engine}}/health must identify the service ("gavriq-test-engine") with a version and UI enabled.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/health', expected_status: 200, expect_json: [{ path: 'status', equals: 'ok' }, { path: 'service', equals: 'gavriq-test-engine' }, { path: 'version', exists: true }], description: 'engine /health' },
-  ], { suiteKey: 'te-smoke', testType: 'smoke', severity: 'critical', priority: 'p0' }),
-
-  api('TE-SMOKE-READY', 'Engine readiness probe answers', 'GET {{engine}}/ready must return {"status":"ready"}.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/ready', expected_status: 200, expect_json: [{ path: 'status', equals: 'ready' }], description: 'engine /ready' },
-  ], { suiteKey: 'te-smoke', testType: 'smoke', severity: 'critical', priority: 'p0' }),
-
-  api('TE-SMOKE-UI-SHELL', 'Unified console shell is served', 'GET {{engine}}/ must serve the unified console HTML (title "GAVRIQ Test Engine").', [
-    { action: 'request', method: 'GET', url: '{{engine}}/', expected_status: 200, expected_body_contains: 'GAVRIQ Test Engine', description: 'console shell' },
-  ], { suiteKey: 'te-smoke', testType: 'smoke', severity: 'high', priority: 'p0' }),
-
-  api('TE-API-META', 'Capability map is published', 'GET /api/v1/meta must publish the engine version and capability map that clients feature-detect against (verified shape: top-level service/version/capabilities).', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/meta', expected_status: 200, expect_json: [{ path: 'service', equals: 'gavriq-test-engine' }, { path: 'capabilities.repository', equals: true }, { path: 'version', exists: true }], description: 'meta' },
-  ]),
-
-  api('TE-API-APPLICATIONS', 'Application registry is multi-tenant', 'GET /api/v1/applications must list at least two registered applications (Sand Bench plus this engine) — the proof of generic multi-application support.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/applications', expected_status: 200, expect_json: [{ path: 'data', min_length: 2 }, { path: 'data', contains: '"key":"sand-bench"' }, { path: 'data', contains: '"key":"gavriq-test-engine"' }], description: 'applications' },
-  ], { severity: 'critical', priority: 'p0' }),
-
-  api('TE-API-TEST-CASES', 'Repository lists cases with pagination contract', 'GET /api/v1/test-cases?limit=5 must return data rows plus a numeric total — the pagination contract the console relies on.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/test-cases?limit=5', expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }, { path: 'total', min: 1 }], description: 'test-cases page' },
-  ]),
-
-  api('TE-API-CASE-DETAIL', 'Case detail includes version history', 'Fetch one known case by key (TE-SMOKE-HEALTH): the detail payload must include its version list.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/test-cases/TE-SMOKE-HEALTH', expected_status: 200, expect_json: [{ path: 'data.key', equals: 'TE-SMOKE-HEALTH' }, { path: 'data.versions', exists: true }], description: 'case detail' },
-  ]),
-
-  api('TE-API-SUITES', 'Suites are filterable by application', 'GET /api/v1/suites must return suites; the engine\'s own suites (te-*) must be present.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/suites', expected_status: 200, expect_json: [{ path: 'data', contains: '"key":"te-self-api"' }], description: 'suites' },
-  ]),
-
-  api('TE-API-ENVIRONMENTS', 'Environment registry with safety policies', 'GET /api/v1/environments must list environments including the Sand Bench target and expose safety_policy JSON.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/environments', expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }, { path: 'data', contains: 'sand-bench-local' }], description: 'environments' },
-  ]),
-
-  api('TE-API-EXEC-VALIDATION', 'Execution queue validates its input', 'POST /api/v1/executions with an empty body must be rejected with 400 — no unconstrained executions can enter the queue.', [
-    { action: 'request', method: 'POST', url: '{{engine}}/api/v1/executions', body: {}, expected_status: 400, description: 'reject empty execution' },
-  ], {
-    dataProfile: { profile: 'negative', data: 'Empty JSON body.', source: 'Hand-crafted.' },
-    expected: '400 with validation error.',
-  }),
-
-  api('TE-API-EXECUTIONS-LIST', 'Execution history is queryable', 'GET /api/v1/executions must return the recent execution list (array).', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/executions', expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'executions' },
-  ]),
-
-  api('TE-API-UI-SUMMARY', 'Console read-model answers per application', 'GET /api/v1/ui/summary?application_key=sand-bench must return the console\'s boot payload: cases, suites, environments scoped to the application.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/ui/summary?application_key=sand-bench', expected_status: 200, expect_json: [{ path: 'data.cases', exists: true }, { path: 'data.suites', exists: true }, { path: 'data.environments', exists: true }], description: 'ui summary' },
-  ]),
-
-  api('TE-API-DASHBOARD', 'Dashboard aggregates answer', 'GET /api/v1/dashboard must return repository aggregates.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/dashboard', expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'dashboard' },
-  ]),
-
-  api('TE-API-RELEASE-READINESS', 'Release readiness verdict is computable', 'GET /api/v1/release-readiness must return a readiness verdict object.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/release-readiness', expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'release readiness' },
-  ]),
-
-  api('TE-API-SIT-CATALOG', 'SIT catalog is importable and listed', 'GET /api/v1/sit-catalog must return the SIT packs the engine imported from sit/cases.', [
-    { action: 'request', method: 'GET', url: '{{engine}}/api/v1/sit-catalog', expected_status: 200, description: 'sit catalog' },
-  ]),
-
-  api('TE-API-RUN-ALL-DRYRUN', 'Run-everything endpoint validates and previews', 'POST /api/v1/executions/run-all with dry_run=true must return the per-suite plan (suites + case counts) without queueing anything — the contract behind the console\'s "Run everything" button.', [
-    { action: 'request', method: 'POST', url: '{{engine}}/api/v1/executions/run-all', body: { application_key: 'sand-bench', dry_run: true }, expected_status: 200, expect_json: [{ path: 'data.suites', min_length: 1 }, { path: 'data.total_cases', min: 1 }], description: 'run-all dry run' },
-  ], {
-    dataProfile: { profile: 'none (dry run)', data: '{"application_key":"sand-bench","dry_run":true} — queues nothing.', source: 'Hand-crafted.' },
-    expected: '200 with the suite-by-suite execution plan.',
-  })
-);
-
-export const ENGINE_CASES: CaseDef[] = C;
+export const ENGINE_CASES: CaseDef[] = [...ENGINE_FUNCTIONAL_CASES, ...ENGINE_UI_CASES, ...ENGINE_QUALITY_CASES];

@@ -255,6 +255,13 @@ export async function executionRoutes(app: FastifyInstance) {
     });
   });
 
+  // Status only — what a worker polls while it runs a job, to learn it was cancelled.
+  app.get<{ Params: { id: string } }>('/api/v1/executions/:id/status', async (req, reply) => {
+    const { rows } = await query('SELECT id, status FROM executions WHERE id::text = $1 OR key = $1', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
+    return reply.send({ data: rows[0] });
+  });
+
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
     const { rows } = await query(
       `UPDATE executions SET status = 'cancelled', finished_at = now()
@@ -266,6 +273,28 @@ export async function executionRoutes(app: FastifyInstance) {
     await audit(req, 'execution.cancel', 'execution', rows[0].id, {});
     return reply.send({ data: rows[0] });
   });
+
+  // Bulk stop: every queued/preparing/running execution, optionally narrowed to
+  // one application/environment. Unscoped (no body) cancels everything in flight —
+  // the "Cancel all" action behind the console's Running Now tab.
+  app.post<{ Body: { application_key?: string; environment_id?: string } }>(
+    '/api/v1/executions/cancel-all',
+    async (req, reply) => {
+      const b = req.body || {};
+      const clauses = [`status IN ('queued','preparing','running')`];
+      const params: unknown[] = [];
+      if (b.application_key) { params.push(b.application_key); clauses.push(`metadata->>'application_key' = $${params.length}`); }
+      if (b.environment_id) { params.push(b.environment_id); clauses.push(`environment_id::text = $${params.length}`); }
+      const { rows } = await query(
+        `UPDATE executions SET status = 'cancelled', finished_at = now()
+         WHERE ${clauses.join(' AND ')}
+         RETURNING id`,
+        params
+      );
+      await audit(req, 'execution.cancel_all', 'application', undefined, { cancelled: rows.length, ...b });
+      return reply.send({ data: { cancelled: rows.length } });
+    }
+  );
 
   app.post<{ Body: { worker_id: string; capabilities?: string[] } }>(
     '/api/v1/executions/claim',
@@ -298,9 +327,17 @@ export async function executionRoutes(app: FastifyInstance) {
            LIMIT 1`
         );
         if (!rows[0]) return null;
+        // The run records the build it is about to test: the commit registered on the
+        // environment (config.deployment) at the moment a worker starts. A build the
+        // caller passed in metadata.build (a deploy pipeline knows best) is kept.
         const { rows: updated } = await client.query(
-          `UPDATE executions SET status = 'running', worker_id = $2, started_at = now()
-           WHERE id = $1 RETURNING *`,
+          `UPDATE executions e SET status = 'running', worker_id = $2, started_at = now(),
+                  metadata = COALESCE((
+                    SELECT jsonb_build_object('build', env.config->'deployment')
+                    FROM environments env
+                    WHERE env.id = e.environment_id AND jsonb_typeof(env.config->'deployment') = 'object'
+                  ), '{}'::jsonb) || e.metadata
+           WHERE e.id = $1 RETURNING *`,
           [rows[0].id, workerId]
         );
         await client.query(
@@ -321,10 +358,14 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const exec = await query(
-        'SELECT id FROM executions WHERE id::text = $1 OR key = $1',
+        'SELECT id, status FROM executions WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
+      // A cancelled run takes no more results: the worker reads this as "stop".
+      if (exec.rows[0].status === 'cancelled') {
+        return reply.status(409).send({ error: 'Execution was cancelled', code: 'execution_cancelled' });
+      }
 
       const { rows } = await query(
         `INSERT INTO execution_results (
@@ -360,8 +401,12 @@ export async function executionRoutes(app: FastifyInstance) {
     '/api/v1/executions/:id/complete',
     async (req, reply) => {
       const status = req.body?.status || 'passed';
+      // "Cancelled" is final: a worker finishing up (or an older worker that never
+      // noticed the cancel) must not turn the run back into passed/failed.
       const { rows } = await query(
-        `UPDATE executions SET status = $2, finished_at = now()
+        `UPDATE executions SET
+           status = CASE WHEN status = 'cancelled' THEN status ELSE $2::execution_status END,
+           finished_at = CASE WHEN status = 'cancelled' THEN COALESCE(finished_at, now()) ELSE now() END
          WHERE id::text = $1 OR key = $1 RETURNING *`,
         [req.params.id, status]
       );

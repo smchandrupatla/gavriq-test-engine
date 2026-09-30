@@ -26,6 +26,8 @@ export interface SitRunInput {
    */
   vars?: Record<string, string>;
   timeoutSeconds?: number;
+  /** Aborted when the run is cancelled: the case's process tree and any browser it left open are killed. */
+  signal?: AbortSignal;
 }
 
 export interface SitRunResult {
@@ -99,11 +101,13 @@ async function seleniumUrl(): Promise<string | undefined> {
   if (!bin || !existsSync(bin)) return undefined;
 
   const port = await freePort();
-  const child = spawn(bin, [`--port=${port}`], { stdio: 'ignore' });
+  // Own process group: the browsers it launches belong to it, not to the case
+  // that asked for them, so the whole group can be taken down together.
+  const child = spawn(bin, [`--port=${port}`], { stdio: 'ignore', detached: process.platform !== 'win32' });
   child.on('exit', () => {
     if (driver?.child === child) driver = null;
   });
-  process.once('exit', () => child.kill());
+  process.once('exit', () => killTree(child.pid));
   const url = `http://127.0.0.1:${port}`;
   for (let attempt = 0; attempt < 40; attempt++) {
     if (await driverReady(url)) {
@@ -155,6 +159,19 @@ function killTree(pid: number | undefined) {
   } catch {
     /* already gone */
   }
+}
+
+/**
+ * A case that is killed (timeout, cancel) or crashes never sends the WebDriver
+ * "delete session", so the browser it opened on the shared ChromeDriver would
+ * run forever. The driver and every browser under it are dropped instead; the
+ * next case that needs one starts a fresh driver.
+ */
+function recycleDriver() {
+  if (!driver) return;
+  const stale = driver;
+  driver = null;
+  killTree(stale.child.pid);
 }
 
 interface TapSummary {
@@ -223,7 +240,8 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
     : ['--test', '--test-reporter=tap', '--experimental-strip-types', ...extra, abs];
 
   const env = sitEnv(input);
-  if (usesRawWebDriver(abs)) {
+  const sharedDriver = usesRawWebDriver(abs);
+  if (sharedDriver) {
     const url = await seleniumUrl();
     if (url) env.SIT_SELENIUM_URL = url;
   }
@@ -246,11 +264,21 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      input.signal?.removeEventListener('abort', onAbort);
       resolve({ ...result, output: (stdout || stderr).slice(0, MAX_OUTPUT) });
     };
     const metrics = { file: parsed.fileRel, test_name: parsed.testName || null };
-    const timer = setTimeout(() => {
+    /** Stop the case now: its own process tree, and the browsers it left on the shared driver. */
+    const stop = () => {
       killTree(child.pid);
+      if (sharedDriver) recycleDriver();
+    };
+    const onAbort = () => {
+      stop();
+      finish({ status: 'error', message: 'Run cancelled', duration_ms: Date.now() - start, classification: 'unknown', metrics });
+    };
+    const timer = setTimeout(() => {
+      stop();
       finish({
         status: 'failed',
         message: `SIT timed out after ${timeoutSeconds}s`,
@@ -259,6 +287,8 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
         metrics,
       });
     }, timeoutMs);
+    if (input.signal?.aborted) onAbort();
+    else input.signal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdout.on('data', (c) => { stdout += c; });
     child.stderr.on('data', (c) => { stderr += c; });
@@ -272,6 +302,8 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
       });
     });
     child.on('close', (code) => {
+      // A case that died without a clean exit may not have closed its browser session.
+      if (sharedDriver && code !== 0 && !settled) recycleDriver();
       const tap = parseTap(stdout);
       const counts = { ...metrics, exit_code: code, tests: tap.tests, passed: tap.pass, failed: tap.fail, skipped: tap.skipped };
       const duration_ms = Date.now() - start;

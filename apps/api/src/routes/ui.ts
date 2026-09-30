@@ -10,6 +10,7 @@ import { query } from '../db/client.js';
  *
  *   GET  /api/v1/ui/summary          one call: cases (compact + last status), suites, envs, build summary
  *   GET  /api/v1/ui/live?since=      poll: executions with progress, workers, case statuses changed since
+ *   GET  /api/v1/ui/runs             full, paginated, filterable run history (environment/status/date range)
  *   GET  /api/v1/ui/executions/:id   run screen: per-case results without evidence bodies
  *   POST /api/v1/ui/history          tile graph: per-run pass/fail for a set of cases
  *   GET  /api/v1/ui/build-history    tile graph: per-build pass/fail for in-container results
@@ -21,6 +22,9 @@ import { query } from '../db/client.js';
 const ACTIVE = `('queued','preparing','running')`;
 const FAILED = `('failed','error','timed_out')`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const STATUSES: Set<string> = new Set([
+  'queued', 'preparing', 'running', 'passed', 'failed', 'skipped', 'blocked', 'cancelled', 'error', 'timed_out',
+]);
 
 function clampInt(v: unknown, def: number, max: number): number {
   const n = Number(v);
@@ -312,6 +316,58 @@ export async function uiRoutes(app: FastifyInstance) {
         totals: totals.rows[0],
       },
     });
+  });
+
+  /**
+   * Full run history, paginated and filterable — unlike /ui/live (active runs +
+   * a capped recent tail for the nav badge/live board), this is the source for
+   * the Test Runs page's table so every run is reachable, not just the last N.
+   */
+  app.get('/api/v1/ui/runs', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const envId = await resolveEnvironmentId(q.environment_id);
+    const status = typeof q.status === 'string' && STATUSES.has(q.status) ? q.status : null;
+    const from = parseSince(q.from);
+    const to = parseSince(q.to);
+    const limit = clampInt(q.limit, 50, 200);
+    const offset = Math.max(0, Math.floor(Number(q.offset) || 0));
+
+    const clauses = [`e.metadata->>'application_key' = $1`];
+    const params: unknown[] = [appKey];
+    if (envId) { params.push(envId); clauses.push(`e.environment_id = $${params.length}`); }
+    if (status) { params.push(status); clauses.push(`e.status = $${params.length}::execution_status`); }
+    if (from) { params.push(from); clauses.push(`e.created_at >= $${params.length}::timestamptz`); }
+    if (to) { params.push(to); clauses.push(`e.created_at <= $${params.length}::timestamptz`); }
+    const where = clauses.join(' AND ');
+
+    const [rows, total] = await Promise.all([
+      query(
+        `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.environment_id,
+                env.name AS environment_name, e.created_at, e.started_at, e.finished_at,
+                cardinality(e.test_case_ids)::int AS total,
+                COALESCE(r.done, 0)::int AS done,
+                COALESCE(r.passed, 0)::int AS passed,
+                COALESCE(r.failed, 0)::int AS failed,
+                COALESCE(app.name, e.metadata->>'application_key') AS application_name
+         FROM executions e
+         LEFT JOIN environments env ON env.id = e.environment_id
+         LEFT JOIN applications app ON app.key = e.metadata->>'application_key'
+         LEFT JOIN LATERAL (
+           SELECT count(*) AS done,
+                  count(*) FILTER (WHERE status = 'passed') AS passed,
+                  count(*) FILTER (WHERE status IN ${FAILED}) AS failed
+           FROM execution_results WHERE execution_id = e.id
+         ) r ON true
+         WHERE ${where}
+         ORDER BY e.created_at DESC
+         LIMIT ${limit} OFFSET ${offset}`,
+        params
+      ),
+      query(`SELECT count(*)::int AS c FROM executions e WHERE ${where}`, params),
+    ]);
+
+    return reply.send({ data: rows.rows, total: total.rows[0]?.c ?? 0, limit, offset });
   });
 
   app.get('/api/v1/ui/build-history', async (req, reply) => {

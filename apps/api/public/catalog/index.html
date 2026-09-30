@@ -41,7 +41,8 @@ button,select,input{font:inherit;color:inherit}
 .topbar h1{font-size:18px;margin:0;flex:0 0 auto}
 .icon-btn{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:6px;width:34px;height:34px;cursor:pointer;display:none}
 .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
-input[type=search],select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+input[type=search],input[type=date],input[type=datetime-local],input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+input[type=date],input[type=datetime-local]{color-scheme:dark}
 #globalSearch{width:220px}
 .pill{font-size:11px;padding:4px 9px;border-radius:12px;background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
 .pill.ok{color:var(--green);border-color:var(--green-soft)}.pill.bad{color:var(--red);border-color:var(--red-soft)}
@@ -218,6 +219,64 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
 .run-tile{display:flex;flex-direction:column;gap:6px;min-width:180px;flex:1 1 200px;text-align:left;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:inherit;font:inherit;cursor:pointer}
 .run-tile:hover{border-color:var(--gold)}
 .run-tile-name{font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.run-case-bar{display:flex;gap:8px;align-items:center;margin-top:4px}
+.field-error{color:var(--red);font-size:12px;margin-top:8px}
+/* Overview: run-by-type multi-select */
+.type-check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px 14px}
+.type-check{display:flex;align-items:center;gap:6px;font-size:13px}
+.type-check input:disabled{opacity:.5}
+/* Forms (Schedule runs, Reports) */
+.form-row{display:grid;grid-template-columns:130px minmax(0,1fr);gap:6px 14px;align-items:start;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.form-row:last-child{border-bottom:none}
+.form-label{color:var(--muted);font-size:12px;padding-top:7px}
+.radio-row{display:flex;flex-wrap:wrap;gap:6px 18px;padding-top:6px}
+.report-scope ul{margin:6px 0 0;padding-left:18px;font-size:13px}.report-scope{border-left:3px solid var(--gold)}
+@media(max-width:700px){.form-row{grid-template-columns:1fr}.form-label{padding-top:0}}
+/* Quality insights (insights.js) */
+.qi-top{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
+.qi-two,.hp-charts.qi-even{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.hp-charts.qi-even{gap:14px;align-items:start}
+@media(max-width:980px){.qi-top,.qi-two,.hp-charts.qi-even{grid-template-columns:minmax(0,1fr)}}
+.qi-verdict-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.qi-headline{font-size:18px;line-height:1.35;margin:0 0 10px;font-weight:600}
+.qi-verdict p,.qi-review p,.qi-finding p,.qi-suggest p,.qi-two p{margin:0 0 8px;max-width:78ch}
+.qi-hero{display:flex;align-items:baseline;gap:8px}
+.qi-hero-value{font-size:52px;font-weight:600;line-height:1}.qi-hero-of{color:var(--muted);font-size:16px}
+.qi-components{display:grid;gap:10px;margin-top:14px}
+.qi-comp{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:baseline}
+.qi-comp-label{font-size:13px}.qi-comp-value{font-weight:600;font-variant-numeric:tabular-nums}
+.qi-comp-basis{grid-column:1/-1}
+/* Meter: the fill carries severity, the track is a lighter step of the same hue. */
+.qi-meter{grid-column:1/-1;display:block;height:6px;border-radius:3px;overflow:hidden}
+.qi-meter i{display:block;height:100%;border-radius:3px}
+.qi-meter.pass{background:rgba(18,165,148,.18)}.qi-meter.pass i{background:var(--viz-pass)}
+.qi-meter.warn{background:rgba(232,184,75,.18)}.qi-meter.warn i{background:var(--amber)}
+.qi-meter.fail{background:rgba(229,72,77,.2)}.qi-meter.fail i{background:var(--viz-fail)}
+.qi-delta{font-size:11px;color:var(--muted)}.qi-delta.good{color:var(--green)}.qi-delta.bad{color:var(--red)}
+.qi-hash{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--text)}
+.chart.qi-chart{min-height:0}
+.qi-note{margin:-2px 0 6px}
+.qi-activity{margin-top:14px}
+.qi-envs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(400px,100%),1fr));gap:16px;margin:16px 0}
+.qi-envs .card{margin-bottom:0}.qi-env.retired{opacity:.72}
+.qi-env .hp-stats{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}
+.qi-build{margin-bottom:12px;font-size:13px}.qi-warn{color:var(--amber)}
+.qi-envmeter{margin:6px 0;height:8px}
+.qi-sub{margin-top:10px;font-size:12px}
+.qi-builds{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:4px}.qi-builds li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.qi-review{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.qi-list{margin:0 0 8px;padding-left:18px;display:grid;gap:4px;max-width:82ch}
+.qi-list.evidence{color:var(--muted);font-size:12px}
+.qi-findings,.qi-suggest{list-style:none;margin:0;padding:0}
+.qi-finding{padding:14px 16px;border-bottom:1px solid var(--line-soft)}.qi-finding:last-child{border-bottom:none}
+.qi-finding-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.qi-finding .chip{text-transform:capitalize}
+.qi-keys{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px}
+.qi-suggest li{padding:10px 0;border-bottom:1px solid var(--line-soft)}.qi-suggest li:last-child{border-bottom:none}
+.qi-suggest+.dlg-h{margin-top:14px}
+.qi-notice{border-left:3px solid var(--amber)}.qi-pending{border-left:3px solid var(--blue)}
+.tabs.qi-tabs{flex-wrap:wrap;gap:0 16px}
+.qi-pair{display:inline-flex;gap:6px;align-items:center;margin-right:12px}
 .toast-wrap{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
 .toast{background:var(--panel2);border:1px solid var(--gold);color:var(--text);padding:10px 14px;border-radius:8px;font-size:13px;max-width:340px;box-shadow:0 6px 20px #0008}
 @media(max-width:860px){.topbar{position:static}#livePill{display:none}.icon-btn{display:inline-block}.sidebar{position:fixed;left:0;top:0;bottom:0;z-index:20;transform:translateX(-100%);transition:transform .18s ease}.sidebar.open{transform:translateX(0)}#globalSearch{width:140px}}
@@ -259,6 +318,7 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
 </div>
 <div class="toast-wrap" id="toastWrap"></div>
 <script src="/catalog/charts.js"></script>
+<script src="/catalog/insights.js"></script>
 <script src="/catalog/app.js"></script>
 </body>
 </html>

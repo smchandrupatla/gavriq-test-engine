@@ -54,13 +54,24 @@ const state={
   // UI
   envId:null,headed:false,search:'',selected:new Set(),rowLimit:ROWS,tile:null,tiles:new Map(),panels:new Set(),
   history:new Map(),charts:new Map(),open:new Set(),section:null,live:{inRun:new Map(),current:new Set()},
-  run:null,evidence:new Map(),buildRows:null,
+  run:null,buildRows:null,
   // Inline case detail (replaces the old modal): #/case/:id and #/case/:id/runs
   caseId:null,caseTab:'details',caseDetail:null,
   // Filter views reached from case-detail links
   methodName:null,tagName:null,
   // Configuration page (run retention)
   settings:null,
+  // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
+  runsFilter:{environment_id:'',status:'',from:'',to:''},
+  runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
+  // Overview: multi-select test types to run together, and which of its tabs is open
+  selectedTypes:new Set(),overviewTab:'summary',
+  // Schedule runs: list (null = not loaded) + the create form. "What to run" is a scope, not a saved suite.
+  schedules:null,schedFormOpen:false,
+  schedForm:{name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:'',when:'once',at:'',cron:'0 2 * * *'},
+  // Reports: filter form + the last preview
+  reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
+  report:{data:null,loading:false,error:null,busy:''},
 };
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -222,11 +233,18 @@ async function applyLive(d){
   const sig=JSON.stringify([state.executions.map(e=>[e.id,e.status,e.done,e.current_case_id,isStalled(e)]),state.workers.map(workerFresh)]);
   if(sig!==state.liveSig){state.liveSig=sig;dirty=true;}
   renderWorkerPill();renderBanner();
-  if(dirty){renderSideNav();renderCurrentView();}
+  // Form screens show no live data; re-rendering them on a poll would wipe what is being typed.
+  if(dirty){renderSideNav();if(!FORM_VIEWS.has(state.view))renderCurrentView();}
 }
+const FORM_VIEWS=new Set(['config','schedules','reports','case']);
 async function loadRun(id){
-  try{state.run=(await api('/api/v1/ui/executions/'+encodeURIComponent(id))).data;}
-  catch(e){state.run={id,error:e.message};}
+  try{
+    const [run,ev]=await Promise.all([
+      api('/api/v1/ui/executions/'+encodeURIComponent(id)),
+      api('/api/v1/executions/'+encodeURIComponent(id)+'/evidence').catch(()=>({data:[]})),
+    ]);
+    state.run={...run.data,evidence:ev.data||[]};
+  }catch(e){state.run={id,error:e.message};}
 }
 async function loadCaseDetail(id){
   try{
@@ -244,6 +262,28 @@ async function loadBuildRows(){
 async function loadSettings(){
   try{state.settings=(await api('/api/v1/settings')).data;}catch(e){state.settings={error:e.message};}
   if(state.view==='config')renderCurrentView();
+}
+const RUNS_PAGE=25;
+function runsQuery(){
+  const f=state.runsFilter;
+  let q=appQuery();
+  if(f.environment_id)q+='&environment_id='+encodeURIComponent(f.environment_id);
+  if(f.status)q+='&status='+encodeURIComponent(f.status);
+  if(f.from)q+='&from='+encodeURIComponent(f.from);
+  if(f.to)q+='&to='+encodeURIComponent(f.to);
+  return q;
+}
+async function loadRunsList(reset){
+  if(state.runsList.loading)return;
+  const offset=reset?0:state.runsList.offset;
+  state.runsList={...state.runsList,loading:true};
+  if(state.view==='history')renderCurrentView();
+  try{
+    const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+RUNS_PAGE+'&offset='+offset);
+    const rows=reset?(res.data||[]):[...state.runsList.rows,...(res.data||[])];
+    state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true};
+  }catch(e){state.runsList={...state.runsList,loading:false,loaded:true,error:e.message};}
+  if(state.view==='history')renderCurrentView();
 }
 function markHistoryStale(){for(const h of state.history.values())h.stale=true;}
 async function loadHistory(tile){
@@ -406,6 +446,7 @@ function drawCharts(){document.querySelectorAll('#content [data-chart]').forEach
 // ---------------------------------------------------------------------------
 function caseTable(cases){
   const shown=cases.slice(0,state.rowLimit);
+  const allSelected=shown.length>0&&shown.every(c=>state.selected.has(c.id));
   const rows=shown.map(c=>{
     const st=c.last_status?{status:c.last_status}:null;
     const now=state.live.current.has(c.id),inRun=state.live.inRun.get(c.id);
@@ -413,13 +454,13 @@ function caseTable(cases){
     return `<tr${now?' class="row-running"':''}><td><button class="case-name" data-case="${esc(c.id)}">${esc(c.name)}</button>${c._type==='sit'?' <span class="badge sit">SIT</span>':''}<div class="key small">${esc(c.key)}</div></td><td>${status}</td><td>${esc(c.execution_method||c.test_type||'—')}</td><td>${esc(secs(c.last_duration_ms))}</td><td class="muted small" title="${esc(when(c.last_at))}">${c.last_at?`<span data-ago="${esc(c.last_at)}">${ago(c.last_at)}</span>`:'Never'}</td><td><input type="checkbox" aria-label="Select ${esc(c.name)}" data-sel="${esc(c.id)}"${state.selected.has(c.id)?' checked':''}></td></tr>`;
   }).join('');
   const more=cases.length>shown.length?`<div class="more"><button class="btn" data-action="more">Show ${Math.min(ROWS,cases.length-shown.length)} more</button><span class="muted small">${shown.length} of ${cases.length} shown</span></div>`:'';
-  return `<div class="table-wrap"><table><thead><tr><th>Test case</th><th>Status</th><th>Method</th><th>Duration</th><th>Last run</th><th><span class="sr-only">Select</span></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No cases.</td></tr>'}</tbody></table></div>${more}`;
+  return `<div class="table-wrap"><table><thead><tr><th>Test case</th><th>Status</th><th>Method</th><th>Duration</th><th>Last run</th><th><input type="checkbox" aria-label="Select all shown" data-selall="1"${allSelected?' checked':''}${shown.length?'':' disabled'}></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No cases.</td></tr>'}</tbody></table></div>${more}`;
 }
 function runSelLabel(){return 'Run selected'+(state.selected.size?' ('+state.selected.size+')':'');}
 function caseSectionHtml(o){
   state.section={ids:o.cases.map(c=>c.id),suiteId:o.suiteId||null,label:o.label||o.title};
   const cases=filterCases(o.cases);
-  return `<div class="card" id="details"><div class="card-head"><div><h2>${esc(o.title)}</h2>${o.sub?`<div class="muted small">${esc(o.sub)}</div>`:''}</div><div class="hp-actions">${o.clear?'<button class="btn" data-action="clear-suite">Show all cases</button>':''}<button class="btn" data-action="run-selected"${state.selected.size?'':' disabled'}>${runSelLabel()}</button><button class="btn ${o.sit?'sit':'primary'}" data-action="run-section"${o.cases.length?'':' disabled'}>${o.suiteId?'Run suite':'Run all'} (${o.cases.length})</button></div></div><div class="toolbar"><span class="muted small">${plural(cases.length,'case')}${state.search?' matching “'+esc(state.search)+'”':''}</span>${o.note?`<span class="muted small">${esc(o.note)}</span>`:''}</div>${caseTable(cases)}</div>`;
+  return `<div class="card" id="details"><div class="card-head"><div><h2>${esc(o.title)}</h2>${o.sub?`<div class="muted small">${esc(o.sub)}</div>`:''}</div><div class="hp-actions">${o.clear?'<button class="btn" data-action="clear-suite">Show all cases</button>':''}<button class="btn" data-action="run-selected"${state.selected.size?'':' disabled'}>${runSelLabel()}</button><button class="btn" data-action="save-suite"${state.selected.size?'':' disabled'}>Save selected as suite${state.selected.size?' ('+state.selected.size+')':''}</button><button class="btn" data-action="schedule" data-what="section"${o.cases.length?'':' disabled'} title="Schedule the selected cases — or this whole list when nothing is selected">Schedule…</button><button class="btn ${o.sit?'sit':'primary'}" data-action="run-section"${o.cases.length?'':' disabled'}>${o.suiteId?'Run suite':'Run all'} (${o.cases.length})</button></div></div><div class="toolbar"><span class="muted small">${plural(cases.length,'case')}${state.search?' matching “'+esc(state.search)+'”':''}</span>${o.note?`<span class="muted small">${esc(o.note)}</span>`:''}</div>${caseTable(cases)}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +501,9 @@ function renderSideNav(){
   h+=navItem('overview',null,'Overview');
   h+=navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null);
   h+=navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot);
+  h+=navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null);
+  h+=navItem('reports',null,'Reports');
+  h+=navItem('insights',null,'Quality insights');
   h+=navItem('config',null,'Configuration');
   if(sitCases().length){
     h+='<div class="nav-section">SIT console</div>';
@@ -490,29 +534,51 @@ function overviewGroups(){
   );
   return groups;
 }
+function overviewTabsHtml(live){
+  const tab=state.overviewTab||'summary';
+  const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="overview-tab" data-tab="${id}">${label}</button>`;
+  return `<div class="tabs" style="margin-bottom:16px">${t('summary','Summary')}${t('running','Running now'+(live.length?' ('+live.length+')':''))}${t('types','Run by test type')}</div>`;
+}
 function renderOverview(){
   el('viewTitle').textContent='Overview';
   if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
-  const all=tileStats({cases:state.cases});
+  const tab=state.overviewTab||'summary';
   const live=activeRuns();
-  const hot=live.filter(e=>!isStalled(e)).length;
-  const b=state.build;
-  const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
-  let h='';
-  if(live.length)h+=`<div class="group-head first"><h2>${liveHeading(live)}</h2><a class="small" href="#/history">Open run screen →</a></div><div class="live-board">${live.map(liveCardHtml).join('')}</div>`;
-  h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span></h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment">▶ Run everything (${all.total})</button></div></div>`;
-  h+='<div class="kpi-grid">'+
-    kpi('All cases',all.total,'in repository')+
-    kpi('Passing',all.passed,'latest result passed',all.passed?'green':'')+
-    kpi('Failing',all.failed,'latest result failed',all.failed?'red':'')+
-    kpi('Never run',all.never,'no result on '+esc(envName()))+
-    kpi('Active runs',hot,`${state.stats.runs_7d||0} runs in the last 7 days`,hot?'amber':'')+
-    kpi('Last build',b?esc(String(b.build_id).slice(0,14)):'—',b?`${b.passed} passed · ${b.failed} failed (in-container)`:'no CI results yet','sm'+(b&&b.failed?' red':''))+
-  '</div>';
-  if(state.search)h+=caseSectionHtml({title:'Matching cases',cases:filterCases(state.cases),label:'search results'});
-  h+=legendHtml();
-  h+=overviewGroups().map(tileGroupHtml).join('');
+  let h=overviewTabsHtml(live);
+  if(tab==='running'){
+    h+=live.length
+      ?`<div class="hp-actions" style="margin-bottom:12px"><button class="btn" data-action="cancel-all-runs">Cancel all (${live.length})</button></div><div class="live-board">${live.map(liveCardHtml).join('')}</div>`
+      :'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
+  }else if(tab==='types'){
+    h+=typeRunSelectorHtml();
+  }else{
+    const all=tileStats({cases:state.cases});
+    const hot=live.filter(e=>!isStalled(e)).length;
+    const b=state.build;
+    const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
+    h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span></h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment">▶ Run everything (${all.total})</button><button class="btn" data-action="schedule" data-what="all"${all.total?'':' disabled'}>Schedule…</button></div></div>`;
+    h+='<div class="kpi-grid">'+
+      kpi('All cases',all.total,'in repository')+
+      kpi('Passing',all.passed,'latest result passed',all.passed?'green':'')+
+      kpi('Failing',all.failed,'latest result failed',all.failed?'red':'')+
+      kpi('Never run',all.never,'no result on '+esc(envName()))+
+      kpi('Active runs',hot,`${state.stats.runs_7d||0} runs in the last 7 days`,hot?'amber':'')+
+      kpi('Last build',b?esc(String(b.build_id).slice(0,14)):'—',b?`${b.passed} passed · ${b.failed} failed (in-container)`:'no CI results yet','sm'+(b&&b.failed?' red':''))+
+    '</div>';
+    if(state.search)h+=caseSectionHtml({title:'Matching cases',cases:filterCases(state.cases),label:'search results'});
+    h+=legendHtml();
+    h+=overviewGroups().map(tileGroupHtml).join('');
+  }
   el('content').innerHTML=h;
+}
+function typeRunSelectorHtml(){
+  const tl=typeList();
+  const rows=tl.map(t=>{
+    const n=casesForType(t.id).length;
+    return `<label class="type-check"><input type="checkbox" data-typesel="${esc(t.id)}"${state.selectedTypes.has(t.id)?' checked':''}${n?'':' disabled'}> ${esc(t.title)} <span class="muted small">(${n})</span></label>`;
+  }).join('');
+  const total=[...state.selectedTypes].reduce((n,id)=>n+casesForType(id).length,0);
+  return `<div class="card"><div class="card-head"><div><h2>Run by test type</h2><div class="muted small">Select one or more test types, then run every case in them together</div></div><div class="hp-actions"><button class="btn primary" data-action="run-types"${state.selectedTypes.size?'':' disabled'}>Run selected types${total?' ('+total+' cases)':''}</button><button class="btn" data-action="schedule" data-what="types"${state.selectedTypes.size?'':' disabled'}>Schedule…</button></div></div><div class="hp-body"><div class="type-check-grid">${rows}</div></div></div>`;
 }
 function suiteTile(s,accent){return {key:'suite:'+s.id,suiteId:s.id,title:s.name||s.key,sub:s.key,cases:casesInSuite(s.id),inline:true,accent};}
 function renderTypeView(typeId){
@@ -545,19 +611,44 @@ function renderSitView(groupId){
   }
   el('content').innerHTML=h;
 }
+function runsFilterBarHtml(){
+  const f=state.runsFilter;
+  const envOptions='<option value="">All environments</option>'+state.environments.map(e=>`<option value="${esc(e.id)}"${f.environment_id===e.id?' selected':''}>${esc(e.name||e.key)}</option>`).join('');
+  const statuses=['','queued','preparing','running','passed','failed','skipped','blocked','cancelled','error','timed_out'];
+  const statusOptions=statuses.map(s=>`<option value="${s}"${f.status===s?' selected':''}>${s?esc(s.replace(/_/g,' ')):'All statuses'}</option>`).join('');
+  const active=f.environment_id||f.status||f.from||f.to;
+  return `<div class="toolbar" style="flex-wrap:wrap">
+    <select id="runsEnvFilter" aria-label="Filter by environment">${envOptions}</select>
+    <select id="runsStatusFilter" aria-label="Filter by status">${statusOptions}</select>
+    <input type="date" id="runsFromFilter" value="${esc(f.from)}" aria-label="From date">
+    <span class="muted small">to</span>
+    <input type="date" id="runsToFilter" value="${esc(f.to)}" aria-label="To date">
+    <button class="btn" data-action="apply-run-filters">Apply</button>
+    ${active?'<button class="btn" data-action="clear-run-filters">Clear filters</button>':''}
+  </div>`;
+}
+function runsTableHtml(){
+  const rl=state.runsList;
+  const rows=rl.rows.map(e=>{
+    const end=e.finished_at?ms(e.finished_at):null,start=ms(e.started_at||e.created_at);
+    const running=ACTIVE.has(String(e.status));
+    const durVal=running?`<span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-start)}</span>`:end?dur(end-start):'—';
+    return `<tr class="clickable" data-run="${esc(e.id)}"><td>${esc(e.name||e.key)}<div class="key small">${esc(e.key)}</div></td><td>${badge(e.status)}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.application_name||'—')}</td><td class="muted small">${esc(e.environment_name||'—')}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${e.finished_at?esc(when(e.finished_at)):'—'}</td><td class="muted small">${durVal}</td></tr>`;
+  }).join('');
+  if(rl.error)return `<div class="empty">Could not load runs: ${esc(rl.error)}</div>`;
+  if(!rl.loaded)return '<div class="hp-loading"><div class="skel" style="height:160px"></div></div>';
+  if(!rows)return '<div class="empty">No executions match these filters.</div>';
+  const more=rl.rows.length<rl.total?`<div class="more"><button class="btn" data-action="runs-more"${rl.loading?' disabled':''}>${rl.loading?'Loading…':'Load more'}</button><span class="muted small">${rl.rows.length} of ${rl.total} shown</span></div>`:`<div class="more"><span class="muted small">${plural(rl.total,'run')} total</span></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Application</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Ended</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
+}
 function renderHistory(){
   el('viewTitle').textContent='Test runs';
   const live=activeRuns();
   const hot=live.filter(e=>!isStalled(e)).length;
-  let h=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span></div>`;
+  let h=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><div class="hp-actions"><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span>${live.length?'<button class="btn" data-action="cancel-all-runs">Cancel all</button>':''}</div></div>`;
   h+=live.length?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`:'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
   if(state.loaded)h+=`<div class="group-head"><h2>History</h2><span class="muted small">every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',cases:state.cases},{fixed:true});
-  const rows=state.executions.map(e=>{
-    const end=e.finished_at?ms(e.finished_at):null,start=ms(e.started_at||e.created_at);
-    const time=ACTIVE.has(String(e.status))?`<span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-start)}</span>`:end?dur(end-start):'—';
-    return `<tr class="clickable" data-run="${esc(e.id)}"><td>${esc(e.name||e.key)}<div class="key small">${esc(e.key)}</div></td><td>${badge(e.status)}${isStalled(e)?' <span class="muted small">stalled</span>':''}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.environment_name||'—')}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${time}</td></tr>`;
-  }).join('');
-  h+=`<div class="card"><div class="card-head"><h2>Recent executions</h2><span class="muted small">select a run for per-case results</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Duration</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">No executions yet.</td></tr>'}</tbody></table></div></div>`;
+  h+=`<div class="card"><div class="card-head"><h2>All runs</h2><span class="muted small">select a run for per-case results</span></div>${runsFilterBarHtml()}${runsTableHtml()}</div>`;
   el('content').innerHTML=h;
 }
 function renderRun(){
@@ -577,29 +668,27 @@ function renderRun(){
   const stalled=isStalled(e);
   const start=r.started_at||r.created_at;
   const elapsed=active?`<span data-elapsed="${esc(start)}">${dur(serverNow()-ms(start))}</span>`:r.finished_at?dur(ms(r.finished_at)-ms(start)):'—';
-  const rows=ids.map(id=>{
-    const x=byCase.get(id),c=names.get(id)||(state.idx&&state.idx.caseById.get(id))||{name:id,key:''};
-    const s=x?String(x.status):id===current?(stalled?'stalled':'running'):active?'pending':'not run';
-    const icon=s==='passed'?'✓':FAILED.has(s)?'✕':s==='running'?'':s==='pending'?'':'–';
-    const iconCls=s==='passed'?'passed':FAILED.has(s)?'failed':s==='running'?'running':s==='pending'||s==='stalled'?'pending':'other';
-    const ev=x&&state.evidence.get(x.id);
-    const evidence=x&&x.evidence_count?`<button class="btn small-btn" data-action="evidence" data-rid="${esc(x.id)}">${ev?'Hide':'Show'} evidence (${x.evidence_count})</button>`:'';
-    const shots=ev?`<div class="evidence">${ev.map(v=>{
-      const link=v.url&&String(v.content_type||'').startsWith('image')?`<a href="${esc(v.url)}" target="_blank" rel="noopener"><img src="${esc(v.url)}" alt="${esc(v.evidence_type)} evidence" loading="lazy"></a>`:`<a class="tag" href="${esc(v.url||'#')}" target="_blank" rel="noopener">${esc(v.evidence_type)}</a>`;
-      const copyBtn=v.url?`<button class="copy-btn" data-action="copy-evidence" data-url="${esc(v.url)}" title="Copy evidence link">Copy</button>`:'';
-      return `<div class="evidence-item">${link}${copyBtn}</div>`;
-    }).join('')}</div>`:'';
-    return `<li class="run-case ${iconCls}"><span class="rc-icon ${iconCls}" aria-hidden="true">${icon}</span><div class="rc-main"><button class="case-name" data-case="${esc(id)}">${esc(c.name)}</button><div class="key small">${esc(c.key)}${x&&x.classification?' · '+esc(String(x.classification).replace(/_/g,' ')):''}</div>${x&&x.message&&s!=='passed'?`<div class="rc-msg">${esc(x.message)}</div>`:''}${evidence}${shots}</div><span>${s==='running'?'<span class="badge running">running</span>':s==='stalled'?'<span class="badge blocked">no progress</span>':s==='pending'?'<span class="badge queued">pending</span>':s==='not run'?'<span class="badge never">not run</span>':badge(s)}</span><span class="muted small rc-dur">${x?secs(x.duration_ms):s==='running'?'…':''}</span></li>`;
+  const failMsgs=r.results.filter(x=>x.message&&x.status!=='passed').map(x=>{
+    const c=names.get(x.test_case_id)||{name:x.test_case_id,key:''};
+    return `<div class="rc-msg"><b>${esc(c.name)}:</b> ${esc(x.message)}</div>`;
   }).join('');
+  const evidenceList=r.evidence||[];
+  const gallery=evidenceList.length?`<div class="evidence">${evidenceList.map(v=>{
+    const c=names.get(v.test_case_id)||{name:v.test_case_id};
+    const link=v.url&&String(v.content_type||'').startsWith('image')?`<a href="${esc(v.url)}" target="_blank" rel="noopener"><img src="${esc(v.url)}" alt="${esc(v.evidence_type)} evidence" loading="lazy"></a>`:`<a class="tag" href="${esc(v.url||'#')}" target="_blank" rel="noopener">${esc(v.evidence_type)}</a>`;
+    const copyBtn=v.url?`<button class="copy-btn" data-action="copy-evidence" data-url="${esc(v.url)}" title="Copy evidence link">Copy</button>`:'';
+    return `<div class="evidence-item">${link}<div class="muted small">${esc(c.name)} · ${esc(v.evidence_type)}</div>${copyBtn}</div>`;
+  }).join('')}</div>`:`<div class="empty">${active?'No evidence reported yet.':'No evidence was recorded for this run.'}</div>`;
   el('content').innerHTML=`<div class="card run-head">
       <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.name||r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
         <div class="hp-actions"><button class="btn" data-action="nav-back">← Back</button><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
       <div class="run-body">
         ${progressHtml(e,'big')}
         <div class="live-meta"><span><b>${byCase.size}</b> / ${ids.length} done</span>${countsHtml(e)}${current?`<span>Now running <b>${esc((names.get(current)||{}).name||current)}</b></span>`:''}</div>
-        <dl class="kv run-kv"><dt>Suite</dt><dd>${esc(r.suite_name||'—')}</dd><dt>Environment</dt><dd>${esc(r.environment_name||'—')}</dd><dt>Trigger</dt><dd>${esc(r.trigger_source||'—')}</dd><dt>Worker</dt><dd class="key">${esc(r.worker_id||(active?'waiting for a worker':'—'))}</dd><dt>Queued</dt><dd>${esc(when(r.created_at))}</dd><dt>Started</dt><dd>${esc(when(r.started_at))}</dd><dt>${active?'Elapsed':'Duration'}</dt><dd>${elapsed}</dd></dl>
+        <dl class="kv run-kv"><dt>Suite</dt><dd>${esc(r.suite_name||'—')}</dd><dt>Environment</dt><dd>${esc(r.environment_name||'—')}</dd><dt>Trigger</dt><dd>${esc(r.trigger_source||'—')}</dd><dt>Worker</dt><dd class="key">${esc(r.worker_id||(active?'waiting for a worker':'—'))}</dd><dt>Queued</dt><dd>${esc(when(r.created_at))}</dd><dt>Started</dt><dd>${esc(when(r.started_at))}</dd><dt>Finished</dt><dd>${r.finished_at?esc(when(r.finished_at)):'—'}</dd><dt>${active?'Elapsed':'Duration'}</dt><dd>${elapsed}</dd></dl>
+        ${failMsgs}
       </div></div>
-    <div class="card"><div class="card-head"><h2>Cases in this run</h2><span class="muted small">${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><ol class="run-cases">${rows||'<li class="empty">This run has no cases.</li>'}</ol></div>`;
+    <div class="card"><div class="card-head"><h2>Evidence</h2><span class="muted small">${plural(evidenceList.length,'item')} · ${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><div class="hp-body">${gallery}</div></div>`;
 }
 function renderBuilds(){
   el('viewTitle').textContent='In-container build';
@@ -647,7 +736,7 @@ function renderCaseView(){
       <dt>Suites</dt><dd>${suites.map(s=>`<a class="tag" href="${esc(suiteHref(s))}">${esc(s.name)}</a>`).join(' ')||'—'}</dd>
       <dt>Tags</dt><dd>${(c.tags||[]).map(t=>`<a class="tag" href="#/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join(' ')||'—'}</dd>
       <dt>Description</dt><dd>${esc(c.description||'—')}</dd>
-    </dl><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}">Run this case</button></div>`;
+    </dl><div class="run-case-bar"><select id="runCaseEnv" aria-label="Environment to run in">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===state.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}">Run this case</button><button class="btn" data-action="schedule" data-what="case" data-key="${esc(c.key)}">Schedule…</button><button class="btn" data-action="report-case" data-key="${esc(c.key)}">Report…</button></div></div>`;
   }
   el('content').innerHTML=`<div class="card">${head}${tabs}${body}</div>`;
 }
@@ -670,13 +759,270 @@ function renderConfigView(){
   if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
   el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Run retention</h2></div>
     <div class="hp-body">
-      <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted.</p>
+      <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted. Minimum 5 days.</p>
       <div class="toolbar" style="border:none;padding:0">
-        <input type="number" id="retentionDays" min="1" max="365" value="${esc(s.run_retention_days)}" style="width:90px">
+        <input type="number" id="retentionDays" min="5" max="365" value="${esc(s.run_retention_days)}" style="width:90px">
         <button class="btn primary" data-action="save-retention">Save</button>
         ${s.updated_at?`<span class="muted small">last changed ${esc(when(s.updated_at))}</span>`:''}
       </div>
+      <div id="retentionError" class="field-error" hidden></div>
     </div></div>`;
+}
+// ---------------------------------------------------------------------------
+// Scope picker — "which test cases" — shared by Schedule runs and Reports.
+// A scope is a saved selection, not a suite: nothing is created or left behind.
+// ---------------------------------------------------------------------------
+function findCaseByText(t){const v=String(t||'').trim().toLowerCase();if(!v)return null;return state.cases.find(c=>String(c.key).toLowerCase()===v)||state.cases.find(c=>String(c.name).toLowerCase()===v)||null;}
+function scopeCases(f){
+  if(f.kind==='types')return [...new Map(f.types.flatMap(t=>casesForType(t)).map(c=>[c.id,c])).values()];
+  if(f.kind==='suite')return casesInSuite(f.suiteId);
+  if(f.kind==='case'){const c=findCaseByText(f.caseText);return c?[c]:[];}
+  if(f.kind==='selected'){const keys=new Set(f.caseKeys);return state.cases.filter(c=>keys.has(c.key));}
+  return state.cases;
+}
+function scopeLabel(f){
+  if(f.kind==='types')return 'Test types: '+(f.types.map(typeTitle).join(', ')||'none');
+  if(f.kind==='suite'){const s=state.idx&&state.idx.suiteById.get(f.suiteId);return 'Suite: '+(s?(s.name||s.key):'—');}
+  if(f.kind==='case'){const c=findCaseByText(f.caseText);return 'Test case: '+(c?c.name:'—');}
+  if(f.kind==='selected')return plural(f.caseKeys.length,'selected test case');
+  return 'Everything';
+}
+function scopePickerHtml(prefix,f){
+  const kinds=[['all','Everything'],['types','Test types'],['suite','A test suite'],['case','One test case']];
+  if(f.caseKeys&&f.caseKeys.length)kinds.push(['selected',plural(f.caseKeys.length,'selected case')]);
+  const radios=kinds.map(([k,l])=>`<label class="type-check"><input type="radio" name="${prefix}Kind" value="${k}"${f.kind===k?' checked':''}> ${esc(l)}</label>`).join('');
+  let detail='';
+  if(f.kind==='types')detail=`<div class="type-check-grid">${typeList().map(t=>{const n=casesForType(t.id).length;return `<label class="type-check"><input type="checkbox" data-scopetype="${prefix}" value="${esc(t.id)}"${f.types.includes(t.id)?' checked':''}${n?'':' disabled'}> ${esc(t.title)} <span class="muted small">(${n})</span></label>`;}).join('')}</div>`;
+  else if(f.kind==='suite')detail=state.suites.length?`<select id="${prefix}Suite">${state.suites.map(s=>`<option value="${esc(s.id)}"${f.suiteId===s.id?' selected':''}>${esc(s.name||s.key)} (${casesInSuite(s.id).length})</option>`).join('')}</select>`:'<span class="muted small">No suites yet — select cases in any list and use “Save selected as suite”.</span>';
+  else if(f.kind==='case')detail=`<input type="search" id="${prefix}CaseSearch" list="${prefix}CaseList" placeholder="Type a test case name or key…" value="${esc(f.caseText||'')}" style="width:min(520px,100%)"><datalist id="${prefix}CaseList">${state.cases.map(c=>`<option value="${esc(c.key)}">${esc(c.name)}</option>`).join('')}</datalist>${f.caseText&&!findCaseByText(f.caseText)?'<div class="field-error">No test case with that name or key.</div>':''}`;
+  return `<div class="form-row"><span class="form-label">Test cases</span><div><div class="radio-row">${radios}</div>${detail?`<div style="margin-top:8px">${detail}</div>`:''}</div></div>`;
+}
+function readScopeForm(prefix,f){
+  const k=document.querySelector(`input[name="${prefix}Kind"]:checked`);
+  const prev=f.kind;if(k)f.kind=k.value;
+  if(prev!==f.kind){if(f.kind==='suite'&&!f.suiteId&&state.suites[0])f.suiteId=state.suites[0].id;return;}  // detail inputs on screen belong to the previous kind
+  const types=[...document.querySelectorAll(`[data-scopetype="${prefix}"]`)];if(types.length)f.types=types.filter(x=>x.checked).map(x=>x.value);
+  const s=el(prefix+'Suite');if(s)f.suiteId=s.value;
+  const c=el(prefix+'CaseSearch');if(c)f.caseText=c.value;
+}
+function formError(id,msg){const x=el(id);if(x){x.hidden=!msg;x.textContent=msg||'';}return false;}
+
+// ---------------------------------------------------------------------------
+// Schedule runs
+// ---------------------------------------------------------------------------
+async function loadSchedules(){
+  try{state.schedules=(await api('/api/v1/schedules')).data||[];}catch(e){state.schedules={error:e.message};}
+  renderSideNav();
+  if(state.view==='schedules')renderCurrentView();
+}
+function scheduleWhat(s){
+  const sc=s.scope||{};
+  if(sc.label)return sc.label;
+  if(sc.suites&&sc.suites.length)return 'Suite: '+sc.suites.join(', ');
+  if(sc.case_keys&&sc.case_keys.length)return plural(sc.case_keys.length,'test case');
+  if(sc.test_types&&sc.test_types.length)return 'Types: '+sc.test_types.join(', ');
+  if(sc.tags&&sc.tags.length)return 'Tags: '+sc.tags.join(', ');
+  if(s.application_id)return 'Everything';
+  if(s.test_case_ids&&s.test_case_ids.length)return plural(s.test_case_ids.length,'test case');
+  return s.test_suite_id?'A test suite':'—';
+}
+function scheduleWhen(s){
+  const e=String(s.cron_expression||'');
+  if(/^at:/i.test(e))return 'Once · '+new Date(e.slice(3)).toLocaleString();
+  if(/^every:/i.test(e))return 'Every '+e.slice(6)+' min';
+  if(e)return 'Repeats · '+e+' ('+(s.time_zone||'UTC')+')';
+  return s.event_trigger?'On event · '+s.event_trigger:'—';
+}
+function openScheduleForm(preset){
+  state.schedForm={name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:state.envId||'',when:'once',at:'',cron:'0 2 * * *',...(preset||{})};
+  state.schedFormOpen=true;
+  if(state.view==='schedules')renderCurrentView();else location.hash='#/schedules';
+}
+function readSchedForm(){
+  const f=state.schedForm;if(!el('schedName'))return;
+  f.name=el('schedName').value;f.envId=el('schedEnv').value;
+  const w=document.querySelector('input[name="schedWhen"]:checked');if(w)f.when=w.value;
+  if(el('schedAt'))f.at=el('schedAt').value;
+  if(el('schedCron'))f.cron=el('schedCron').value;
+  readScopeForm('sched',f);
+}
+function scheduleFormHtml(){
+  const f=state.schedForm;
+  const n=scopeCases(f).length;
+  const tz=(Array.isArray(state.schedules)&&state.schedules[0]&&state.schedules[0].time_zone)||'UTC';
+  const presets=[['0 * * * *','Every hour'],['0 2 * * *','Nightly at 02:00'],['0 9 * * 1','Mondays at 09:00'],['every:30','Every 30 minutes']];
+  const whenDetail=f.when==='once'
+    ?`<input type="datetime-local" id="schedAt" value="${esc(f.at)}"> <span class="muted small">your local time — runs once, then the schedule is done</span>`
+    :`<input type="text" id="schedCron" value="${esc(f.cron)}" style="width:180px"> ${presets.map(([c,l])=>`<button class="btn small-btn" style="margin-top:0" data-action="sched-preset" data-cron="${esc(c)}">${esc(l)}</button>`).join(' ')}<div class="muted small" style="margin-top:6px">Five cron fields (minute hour day month weekday) in ${esc(tz)}, or every:N for every N minutes.</div>`;
+  return `<div class="card" data-form="sched"><div class="card-head"><h2>Schedule a run</h2><span class="muted small">${esc(state.appKey||'')} · ${plural(n,'test case')} in this selection</span></div>
+    <div class="form-row"><span class="form-label">Name</span><input type="text" id="schedName" value="${esc(f.name)}" placeholder="e.g. Nightly smoke on staging" style="width:min(520px,100%)"></div>
+    ${scopePickerHtml('sched',f)}
+    <div class="form-row"><span class="form-label">Environment</span><div><select id="schedEnv">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===f.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select></div></div>
+    <div class="form-row"><span class="form-label">When</span><div><div class="radio-row"><label class="type-check"><input type="radio" name="schedWhen" value="once"${f.when==='once'?' checked':''}> Once, at a date and time</label><label class="type-check"><input type="radio" name="schedWhen" value="repeat"${f.when==='repeat'?' checked':''}> Repeating</label></div><div style="margin-top:8px">${whenDetail}</div></div></div>
+    <div class="form-row"><span></span><div><button class="btn primary" data-action="sched-save">Save schedule</button> <button class="btn" data-action="sched-new">Cancel</button><div id="schedError" class="field-error" hidden></div></div></div>
+  </div>`;
+}
+async function saveSchedule(btn){
+  readSchedForm();
+  const f=state.schedForm,err=m=>formError('schedError',m);
+  err('');
+  if(!f.name.trim())return err('Give the schedule a name.');
+  if(!f.envId)return err('Choose an environment.');
+  const cases=scopeCases(f);
+  if(!cases.length)return err('Nothing to run — this selection has no test cases.');
+  let cron;
+  if(f.when==='once'){
+    if(!f.at)return err('Choose the date and time to run.');
+    const d=new Date(f.at);
+    if(Number.isNaN(d.getTime()))return err('That date and time is not valid.');
+    if(d.getTime()<=Date.now())return err('Choose a time in the future.');
+    cron='at:'+d.toISOString();
+  }else{
+    cron=f.cron.trim();
+    if(!cron)return err('Enter a cron expression or pick a preset.');
+  }
+  let scope={};
+  if(f.kind==='suite'){const s=state.idx.suiteById.get(f.suiteId);scope={suites:[s.key],label:scopeLabel(f)};}
+  else if(f.kind!=='all')scope={case_keys:cases.map(c=>c.key),label:scopeLabel(f)+(f.kind==='types'?' ('+plural(cases.length,'case')+')':'')};
+  btn.disabled=true;
+  try{
+    await postJson('/api/v1/schedules',{name:f.name.trim(),application:state.appKey,environment:f.envId,scope,cron_expression:cron});
+    toast('Scheduled “'+f.name.trim()+'”');
+    state.schedFormOpen=false;
+    await loadSchedules();
+  }catch(e){err('Could not save: '+e.message);btn.disabled=false;}
+}
+async function scheduleAction(kind,node){
+  const id=node.dataset.id;
+  try{
+    if(kind==='toggle')await api('/api/v1/schedules/'+encodeURIComponent(id),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({enabled:node.dataset.enabled!=='true'})});
+    else if(kind==='delete'){if(!confirm('Delete the schedule “'+node.dataset.name+'”?'))return;await api('/api/v1/schedules/'+encodeURIComponent(id),{method:'DELETE'});toast('Schedule deleted');}
+    else if(kind==='run'){const res=await postJson('/api/v1/schedules/'+encodeURIComponent(id)+'/run',{});toast(res.message||'Run queued','#/history');pollLive();}
+  }catch(e){toast('Failed: '+e.message);}
+  await loadSchedules();
+}
+function renderSchedulesView(){
+  el('viewTitle').textContent='Schedule runs';
+  const all=state.schedules;
+  if(!state.loaded||all===null){el('content').innerHTML=skeletonHtml();return;}
+  let h=`<div class="group-head first"><h2>Scheduled runs <span class="muted small">for ${esc(state.appKey||'')}</span></h2><div class="hp-actions"><button class="btn primary" data-action="sched-new">${state.schedFormOpen?'Close':'+ Schedule a run'}</button></div></div>`;
+  if(state.schedFormOpen)h+=scheduleFormHtml();
+  if(all.error){el('content').innerHTML=h+`<div class="card empty">Could not load schedules: ${esc(all.error)}</div>`;return;}
+  const list=all.filter(s=>!s.application_key||s.application_key===state.appKey);
+  const envById=new Map(state.environments.map(e=>[e.id,e]));
+  const rows=list.map(s=>{
+    const once=/^at:/i.test(String(s.cron_expression||''));
+    const done=once&&s.last_run_at;
+    const st=done?'<span class="badge passed">done</span>':s.enabled?'<span class="badge running">active</span>':'<span class="badge never">paused</span>';
+    const env=envById.get(s.environment_id);
+    return `<tr><td>${esc(s.name)}</td><td>${esc(scheduleWhat(s))}</td><td class="muted small">${esc(env?(env.name||env.key):(s.environment_key||'—'))}</td><td class="small">${esc(scheduleWhen(s))}</td><td class="muted small">${s.next_run_at?esc(new Date(s.next_run_at).toLocaleString()):'—'}</td><td class="muted small">${s.last_run_at?esc(new Date(s.last_run_at).toLocaleString()):'Never'}</td><td>${st}</td><td class="nowrap">${done?'':`<button class="btn small-btn" style="margin-top:0" data-action="sched-toggle" data-id="${esc(s.id)}" data-enabled="${s.enabled?'true':'false'}">${s.enabled?'Pause':'Resume'}</button> `}<button class="btn small-btn" style="margin-top:0" data-action="sched-run" data-id="${esc(s.id)}">Run now</button> <button class="btn small-btn" style="margin-top:0" data-action="sched-delete" data-id="${esc(s.id)}" data-name="${esc(s.name)}">Delete</button></td></tr>`;
+  }).join('');
+  h+=`<div class="card"><div class="card-head"><h2>Schedules</h2><span class="muted small">${plural(list.length,'schedule')} · ${list.filter(s=>s.enabled&&!(/^at:/i.test(String(s.cron_expression||''))&&s.last_run_at)).length} active</span></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>What runs</th><th>Environment</th><th>When</th><th>Next run</th><th>Last run</th><th>State</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">Nothing is scheduled. Use “Schedule a run”, or the Schedule button next to any Run button.</td></tr>'}</tbody></table></div></div>`;
+  el('content').innerHTML=h;
+}
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+function readReportForm(){
+  const f=state.reportForm;if(!el('repTitle'))return;
+  f.title=el('repTitle').value;f.status=el('repStatus').value;
+  if(el('repApp'))f.appScope=el('repApp').value;
+  if(el('repEnv'))f.envId=el('repEnv').value;
+  const rs=document.querySelector('input[name="repRunSel"]:checked');if(rs)f.runSel=rs.value;
+  if(el('repFrom'))f.from=el('repFrom').value;
+  if(el('repTo'))f.to=el('repTo').value;
+  f.details=el('repDetails').checked;f.evidence=el('repEvidence').checked;
+  readScopeForm('rep',f);
+}
+function reportBody(format){
+  const f=state.reportForm;
+  let scope={kind:'all'};
+  if(f.kind==='suite')scope={kind:'suite',suite_id:f.suiteId};
+  else if(f.kind!=='all'){
+    const cs=scopeCases(f);
+    const label=f.kind==='case'?'test case “'+(cs[0]?cs[0].name:'')+'”':f.kind==='types'?'test types '+f.types.map(typeTitle).join(', ')+' ('+plural(cs.length,'case')+')':plural(cs.length,'selected test case');
+    scope={kind:'cases',case_ids:cs.map(c=>c.id),label};
+  }
+  // Across every application the case lists of this one do not apply: the report covers everything.
+  const allApps=f.appScope==='all';
+  if(allApps)scope={kind:'all'};
+  return {application_id:allApps?'all':state.application.id,environment_id:allApps?null:(f.envId||null),scope,run_selection:f.runSel,
+    from:f.runSel==='date_range'&&f.from?new Date(f.from+'T00:00:00').toISOString():null,
+    to:f.runSel==='date_range'&&f.to?new Date(f.to+'T23:59:59').toISOString():null,
+    status:f.status,include_case_details:f.details,include_evidence:f.evidence,title:f.title.trim(),format};
+}
+function reportReady(){
+  readReportForm();
+  formError('repError','');
+  if(!state.application)return formError('repError','No application loaded.');
+  if(state.reportForm.appScope!=='all'&&!scopeCases(state.reportForm).length)return formError('repError','This selection has no test cases — choose something to report on.');
+  return true;
+}
+async function previewReport(){
+  if(!reportReady())return;
+  state.report={data:null,loading:true,error:null,busy:''};renderCurrentView();
+  try{state.report={data:(await postJson('/api/v1/reports',reportBody('json'))).data,loading:false,error:null,busy:''};}
+  catch(e){state.report={data:null,loading:false,error:e.message,busy:''};}
+  if(state.view==='reports')renderCurrentView();
+}
+async function downloadReport(format){
+  if(!reportReady())return;
+  state.report.busy=format;renderCurrentView();
+  try{
+    const res=await fetch('/api/v1/reports',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(reportBody(format))});
+    if(!res.ok){const b=await res.json().catch(()=>({}));throw new Error(b.error||('HTTP '+res.status));}
+    const blob=await res.blob();
+    const m=/filename="([^"]+)"/.exec(res.headers.get('content-disposition')||'');
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=m?m[1]:'report.'+format;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+    toast('Report downloaded: '+a.download);
+  }catch(e){toast('Report failed: '+e.message);}
+  state.report.busy='';
+  if(state.view==='reports')renderCurrentView();
+}
+function reportPreviewHtml(){
+  const r=state.report;
+  if(r.loading)return '<div class="kpi-grid">'+'<div class="skel" style="height:84px"></div>'.repeat(5)+'</div><div class="skel" style="height:220px"></div>';
+  if(r.error)return `<div class="card empty">Could not build the report: ${esc(r.error)}</div>`;
+  if(!r.data)return '<div class="card empty">Choose what the report should cover, then Preview — or download it straight away as PDF or CSV.</div>';
+  const m=r.data.meta,d=r.data.dashboard,cases=r.data.cases,multi=!!m.all_applications;
+  const shown=cases.slice(0,200);
+  // A case of another application cannot be opened from here (the console is showing one application at a time).
+  const nameCell=c=>multi&&c.application_key!==state.appKey?esc(c.name):`<button class="case-name" data-case="${esc(c.id)}">${esc(c.name)}</button>`;
+  const rows=shown.map((c,i)=>{const last=c.runs[0];return `<tr><td class="num">${i+1}</td>${multi?`<td class="muted small">${esc(c.application_name)}</td>`:''}<td>${nameCell(c)}<div class="key small">${esc(c.key)}</div></td><td>${esc(c.test_type)}</td><td>${esc(c.execution_method||'—')}</td><td class="num">${c.runs.length}</td><td>${last?badge(last.status):badge(null)}</td><td class="muted small">${last?esc(last.environment_name||'—'):'—'}</td><td class="muted small">${last?esc(when(last.finished_at)):'—'}</td></tr>`;}).join('');
+  const seg=(v,c)=>v?`<span class="seg ${c}" style="flex-grow:${v}"></span>`:'';
+  const bd=(title,list)=>`<div class="card"><div class="card-head"><h2>${esc(title)}</h2><span class="muted small">${plural(list.length,'group')}</span></div><div class="table-wrap"><table><thead><tr><th>${esc(title.replace(/^By /,'').replace(/^./,x=>x.toUpperCase()))}</th><th class="num">Runs</th><th class="num">Passed</th><th class="num">Failed</th><th class="num">Pass rate</th><th style="width:30%">Result mix</th></tr></thead><tbody>${list.slice(0,15).map(g=>`<tr><td>${esc(g.name)}</td><td class="num">${g.runs}</td><td class="num">${g.passed}</td><td class="num">${g.failed}</td><td class="num">${g.pass_rate==null?'—':g.pass_rate+'%'}</td><td><span class="meter" style="margin-top:6px">${seg(g.passed,'pass')}${seg(g.failed,'fail')}${seg(g.other,'other')}</span></td></tr>`).join('')}${list.length>15?`<tr><td colspan="6" class="muted small">…and ${list.length-15} more in the download</td></tr>`:''}</tbody></table></div></div>`;
+  const breakdowns=d.runs?((multi||(d.by_application||[]).length>1?bd('By application',d.by_application):'')+bd('By environment',d.by_environment||[])+((d.by_type||[]).length>1?bd('By test type',d.by_type):'')):'';
+  return `<div class="group-head"><h2>${esc(m.title)}</h2><span class="muted small">${esc(m.ref)} · generated ${esc(when(m.generated_at))}</span></div>
+    <div class="kpi-grid">${kpi('Test cases',d.cases,`${d.cases_with_runs} with runs · ${d.cases_never_run} never run`)}${kpi('Runs',d.runs,m.filters.run_selection==='last_run'?'latest per case':'in range')}${kpi('Passed',d.passed,'',d.passed?'green':'')}${kpi('Failed',d.failed,d.other?d.other+' other':'',d.failed?'red':'')}${kpi('Pass rate',d.pass_rate==null?'—':d.pass_rate+'%','of passed + failed')}${kpi('Evidence',d.evidence_items,m.filters.include_evidence?'items in report':'not included')}</div>
+    <div class="card report-scope"><div class="hp-body"><b>This report covers</b><ul>${m.filters_lines.map(l=>`<li>${esc(l)}</li>`).join('')}</ul></div></div>
+    ${breakdowns}
+    <div class="card"><div class="card-head"><h2>Test cases in this report</h2><span class="muted small">${shown.length<cases.length?`first ${shown.length} of ${cases.length} shown — the download has all of them`:plural(cases.length,'case')}</span></div><div class="table-wrap"><table><thead><tr><th>#</th>${multi?'<th>Application</th>':''}<th>Test case</th><th>Type</th><th>Method</th><th class="num">Runs</th><th>Latest result</th><th>Environment</th><th>Finished</th></tr></thead><tbody>${rows||`<tr><td colspan="${multi?9:8}" class="empty">Nothing matches these filters.</td></tr>`}</tbody></table></div></div>`;
+}
+function renderReportsView(){
+  el('viewTitle').textContent='Reports';
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const f=state.reportForm,busy=state.report.busy;
+  const appName=(state.application&&state.application.name)||state.appKey||'';
+  const range=f.runSel==='date_range'?`<div style="margin-top:8px"><input type="date" id="repFrom" value="${esc(f.from)}" aria-label="From date"> <span class="muted small">to</span> <input type="date" id="repTo" value="${esc(f.to)}" aria-label="To date"> <span class="muted small">leave empty for no limit</span></div>`:'';
+  const allApps=f.appScope==='all';
+  const envRow=allApps
+    ?'<div class="form-row"><span class="form-label">Environment</span><div class="muted" style="padding-top:6px">All environments of every application</div></div>'
+    :`<div class="form-row"><span class="form-label">Environment</span><div><select id="repEnv"><option value="">All environments</option>${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===f.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')}</select></div></div>`;
+  const scopeRow=allApps
+    ?'<div class="form-row"><span class="form-label">Test cases</span><div class="muted" style="padding-top:6px">Every test case of every application. To pick types, a suite or one case, choose a single application.</div></div>'
+    :scopePickerHtml('rep',f);
+  el('content').innerHTML=`<div class="card" data-form="rep"><div class="card-head"><h2>Build a report</h2><span class="muted small">${allApps?plural(state.applications.length,'application'):plural(scopeCases(f).length,'test case')+' in this selection'}</span></div>
+    <div class="form-row"><span class="form-label">Title</span><input type="text" id="repTitle" value="${esc(f.title)}" placeholder="${esc(allApps?'All applications':appName)} — Test Report" style="width:min(520px,100%)"></div>
+    <div class="form-row"><span class="form-label">Application</span><div><select id="repApp"><option value="current"${allApps?'':' selected'}>${esc(appName)}</option><option value="all"${allApps?' selected':''}>All applications</option></select> <span class="muted small">— for a different single application, switch the App selector at the top</span></div></div>
+    ${envRow}
+    ${scopeRow}
+    <div class="form-row"><span class="form-label">Runs</span><div><div class="radio-row"><label class="type-check"><input type="radio" name="repRunSel" value="last_run"${f.runSel==='last_run'?' checked':''}> Latest run of each test case</label><label class="type-check"><input type="radio" name="repRunSel" value="date_range"${f.runSel==='date_range'?' checked':''}> All runs, optionally between dates</label></div>${range}</div></div>
+    <div class="form-row"><span class="form-label">Result</span><div><select id="repStatus"><option value="all"${f.status==='all'?' selected':''}>Passed and failed</option><option value="passed"${f.status==='passed'?' selected':''}>Passed only</option><option value="failed"${f.status==='failed'?' selected':''}>Failed only</option></select></div></div>
+    <div class="form-row"><span class="form-label">Include</span><div class="radio-row"><label class="type-check"><input type="checkbox" id="repDetails"${f.details?' checked':''}> Test case details (description, steps, expected results)</label><label class="type-check"><input type="checkbox" id="repEvidence"${f.evidence?' checked':''}> Evidence (screenshots are embedded in the PDF only)</label></div></div>
+    <div class="form-row"><span></span><div><button class="btn primary" data-action="report-preview"${busy?' disabled':''}>Preview</button> <button class="btn" data-action="report-download" data-format="pdf"${busy?' disabled':''}>${busy==='pdf'?'Preparing PDF…':'Download PDF'}</button> <button class="btn" data-action="report-download" data-format="csv"${busy?' disabled':''}>${busy==='csv'?'Preparing CSV…':'Download CSV'}</button><div id="repError" class="field-error" hidden></div></div></div>
+  </div>${reportPreviewHtml()}`;
 }
 function renderCurrentView(){
   state.tiles=new Map();state.charts=new Map();state.panels=new Set();state.section=null;
@@ -689,6 +1035,9 @@ function renderCurrentView(){
   else if(v==='method')renderMethodView(state.methodName);
   else if(v==='tag')renderTagView(state.tagName);
   else if(v==='config')renderConfigView();
+  else if(v==='schedules')renderSchedulesView();
+  else if(v==='reports')renderReportsView();
+  else if(v==='insights')renderInsightsView();   // insights.js
   else if(v==='type')renderTypeView(state.typeId);
   else if(v==='baseline')renderTypeView('selenium-baseline');
   else if(v==='sit'||v==='sit-all')renderSitView(state.sitGroupId);
@@ -719,8 +1068,10 @@ async function switchEnvironment(id){
   if(id===state.envId)return;
   state.envId=id||null;
   try{localStorage.setItem(envStoreKey(),state.envId||'');}catch{}
-  // Every status on screen belongs to the previous environment.
-  Object.assign(state,{since:null,selected:new Set()});
+  // Every status on screen belongs to the previous environment — including the
+  // Test Runs page's own filter, which otherwise silently keeps showing the old
+  // environment (or "all") while every other view has already moved on.
+  Object.assign(state,{since:null,selected:new Set(),runsFilter:{environment_id:state.envId||'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false}});
   state.history.clear();
   await refreshAll();
 }
@@ -733,7 +1084,9 @@ async function switchApplication(key){
   state.appKey=key;
   try{localStorage.setItem('te.app',key);}catch{}
   // Full reset of app-scoped view state, including the environment: each application has its own targets.
-  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null});
+  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
+    schedFormOpen:false,report:{data:null,loading:false,error:null,busy:''},
+    reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false}});
   state.history.clear();
   location.hash='#/overview';
   renderSideNav();renderCurrentView();
@@ -745,20 +1098,33 @@ async function switchApplication(key){
 // Actions
 // ---------------------------------------------------------------------------
 async function queueExecution(body,label){
-  if(!state.envId){toast('No environment available.');return;}
+  const environmentId=body.environment_id||state.envId;
+  if(!environmentId){toast('No environment available.');return;}
   try{
-    const res=await postJson('/api/v1/executions',{...body,environment_id:state.envId,trigger_source:'manual',...(state.headed?{metadata:{headless:false}}:{})});
+    const res=await postJson('/api/v1/executions',{...body,environment_id:environmentId,trigger_source:'manual',...(state.headed?{metadata:{headless:false}}:{})});
     toast('Queued '+label+' — '+(res.data.name||res.data.key),'#/run/'+res.data.id);
     pollLive();
   }catch(e){toast('Run failed: '+e.message);}
 }
-function runCases(ids,label){if(ids.length)queueExecution({test_case_ids:ids},label);}
+function runCases(ids,label,environmentId){if(ids.length)queueExecution({test_case_ids:ids,...(environmentId?{environment_id:environmentId}:{})},label);}
 function runSuite(suiteId,ids,label){queueExecution({test_suite_id:suiteId,test_case_ids:ids},label||'suite');}
 async function cancelRun(id){
   try{await api('/api/v1/executions/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Cancelled run');}
   catch(e){toast('Cancel failed: '+e.message);}
   if(state.view==='run')await loadRun(state.runId);
   pollLive();
+}
+async function cancelAllRuns(btn){
+  const n=activeRuns().length;
+  if(!n)return;
+  if(!confirm('Cancel all '+plural(n,'run')+' in progress for '+(state.appKey||'this application')+' on '+envName()+'?'))return;
+  if(btn)btn.disabled=true;
+  try{
+    const res=await postJson('/api/v1/executions/cancel-all',{application_key:state.appKey,environment_id:state.envId});
+    toast('Cancelled '+plural(res.data.cancelled,'run'));
+    pollLive();
+  }catch(e){toast('Cancel all failed: '+e.message);}
+  finally{if(btn)btn.disabled=false;}
 }
 async function copyText(text){
   try{await navigator.clipboard.writeText(text);return true;}
@@ -777,11 +1143,6 @@ async function copyEvidence(url,btn){
   const ok=await copyText(url);
   toast(ok?'Evidence link copied':'Copy failed — select and copy manually');
   if(ok&&btn){const prev=btn.textContent;btn.textContent='Copied';btn.disabled=true;setTimeout(()=>{btn.textContent=prev;btn.disabled=false;},1500);}
-}
-async function toggleEvidence(rid){
-  if(state.evidence.has(rid))state.evidence.delete(rid);
-  else{try{state.evidence.set(rid,(await api('/api/v1/execution-results/'+encodeURIComponent(rid)+'/evidence')).data||[]);}catch(e){toast('Evidence failed: '+e.message);}}
-  renderCurrentView();
 }
 function toggleTile(key){
   const tile=state.tiles.get(key);
@@ -803,22 +1164,98 @@ function handleAction(action,node){
   else if(action==='run-section'&&state.section){const s=state.section;if(s.suiteId)runSuite(s.suiteId,s.ids,s.label);else runCases(s.ids,s.label);}
   else if(action==='cancel-run')cancelRun(node.dataset.id);
   else if(action==='rerun'&&state.run)runCases(state.run.test_case_ids||[],state.run.key);
-  else if(action==='evidence')toggleEvidence(node.dataset.rid);
   else if(action==='copy-evidence')copyEvidence(node.dataset.url,node);
   else if(action==='run-all')runEverything(node);
   else if(action==='nav-back')history.back();
-  else if(action==='run-case')runCases([node.dataset.id],node.dataset.label);
+  else if(action==='run-case'){const envSel=el('runCaseEnv');runCases([node.dataset.id],node.dataset.label,envSel&&envSel.value||null);}
   else if(action==='save-retention')saveRetention(node);
+  else if(action==='save-suite')saveAsSuite();
+  else if(action==='apply-run-filters')applyRunFilters();
+  else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',from:'',to:''};loadRunsList(true);}
+  else if(action==='runs-more')loadRunsList(false);
+  else if(action==='run-types')runSelectedTypes();
+  else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
+  else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
+  else if(action==='sched-save')saveSchedule(node);
+  else if(action==='sched-preset'){const c=el('schedCron');if(c){c.value=node.dataset.cron;state.schedForm.cron=node.dataset.cron;}}
+  else if(action==='sched-toggle')scheduleAction('toggle',node);
+  else if(action==='sched-run')scheduleAction('run',node);
+  else if(action==='sched-delete')scheduleAction('delete',node);
+  else if(action==='schedule')scheduleFrom(node);
+  else if(action==='report-preview')previewReport();
+  else if(action==='report-download')downloadReport(node.dataset.format);
+  else if(action==='report-case'){state.reportForm={...state.reportForm,title:'',appScope:'current',kind:'case',caseText:node.dataset.key,caseKeys:[],runSel:'date_range',from:'',to:'',status:'all',details:true,evidence:true};state.report={data:null,loading:false,error:null,busy:''};location.hash='#/reports';}
+  else if(action==='cancel-all-runs')cancelAllRuns(node);
+}
+// "Schedule" next to a Run button: same selection, run later instead of now.
+function scheduleFrom(node){
+  const what=node.dataset.what;
+  if(what==='types')return openScheduleForm({kind:'types',types:[...state.selectedTypes]});
+  if(what==='case')return openScheduleForm({kind:'case',caseText:node.dataset.key,envId:(el('runCaseEnv')&&el('runCaseEnv').value)||state.envId||''});
+  if(what==='section'){
+    const byId=state.idx.caseById,keysOf=ids=>ids.map(id=>byId.get(id)).filter(Boolean).map(c=>c.key);
+    if(state.selected.size)return openScheduleForm({kind:'selected',caseKeys:keysOf([...state.selected])});
+    const s=state.section;
+    if(s&&s.suiteId)return openScheduleForm({kind:'suite',suiteId:s.suiteId});
+    if(s)return openScheduleForm({kind:'selected',caseKeys:keysOf(s.ids)});
+  }
+  openScheduleForm();
+}
+function applyRunFilters(){
+  state.runsFilter={
+    environment_id:el('runsEnvFilter').value,
+    status:el('runsStatusFilter').value,
+    from:el('runsFromFilter').value,
+    to:el('runsToFilter').value,
+  };
+  loadRunsList(true);
+}
+async function runSelectedTypes(){
+  const ids=[...new Set([...state.selectedTypes].flatMap(id=>casesForType(id).map(c=>c.id)))];
+  if(!ids.length)return;
+  const label=state.selectedTypes.size===1?typeTitle([...state.selectedTypes][0]):plural(state.selectedTypes.size,'test type');
+  await queueExecution({test_case_ids:ids},label);
+  state.selectedTypes=new Set();
+  renderCurrentView();
+}
+async function saveAsSuite(){
+  const ids=[...state.selected];
+  if(!ids.length)return;
+  const name=(prompt('Name for the new suite:')||'').trim();
+  if(!name)return;
+  const appId=state.application&&state.application.id;
+  if(!appId){toast('No application loaded.');return;}
+  const slug=name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'suite';
+  const key='sb-custom-'+slug+'-'+Date.now().toString(36);
+  try{
+    const suite=await postJson('/api/v1/suites',{key,name,application_id:appId});
+    await postJson('/api/v1/suites/'+encodeURIComponent(suite.data.id)+'/cases',{test_case_ids:ids});
+    toast('Saved suite “'+name+'” with '+plural(ids.length,'case'));
+    state.selected=new Set();
+    await loadSummary();
+    renderSideNav();renderCurrentView();
+  }catch(e){toast('Save suite failed: '+e.message);}
+}
+function showRetentionError(msg){
+  const err=el('retentionError');
+  if(!err)return;
+  if(!msg){err.hidden=true;err.textContent='';return;}
+  err.hidden=false;err.textContent=msg;
 }
 async function saveRetention(btn){
-  const days=Number(el('retentionDays').value);
-  if(!Number.isInteger(days)||days<1||days>365){toast('Enter a whole number of days between 1 and 365');return;}
+  showRetentionError(null);
+  const raw=el('retentionDays').value;
+  const days=Number(raw);
+  if(raw===''||!Number.isInteger(days)||days<5||days>365){
+    showRetentionError('Enter a whole number of days, minimum 5 (maximum 365).');
+    return;
+  }
   btn.disabled=true;
   try{
     state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({run_retention_days:days})})).data;
-    toast('Retention updated');
+    toast('Retention updated to '+days+' days');
     renderCurrentView();
-  }catch(e){toast('Save failed: '+e.message);btn.disabled=false;}
+  }catch(e){showRetentionError('Save failed: '+e.message);btn.disabled=false;}
 }
 async function runEverything(btn){
   if(!state.envId){toast('No environment available.');return;}
@@ -845,7 +1282,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='history'||v==='builds'||v==='baseline'||v==='config')state.view=v;
+  else if(v==='history'||v==='builds'||v==='baseline'||v==='config'||v==='schedules'||v==='reports'||v==='insights')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
@@ -853,6 +1290,8 @@ async function onRoute(){
   const runId=state.runId,caseId=state.caseId;
   if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
   if(state.view==='config'&&state.settings===null)loadSettings();
+  if(state.view==='schedules')loadSchedules();
+  if(state.view==='history'&&!state.runsList.loaded){if(!state.runsFilter.environment_id)state.runsFilter.environment_id=state.envId||'';loadRunsList(true);}
   renderCurrentView();
   window.scrollTo(0,0);
   if(runId){await loadRun(runId);if(state.runId===runId)renderCurrentView();}
@@ -886,9 +1325,31 @@ content.addEventListener('click',e=>{
 });
 content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
 content.addEventListener('change',e=>{
+  const form=e.target.closest('[data-form]');
+  if(form){
+    if(form.dataset.form==='sched')readSchedForm();else readReportForm();
+    // Text and date fields only sync to state; re-rendering on their blur would swallow the click that caused it.
+    if(e.target.matches('input[type=radio],input[type=checkbox],select'))renderCurrentView();
+    return;
+  }
+  if(e.target.matches('#runsEnvFilter,#runsStatusFilter,#runsFromFilter,#runsToFilter')){applyRunFilters();return;}
+  const typesel=e.target.closest('[data-typesel]');
+  if(typesel){
+    if(typesel.checked)state.selectedTypes.add(typesel.dataset.typesel);else state.selectedTypes.delete(typesel.dataset.typesel);
+    renderCurrentView();
+    return;
+  }
+  const all=e.target.closest('[data-selall]');
+  if(all){
+    const ids=[...all.closest('table').querySelectorAll('[data-sel]')].map(cb=>cb.dataset.sel);
+    if(all.checked)ids.forEach(id=>state.selected.add(id));else ids.forEach(id=>state.selected.delete(id));
+    renderCurrentView();
+    return;
+  }
   const cb=e.target.closest('[data-sel]');if(!cb)return;
   if(cb.checked)state.selected.add(cb.dataset.sel);else state.selected.delete(cb.dataset.sel);
   content.querySelectorAll('[data-action="run-selected"]').forEach(b=>{b.disabled=!state.selected.size;b.textContent=runSelLabel();});
+  content.querySelectorAll('[data-action="save-suite"]').forEach(b=>{b.disabled=!state.selected.size;b.textContent='Save selected as suite'+(state.selected.size?' ('+state.selected.size+')':'');});
 });
 content.addEventListener('toggle',e=>{const d=e.target;if(d.dataset&&d.dataset.keep){if(d.open)state.open.add(d.dataset.keep);else state.open.delete(d.dataset.keep);}},true);
 window.addEventListener('hashchange',onRoute);

@@ -9,12 +9,17 @@
  *     ({"token": "token"} → vars.token = body.token) for later steps
  *     (e.g. headers: {authorization: "Bearer {{token}}"}).
  *   - `expect_json` asserts on the body by dot-path (equals / contains / exists /
- *     min_length for arrays).
+ *     matches, min and max for numbers, min_length and max_length for arrays
+ *     and strings).
  *   - `poll` re-issues the same request until every expectation passes or the
  *     poll window closes — the async round-trip primitive (message sent via one
  *     system, its effect observed through another).
  *   - `allow_failure` marks a step whose expectations may fail without failing
  *     the case (used to probe optional surfaces).
+ *   - `precondition` marks a step that establishes whether the target can host
+ *     the case at all (fixtures seeded, nothing else draining the queue). When
+ *     its expectations fail the case is reported skipped, not failed. A target
+ *     that does not answer is still a failure.
  *
  * Every run leaves an `http_transcript` evidence file: each request as sent and
  * the response as received (secrets masked, bodies capped), pass or fail.
@@ -39,8 +44,14 @@ export interface HttpStep {
     contains?: string;
     exists?: boolean;
     min_length?: number;
+    /** Upper bound on an array's or string's length (inclusive). */
+    max_length?: number;
     /** Numeric lower bound (inclusive). */
     min?: number;
+    /** Numeric upper bound (inclusive). */
+    max?: number;
+    /** Regular expression the value (as a string) must match. */
+    matches?: string;
   }>;
   expect_headers?: Array<{
     name: string;
@@ -51,6 +62,7 @@ export interface HttpStep {
   save?: Record<string, string>;
   poll?: { timeout_ms?: number; interval_ms?: number };
   allow_failure?: boolean;
+  precondition?: boolean;
   description?: string;
 }
 
@@ -63,7 +75,7 @@ export interface HttpRunInput {
 }
 
 export interface HttpRunResult {
-  status: 'passed' | 'failed' | 'error';
+  status: 'passed' | 'failed' | 'error' | 'skipped';
   message: string;
   duration_ms: number;
   classification?: string;
@@ -77,7 +89,7 @@ interface Exchange {
   request: { method: string; url: string; headers?: Record<string, string>; body?: string };
   response?: { status: number; headers: Record<string, string>; body: string; latency_ms: number };
   attempts?: number;
-  outcome?: 'passed' | 'failed' | 'tolerated';
+  outcome?: 'passed' | 'failed' | 'tolerated' | 'precondition_not_met';
   failure?: string;
   error?: string;
 }
@@ -146,7 +158,10 @@ function checkExpectations(
     }
     if (ex.equals !== undefined) {
       const want = typeof ex.equals === 'string' ? substitute(ex.equals, vars) : ex.equals;
-      if (actual !== want) {
+      // A captured variable is always text; compared with a number or boolean it means that value's text.
+      const templated = typeof ex.equals === 'string' && ex.equals.includes('{{');
+      const same = templated && (typeof actual === 'number' || typeof actual === 'boolean') ? String(actual) === want : actual === want;
+      if (!same) {
         return `expect_json ${ex.path}: got ${JSON.stringify(actual)}, wanted ${JSON.stringify(want)}`;
       }
     }
@@ -161,9 +176,21 @@ function checkExpectations(
       const len = Array.isArray(actual) ? actual.length : typeof actual === 'string' ? actual.length : -1;
       if (len < ex.min_length) return `expect_json ${ex.path}: length ${len} < ${ex.min_length}`;
     }
+    if (ex.max_length !== undefined) {
+      const len = Array.isArray(actual) ? actual.length : typeof actual === 'string' ? actual.length : -1;
+      if (len < 0 || len > ex.max_length) return `expect_json ${ex.path}: length ${len} > ${ex.max_length}`;
+    }
     if (ex.min !== undefined) {
       const num = Number(actual);
       if (!Number.isFinite(num) || num < ex.min) return `expect_json ${ex.path}: ${JSON.stringify(actual)} < ${ex.min}`;
+    }
+    if (ex.max !== undefined) {
+      const num = Number(actual);
+      if (actual === null || actual === undefined || !Number.isFinite(num) || num > ex.max) return `expect_json ${ex.path}: ${JSON.stringify(actual)} > ${ex.max}`;
+    }
+    if (ex.matches !== undefined) {
+      const text = typeof actual === 'string' ? actual : actual === undefined ? '' : JSON.stringify(actual);
+      if (!new RegExp(substitute(ex.matches, vars)).test(text)) return `expect_json ${ex.path}: ${JSON.stringify(actual)?.slice(0, 160)} does not match /${ex.matches}/`;
     }
   }
   for (const eh of step.expect_headers || []) {
@@ -319,7 +346,7 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
         trace.exchanges.push({
           ...outcome.recorded,
           attempts,
-          outcome: !failure ? 'passed' : step.allow_failure ? 'tolerated' : 'failed',
+          outcome: !failure ? 'passed' : step.allow_failure ? 'tolerated' : step.precondition ? 'precondition_not_met' : 'failed',
           failure: failure || undefined,
         });
 
@@ -327,6 +354,14 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
           if (step.allow_failure) {
             results.push(`step ${idx + 1} (${step.description || method}) tolerated: ${failure}`);
             continue;
+          }
+          if (step.precondition) {
+            return {
+              status: 'skipped',
+              message: `Precondition not met — step ${idx + 1}${step.description ? ` (${step.description})` : ''}: ${failure}`,
+              duration_ms: Date.now() - start,
+              metrics: { latency_ms: lastLatency, status_code: lastStatus, skipped_at_step: idx + 1 },
+            };
           }
           return {
             status: 'failed',
