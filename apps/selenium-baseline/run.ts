@@ -73,6 +73,8 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
   // Ensure reporting directory exists
   await mkdir(config.reportingDir, { recursive: true });
 
+  let workflowResults: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }> | undefined;
+
   await withDriver(async (driver) => {
     const navigator = new MenuNavigator(driver, config);
     const validator = new ScreenValidator(driver, config);
@@ -148,7 +150,6 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
     }
 
     // 4. Run workflow checks (DB-persistence)
-    let workflowResults: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }> | undefined;
     if (options?.workflowChecks?.length) {
       console.log('\n=== Workflow Checks ===');
       const wfResults = await runWorkflowChecks(driver, config, { workflows: options.workflowChecks });

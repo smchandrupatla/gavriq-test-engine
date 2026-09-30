@@ -56,6 +56,10 @@ export async function closeSession(id) {
   try { await wd("DELETE", `/session/${id}`); } catch { /* ignore */ }
 }
 
+/**
+ * @param {string} id
+ * @returns {SeleniumSession}
+ */
 export function session(id) {
   const base = `/session/${id}`;
   return {
@@ -86,6 +90,22 @@ export function session(id) {
   };
 }
 
+/**
+ * @typedef {Object} SeleniumSession
+ * @property {string} id
+ * @property {(url: string) => Promise<void>} go
+ * @property {() => Promise<string>} source
+ * @property {() => Promise<string>} title
+ * @property {() => Promise<string>} url
+ * @property {(using: string, value: string) => Promise<string | null>} find
+ * @property {(using: string, value: string) => Promise<string[]>} finds
+ * @property {(el: string) => Promise<void>} click
+ * @property {(el: string) => Promise<void>} clear
+ * @property {(el: string, text: string) => Promise<void>} type
+ * @property {(el: string) => Promise<string>} text
+ * @property {() => Promise<string>} shot
+ */
+
 function safe(name) {
   return String(name || "shot").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 80);
 }
@@ -113,6 +133,11 @@ export async function recordSkip(name, reason) {
   return file;
 }
 
+/**
+ * @template T
+ * @param {(sess: SeleniumSession) => Promise<T>} fn
+ * @returns {Promise<{ skipped: true, reason: string } | { skipped: false, result: T }>}
+ */
 export async function withBrowser(fn) {
   const ready = await seleniumReady();
   if (!ready) {

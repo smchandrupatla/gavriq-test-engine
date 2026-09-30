@@ -38,10 +38,13 @@ async function menuSnapshot(driver: WebDriver): Promise<Array<{ label: string; c
 function menusEqual(a: Array<{ label: string; children: string[] }>, b: Array<{ label: string; children: string[] }>): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].label !== b[i].label) return false;
-    if (a[i].children.length !== b[i].children.length) return false;
-    for (let j = 0; j < a[i].children.length; j++) {
-      if (a[i].children[j] !== b[i].children[j]) return false;
+    const ai = a[i];
+    const bi = b[i];
+    if (!ai || !bi) return false;
+    if (ai.label !== bi.label) return false;
+    if (ai.children.length !== bi.children.length) return false;
+    for (let j = 0; j < ai.children.length; j++) {
+      if (ai.children[j] !== bi.children[j]) return false;
     }
   }
   return true;

@@ -21,7 +21,7 @@ test("N-2 demo script is the same walk after deploy", async () => {
 test("channel targets list file, api, mq, kafka", async () => {
   const res = await fetch(`${ENV.apiBase}/api/v1/channel-targets`, { signal: AbortSignal.timeout(5000) });
   assert.equal(res.status, 200);
-  const body = await res.json();
+  const body = (await res.json()) as { data?: Array<{ channel?: string }> };
   const channels = (body.data || []).map((row) => row.channel);
   for (const expected of ["file", "api", "mq", "kafka"]) {
     assert.ok(channels.includes(expected), `missing channel ${expected}`);
