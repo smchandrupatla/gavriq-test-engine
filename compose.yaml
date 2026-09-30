@@ -43,6 +43,15 @@ services:
       SIT_ON_START: "false"
       SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
       SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:8080}
+      # "Kafka test" menu: Kafka Desk by its alias on the shared network (see docs/KAFKA-TEST.md)
+      SIT_KAFKA_DESK_BASE: ${SIT_KAFKA_DESK_BASE:-http://kafka-desk:8095}
+      SIT_KAFKA_DESK_USER: ${SIT_KAFKA_DESK_USER:-}
+      SIT_KAFKA_DESK_PASS: ${SIT_KAFKA_DESK_PASS:-}
+      SIT_KAFKA_FEEDER_MESSAGES: ${SIT_KAFKA_FEEDER_MESSAGES:-6}
+      SIT_KAFKA_FEEDER_SECONDS: ${SIT_KAFKA_FEEDER_SECONDS:-12}
+    networks:
+      default: {}
+      kafka-shared: {}
     ports:
       - "127.0.0.1:${TEST_ENGINE_HOST_PORT:-8787}:8787"
     extra_hosts:
@@ -113,6 +122,10 @@ services:
       SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:8080}
     profiles:
       - sit
+
+networks:
+  kafka-shared:
+    name: gavriq-kafka-net
 
 volumes:
   sit-console-data:

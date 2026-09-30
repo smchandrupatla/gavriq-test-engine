@@ -7,9 +7,17 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { ENV, SERVICES } from "./lib/env.ts";
 import { runAllCases, reportToTesthub, listCaseFiles } from "./lib/runner.mjs";
-import { TYPES, GROUPS, suiteOf, groupOf } from "./lib/catalog.mjs";
+import { TYPES as BASE_TYPES, GROUPS as BASE_GROUPS, suiteOf as baseSuiteOf, groupOf as baseGroupOf } from "./lib/catalog.mjs";
+import { KAFKA_TEST_TYPE, KAFKA_TEST_GROUPS, kafkaTestSuiteOf, kafkaTestGroupOf } from "./kafka-test/catalog.mjs";
 import { extractTestCases } from "../dev/scripts/extract-tests.mjs";
 import { specificationCases, regressionCases, useCases, useCaseDocument } from './lib/use-cases.mjs';
+
+// sit/lib/catalog.mjs is synced from Sand Bench and knows nothing of the engine's own
+// "Kafka test" cases (25-, 26-); layer them on here rather than editing the synced copy.
+const TYPES = [...BASE_TYPES, KAFKA_TEST_TYPE];
+const GROUPS = { ...BASE_GROUPS, ...KAFKA_TEST_GROUPS };
+const suiteOf = (name) => kafkaTestSuiteOf(name) ?? baseSuiteOf(name);
+const groupOf = (name, testName) => kafkaTestGroupOf(name) ?? baseGroupOf(name, testName);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const casesDir = path.join(root, "sit/cases");
@@ -160,6 +168,8 @@ const CATEGORY_BY_FILE = {
   "00-health": "Deployment health & readiness",
   "10-mq-round-trip": "MQ round trip",
   "20-kafka-round-trip": "Kafka round trip",
+  "25-kafka-schedule": "Kafka test — schedule to Kafka, confirmed by Kafka Desk",
+  "26-kafka-data-feeder": "Kafka test — data feeder to Kafka, confirmed by Kafka Desk",
   "30-api-round-trip": "External API round trip",
   "40-worker-job": "Worker job queue",
   "50-dbviewer-cross-check": "Database cross-check",

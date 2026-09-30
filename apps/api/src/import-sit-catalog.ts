@@ -16,6 +16,8 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '00-health': { suite: 'sit-health', type: 'smoke', method: 'http' },
   '10-mq-round-trip': { suite: 'sit-mq', type: 'integration', method: 'http' },
   '20-kafka-round-trip': { suite: 'sit-kafka', type: 'integration', method: 'http' },
+  '25-kafka-schedule': { suite: 'sit-kafka-schedule', type: 'integration', method: 'http' },
+  '26-kafka-data-feeder': { suite: 'sit-kafka-data-feeder', type: 'integration', method: 'http' },
   '30-api-round-trip': { suite: 'sit-api', type: 'api', method: 'http' },
   '40-worker-job': { suite: 'sit-worker', type: 'integration', method: 'http' },
   '50-dbviewer-cross-check': { suite: 'sit-db', type: 'database', method: 'http' },

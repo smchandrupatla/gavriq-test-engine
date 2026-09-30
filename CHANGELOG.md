@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Kafka test
+- New **Kafka test** menu: Schedule → Kafka and Data feeder → Kafka, on demand, with checkpoints for Sand Bench and
+  Kafka Desk and per-message evidence (`docs/KAFKA-TEST.md`, `scripts/kafka-stack.sh`).
+
 ## [0.3.3] — 2026-09-18
 
 **Added**
