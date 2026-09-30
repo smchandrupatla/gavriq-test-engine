@@ -27,7 +27,7 @@ case "${1:-status}" in
   status)
     curl -fsS "http://localhost:$TEST_ENGINE_HOST_PORT/api/v1/kafka-test/status" || echo "Test Engine not reachable on $TEST_ENGINE_HOST_PORT" ;;
   test)
-    curl -fsS -X POST -H 'content-type: application/json' -d '{"files":["25-kafka-schedule.sit.ts","26-kafka-data-feeder.sit.ts"]}' \
+    curl -fsS -X POST -H 'content-type: application/json' -d '{"files":["25-kafka-schedule.sit.ts","26-kafka-data-feeder.sit.ts","27-kafka-formats.sit.ts","28-kafka-exceptions.sit.ts","29-kafka-load.sit.ts"]}' \
       "http://localhost:$TEST_ENGINE_HOST_PORT/api/v1/sit-runs" && echo && echo "Started. Watch: http://localhost:$TEST_ENGINE_HOST_PORT/#/kafka-test" ;;
   *) echo "usage: $0 up|down|status|test"; exit 2 ;;
 esac

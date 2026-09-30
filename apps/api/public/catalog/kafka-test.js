@@ -9,7 +9,8 @@
  * Bench recorded and what Kafka Desk consumed. The menu shows the plan, the live log while a run
  * is going, and the evidence afterwards. */
 (function () {
-  const VIEWS = { 'kafka-test': null, 'kafka-test-schedule': 'kafka-schedule', 'kafka-test-feeder': 'kafka-data-feeder' };
+  const VIEWS = { 'kafka-test': null, 'kafka-test-schedule': 'kafka-schedule', 'kafka-test-feeder': 'kafka-data-feeder', 'kafka-test-formats': 'kafka-formats', 'kafka-test-exceptions': 'kafka-exceptions', 'kafka-test-load': 'kafka-load' };
+  const VIEW_OF = Object.fromEntries(Object.entries(VIEWS).filter(([, v]) => v).map(([view, key]) => [key, view]));
   const k = { data: null, status: null, history: {}, picked: {}, run: null, timer: null, loadedAt: 0 };
 
   const css = document.createElement('style');
@@ -145,11 +146,18 @@
     const msgs = (evidence && evidence.messages) || [];
     if (!msgs.length) return '<div class="empty">No messages compared yet. They appear here once the run reaches the Kafka Desk checkpoints.</div>';
     const rows = msgs.map((m) =>
-      '<tr><td>' + esc(m.ordinal) + '</td><td class="kt-id">' + esc(m.messageId || '(no id — matched by payload)') + '</td>' +
+      '<tr><td>' + esc(m.ordinal) + '</td><td class="kt-detail">' + esc(m.variant || '') + '</td><td class="kt-id">' + esc(m.messageId || '(no id — matched by payload)') + '</td>' +
       '<td>' + esc(m.sandBench.status) + '<div class="kt-detail">' + coord(m.sandBench.coordinates) + '</div></td>' +
-      '<td>' + (m.kafkaDesk.found ? '<span class="ok-text">consumed</span> (' + esc(m.kafkaDesk.source) + ')' : '<span class="bad-text">not seen</span>') + '<div class="kt-detail">' + coord(m.kafkaDesk.coordinates) + (m.kafkaDesk.seenAt ? ' · ' + esc(fmt(m.kafkaDesk.seenAt)) : '') + '</div></td>' +
+      '<td>' + (m.kafkaDesk.found ? '<span class="ok-text">consumed</span> (' + esc(m.kafkaDesk.source) + ')' : '<span class="bad-text">not seen</span>') + '<div class="kt-detail">' + coord(m.kafkaDesk.coordinates) + (m.kafkaDesk.seenAt ? ' · ' + esc(fmt(m.kafkaDesk.seenAt)) : '') + (m.kafkaDesk.format ? '<br>' + esc(m.kafkaDesk.format + ' · ' + m.kafkaDesk.encoding + ' · ' + m.kafkaDesk.layout) : '') + '</div></td>' +
       '<td><span class="kt-mark ' + (m.coordinatesMatch ? 'passed' : 'failed') + '">' + (m.coordinatesMatch ? '✓ same' : '✗ differ') + '</span></td></tr>').join('');
-    return '<div class="table-wrap"><table><thead><tr><th>#</th><th>Message ID</th><th>Sand Bench recorded</th><th>Kafka Desk consumed</th><th>Offsets</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return '<div class="table-wrap"><table><thead><tr><th>#</th><th>Variant</th><th>Message ID</th><th>Sand Bench recorded</th><th>Kafka Desk consumed</th><th>Offsets</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function loadTable(evidence) {
+    const load = evidence && evidence.sandBench && evidence.sandBench.load;
+    if (!load || !Object.keys(load).length) return '';
+    const rows = Object.entries(load).map(([name, m]) => '<tr><td>' + esc(name) + '</td><td>' + esc(m.messages) + '</td><td>' + esc(m.perSecond) + ' /s</td><td>' + esc(m.sendSeconds != null ? m.sendSeconds : m.actualSeconds) + ' s</td><td>' + esc(m.allConfirmedSeconds) + ' s</td></tr>').join('');
+    return '<div class="card"><div class="card-head"><h2>Throughput</h2></div><div class="table-wrap"><table><thead><tr><th>Test</th><th>Messages</th><th>Rate</th><th>Sent in</th><th>All confirmed by Kafka Desk after</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
   }
 
   function summaryLine(c) {
@@ -166,7 +174,7 @@
     el('content').innerHTML =
       '<p class="muted" style="margin-top:0">Proves that what Sand Bench sends to Kafka really arrives in Kafka: each test creates its data in Sand Bench, lets Sand Bench send it, then asks Kafka Desk — which consumes the topic on its own — to confirm every message ID at the same offset. Checkpoints are written for both systems and kept as evidence.</p>' +
       targetsHtml() +
-      '<div class="toolbar" style="padding:0 0 12px;border:0"><button class="btn primary" data-kt-run="all"' + (busy ? ' disabled' : '') + '>Run both tests</button><span class="muted small">On demand. Takes about a minute each; a data feeder run trickles its messages over ~12 seconds so you can watch them arrive in Kafka Desk.</span></div>' +
+      '<div class="toolbar" style="padding:0 0 12px;border:0"><button class="btn primary" data-kt-run="all"' + (busy ? ' disabled' : '') + '>Run all Kafka tests</button><span class="muted small">On demand. Schedule and feeder tests take about a minute each, formats and exceptions a few minutes; feeder runs trickle their messages over several seconds so you can watch them arrive in Kafka Desk.</span></div>' +
       liveHtml() +
       k.data.cases.map((c) =>
         '<div class="kt-case"><div class="kt-case-head"><div><h3><a href="#/' + (c.key === 'kafka-schedule' ? 'kafka-test-schedule' : 'kafka-test-feeder') + '">' + esc(c.title) + '</a></h3><div class="muted small" style="max-width:640px">' + esc(c.summary) + '</div><div style="margin-top:8px">' + summaryLine(c) + '</div></div>' +
@@ -191,7 +199,7 @@
       targetsHtml() + liveHtml() +
       '<div class="card"><div class="card-head"><h2>Checkpoints</h2><span class="muted small">' + (evidence ? 'Evidence ' + esc(evidence.runId) + ' · ' + esc(fmt(evidence.startedAt)) : 'Plan — not run yet') + '</span></div>' +
       (evidence && evidence.error ? '<div class="banner" style="margin:12px 16px">' + esc(evidence.error) + '</div>' : '') + checkpointTable(c, evidence) + '</div>' +
-      '<div class="card"><div class="card-head"><h2>Messages: Sand Bench vs Kafka Desk</h2></div>' + messageTable(evidence) + '</div>' +
+      loadTable(evidence) + '<div class="card"><div class="card-head"><h2>Messages: Sand Bench vs Kafka Desk</h2></div>' + messageTable(evidence) + '</div>' +
       '<div class="card"><div class="card-head"><h2>Earlier runs</h2></div>' + (history ? '<div class="table-wrap"><table><thead><tr><th>Started</th><th>Result</th><th>Checkpoints</th><th>Messages</th><th></th></tr></thead><tbody>' + history + '</tbody></table></div>' : '<div class="empty">No earlier runs.</div>') + '</div>';
     bind(c.key);
   }
@@ -202,7 +210,7 @@
         const key = b.getAttribute('data-kt-run');
         const defs = k.data.cases.filter((c) => key === 'all' || c.key === key);
         k.picked = {};
-        start(defs.map((c) => c.file), key === 'all' ? 'both Kafka tests' : defs[0].title).then(() => (caseKey ? renderCase(state.view) : renderOverview()));
+        start(defs.map((c) => c.file), key === 'all' ? 'all Kafka tests' : defs[0].title).then(() => (caseKey ? renderCase(state.view) : renderOverview()));
       };
     });
     document.querySelectorAll('[data-kt-open]').forEach((b) => {
@@ -212,6 +220,7 @@
     });
   }
 
+  const byKey = (key) => (k.data ? k.data.cases.find((c) => c.key === key) : null);
   function dot(c) { return !c || !c.latest ? null : c.latest.result === 'passed' ? 'green' : 'red'; }
 
   const previous = window.TE_EXT;
@@ -224,7 +233,10 @@
         '<div class="nav-section">Kafka test</div>' +
         navItem('kafka-test', null, 'Overview & run') +
         navItem('kafka-test-schedule', null, 'Schedule → Kafka', null, dot(schedule)) +
-        navItem('kafka-test-feeder', null, 'Data feeder → Kafka', null, dot(feeder));
+        navItem('kafka-test-feeder', null, 'Data feeder → Kafka', null, dot(feeder)) +
+        navItem('kafka-test-formats', null, 'Formats', null, dot(byKey('kafka-formats'))) +
+        navItem('kafka-test-exceptions', null, 'Exceptions · Kafka down', null, dot(byKey('kafka-exceptions'))) +
+        navItem('kafka-test-load', null, 'Load', null, dot(byKey('kafka-load')));
     },
     render: (v) => {
       if (v === 'kafka-test') return renderOverview();
