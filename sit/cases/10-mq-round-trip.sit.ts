@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, pollUntil, testhubJson } from "../lib/client.ts";
+import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson } from "../lib/client.ts";
 
 type InboundEvent = { id: string; channel: string; systemId: string; payload: Record<string, unknown> };
 type TesthubInboxRow = { at: string; channel: string; queue: string | null; payload: Record<string, unknown> };
@@ -43,7 +43,7 @@ test("application sends a message to the MQ manager and delivery is confirmed th
 
   const run = await apiJson<{
     accepted: boolean;
-    delivery: { sent: number; blocked: number; failed: number; results: Array<{ channel: string; status: string }> };
+    delivery: { sent: number; simulated: number; blocked: number; failed: number; results: Array<{ channel: string; status: string }> };
   }>("/api/v1/runs", {
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "mq", seed: correlationId("seed") }),
@@ -51,8 +51,11 @@ test("application sends a message to the MQ manager and delivery is confirmed th
   assert.equal(run.status, 202, "run request was rejected");
   assert.equal(run.body.delivery.blocked, 0, "generated message failed schema validation and was never dispatched");
   assert.equal(run.body.delivery.failed, 0, "MQ adapter reported a failed send");
-  assert.equal(run.body.delivery.sent, 1);
-  assert.equal(run.body.delivery.results[0]?.status, "acknowledged");
+  // Delivered when the stack has a real MQ target; otherwise the stand-in answers simulated,
+  // never acknowledged, and the test hub mirror below still records the message.
+  const expected = await expectedDeliveryStatus("mq");
+  assert.equal(expected === "acknowledged" ? run.body.delivery.sent : run.body.delivery.simulated, 1);
+  assert.equal(run.body.delivery.results[0]?.status, expected);
 
   const after = await pollUntil(
     () => testhubJson<{ data: TesthubInboxRow[]; total: number }>("/hub/inbox?channel=mq"),

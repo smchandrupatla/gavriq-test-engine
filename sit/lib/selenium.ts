@@ -50,17 +50,25 @@ export async function withDriver<T>(fn: (driver: WebDriver) => Promise<T>): Prom
   }
 }
 
-// The console auto-authenticates on load and mounts the SPA into #console-root once
-// #gate is hidden (apps/web/public/js/live-bind.js's enter() adds the "hidden" class
-// to #gate on success) — the same real, user-visible signal sit/lib/ui.ts waits on.
+// apps/web/public/config/login.json decides whether the console auto-authenticates
+// (loginScreenEnabled: false) or shows the sign-in gate and waits for a click
+// (loginScreenEnabled: true — the default since 2d06753's multi-tenancy/sign-in-page
+// work). Either way #gate gets the "hidden" class once a session exists (live-bind.js) —
+// the same real, user-visible signal sit/lib/ui.ts waits on — so this handles both: click
+// Sign in only if the gate is still showing, using the tenant/username it pre-fills itself.
 export async function openConsole(driver: WebDriver): Promise<void> {
   await driver.get(`${ENV.webBase}/`);
-  await driver.wait(async () => {
+  const gateShown = async () => {
     const gates = await driver.findElements(By.id("gate"));
-    if (!gates.length) return true;
+    if (!gates.length) return false;
     const cls = (await gates[0].getAttribute("class")) || "";
-    return cls.split(/\s+/).includes("hidden");
-  }, 20000, "console gate never hid — sign-in/mount did not complete");
+    return !cls.split(/\s+/).includes("hidden");
+  };
+  if (await gateShown()) {
+    const buttons = await driver.findElements(By.id("login"));
+    if (buttons.length) await buttons[0].click();
+  }
+  await driver.wait(async () => !(await gateShown()), 20000, "console gate never hid — sign-in/mount did not complete");
   await driver.wait(until.elementLocated(By.css('#console-root .opsc-sidebar')), 20000, 'console sidebar did not mount');
 }
 
@@ -157,17 +165,17 @@ export async function clickButtonByLabel(driver: WebDriver, label: string): Prom
 }
 
 // Clicks the first element matching css whose text contains the given text — used for
-// the Message Designer wizard's family/message-type tiles, which are plain clickable
+// Create message definition's message tiles (.sbe-studio-msg) and other plain clickable
 // divs (not IconButtons) identified by their visible name.
 export async function clickTileByText(driver: WebDriver, css: string, text: string): Promise<void> {
   const el = await firstWithText(driver, css, text);
   await el.click();
 }
 
-// Waits for the console's success toast (rendered on every FormPageTemplate submit and
-// on the Message Designer wizard's "Create message(s)") and returns its text so the
-// caller can assert on it — the toast text is the UI's own claim of success, always
-// checked here alongside an independent check that the write actually landed.
+// Waits for the console's success toast (rendered on every FormPageTemplate submit, and
+// on the definition studio for Publish, Discard changes and dataset/profile saves) and
+// returns its text so the caller can assert on it — the toast text is the UI's own claim
+// of success, always checked here alongside an independent check that the write landed.
 export async function waitForToast(driver: WebDriver, timeoutMs = 8000): Promise<string> {
   const el = await driver.wait(until.elementLocated(By.css(".opsc-toast")), timeoutMs, "no success toast appeared");
   return ((await el.getText()) || "").trim();
