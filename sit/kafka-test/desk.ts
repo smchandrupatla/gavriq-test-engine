@@ -29,6 +29,10 @@ export type DeskEvidence = {
   offset: number | null;
   seenAt: string;
   ids: string[];
+  format?: string;
+  encoding?: string;
+  layout?: string;
+  preview?: string;
 };
 
 export type VerifyResult = {
@@ -36,7 +40,7 @@ export type VerifyResult = {
   found: number;
   complete: boolean;
   missing: Array<string | null>;
-  results: Array<{ index: number; id: string | null; found: boolean; matchedBy: string | null; evidence: DeskEvidence | null }>;
+  results: Array<{ index: number; id: string | null; found: boolean; matchedBy: string | null; count?: number; evidence: DeskEvidence | null }>;
 };
 
 /** Ask the desk to confirm messages were consumed from the broker, waiting up to waitMs for late ones. */

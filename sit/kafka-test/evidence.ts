@@ -32,11 +32,13 @@ export type Coordinates = { topic: string; partition: number; offset: number };
 
 export type MessageEvidence = {
   ordinal: number;
+  /** Which variant of a multi-variant test (e.g. "xml / base64 / pretty"). */
+  variant?: string;
   messageId: string | null;
   /** What Sand Bench recorded for this delivery. */
   sandBench: { runId: string; seq: number; status: string; detail?: string | null; coordinates: Coordinates | null };
   /** What Kafka Desk consumed from the broker. */
-  kafkaDesk: { found: boolean; source?: string; coordinates?: Coordinates | null; seenAt?: string; matchedBy?: string | null };
+  kafkaDesk: { found: boolean; source?: string; coordinates?: Coordinates | null; seenAt?: string; matchedBy?: string | null; format?: string; encoding?: string; layout?: string; copies?: number };
   /** Topic, partition and offset agree between the two. */
   coordinatesMatch: boolean;
 };

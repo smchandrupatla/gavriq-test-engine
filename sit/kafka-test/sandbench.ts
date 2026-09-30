@@ -20,7 +20,7 @@ export type ExternalSystem = { id: string; name: string; channel: string; topic:
 
 /** Same format Sand Bench writes on an acknowledged Kafka delivery: "<topic> (partition P, offset O)". */
 export function parseCoordinates(detail: string | null | undefined): Coordinates | null {
-  const match = /^(.+) \(partition (\d+), offset (\d+)\)$/.exec(String(detail || ""));
+  const match = /^(.+) \(partition (\d+), offset (\d+)(?:; [^)]*)?\)$/.exec(String(detail || ""));
   return match ? { topic: match[1]!, partition: Number(match[2]), offset: Number(match[3]) } : null;
 }
 
@@ -121,9 +121,14 @@ export async function preflight(ev: Evidence, prefix: string): Promise<ExternalS
 }
 
 export async function deliveriesOf(runId: string): Promise<Delivery[]> {
-  const res = await apiJson<{ data: Delivery[]; total: number }>(`/api/v1/runs/${encodeURIComponent(runId)}/deliveries?limit=500`);
-  if (res.status !== 200) throw new Error(`GET /api/v1/runs/${runId}/deliveries answered ${res.status}`);
-  return res.body.data || [];
+  const all: Delivery[] = [];
+  for (;;) {
+    const res = await apiJson<{ data: Delivery[]; total: number }>(`/api/v1/runs/${encodeURIComponent(runId)}/deliveries?limit=500&offset=${all.length}`, { signal: AbortSignal.timeout(60_000) });
+    if (res.status !== 200) throw new Error(`GET /api/v1/runs/${runId}/deliveries answered ${res.status}`);
+    const page = res.body.data || [];
+    all.push(...page);
+    if (!page.length || all.length >= (res.body.total ?? 0)) return all;
+  }
 }
 
 export function sandBenchRow(runId: string, d: Delivery): MessageEvidence["sandBench"] {

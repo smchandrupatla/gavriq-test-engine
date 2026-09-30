@@ -4,6 +4,9 @@
 export const KAFKA_TEST_FILES = {
   "25-kafka-schedule.sit.ts": { group: "schedule", key: "kafka-schedule" },
   "26-kafka-data-feeder.sit.ts": { group: "data-feeder", key: "kafka-data-feeder" },
+  "27-kafka-formats.sit.ts": { group: "formats", key: "kafka-formats" },
+  "28-kafka-exceptions.sit.ts": { group: "exceptions", key: "kafka-exceptions" },
+  "29-kafka-load.sit.ts": { group: "load", key: "kafka-load" },
 };
 
 export const KAFKA_TEST_TYPE = {
@@ -16,6 +19,9 @@ export const KAFKA_TEST_GROUPS = {
   "kafka-test": [
     { id: "schedule", title: "Schedule → Kafka" },
     { id: "data-feeder", title: "Data feeder → Kafka" },
+    { id: "formats", title: "Formats: JSON · XML · flat file" },
+    { id: "exceptions", title: "Exceptions: Kafka down, recovery, interruption" },
+    { id: "load", title: "Load" },
   ],
 };
 

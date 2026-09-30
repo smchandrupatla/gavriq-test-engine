@@ -8,6 +8,10 @@ Sand Bench sends to Kafka arrives in Kafka:
 | Schedule → Kafka | `sit/cases/25-kafka-schedule.sit.ts` | Creates a dataset, test case and **schedule** in Sand Bench (target: the *Sand Bench Kafka Desk* connection). The Sand Bench worker fires it; the run's generated messages go to topic `sandbench.out`. |
 | Data feeder → Kafka | `sit/cases/26-kafka-data-feeder.sit.ts` | Creates a dataset of messages with known IDs and a **data feeder** that trickles them over ~12 s, starts it and watches messages arrive. |
 
+| Formats | `27-kafka-formats.sit.ts` | 12 combinations of format (JSON / XML / flat file) × encoding (human readable / base64) × layout (compact / pretty-printed), each with its own saved Kafka connection; plus 3 feeder cases sending stored XML/JSON documents in a different form. Kafka Desk must find the same IDs and recognise the form. |
+| Exceptions | `28-kafka-exceptions.sit.ts` | **Kafka down** for a run, a data feeder and a schedule (must fail visibly, nothing reaches Kafka Desk); recovery on the same connection; one dead connection does not affect another; feeder **cancel** and **pause/resume**; feeder on a **disabled** connection is refused. |
+| Load | `29-kafka-load.sit.ts` | `SIT_KAFKA_LOAD_MESSAGES` (default 200) messages per test as JSON, XML/base64/pretty and flat file; a feeder at a high rate; three feeders at once. Every message exactly once and in order; throughput in the evidence. |
+
 Each test writes **checkpoints** for both systems (`SB` = Sand Bench, `KD` = Kafka Desk) and stops at the first
 one that does not hold, so the evidence shows where a message stopped:
 
@@ -43,3 +47,15 @@ Sand Bench's built-in `kafkaportal` is disabled in this mode (same port and name
 `npx tsx --test tests/kafka-test-flow.test.ts` runs both cases against the real Kafka Desk (sibling checkout), a
 fake Kafka REST proxy and a mock Sand Bench API, and checks they fail at the right checkpoint when delivery is
 only simulated, a message never reaches the broker, or the worker never runs the schedule.
+
+## The endpoint chooser (Sand Bench)
+
+A Kafka connection under **External systems** now chooses how its messages go on the wire: **format** (JSON object
+= default, JSON text, XML, flat file), **layout** (compact / pretty-printed), **encoding** (human readable / base64)
+and an optional **Kafka REST proxy override** for that connection alone. The tests create their own connections
+through the same API (`PUT /api/v1/external-systems/:id`) and remove them afterwards. "Kafka down" is a connection
+whose broker override points at `http://127.0.0.1:9` — nothing is stopped.
+
+Flat file = a header line and one record line, `|`-delimited (pretty pads the columns). A stored dataset message
+(`{name, format, content}`) is sent as its document and re-shaped if another format is chosen. Only the Kafka channel
+uses these options today.

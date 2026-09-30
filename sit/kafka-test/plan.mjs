@@ -6,6 +6,38 @@
 const sb = (id, title) => ({ id, system: "sand-bench", title });
 const kd = (id, title) => ({ id, system: "kafka-desk", title });
 
+
+// checkpoint groups written by sit/kafka-test/checks.ts
+const acked = (id) => [
+  sb(`${id}a`, "Sand Bench recorded every delivery for the run"),
+  sb(`${id}b`, "Every delivery was acknowledged by the Kafka broker (none simulated, failed or blocked)"),
+  sb(`${id}c`, "Every acknowledgement carries the broker's topic, partition and offset"),
+];
+const confirmed = (id, ordered = false) => [
+  kd(`${id}a`, "Kafka Desk answered the checkpoint request"),
+  kd(`${id}b`, "Kafka Desk consumed every message ID from Kafka"),
+  kd(`${id}c`, "Each message sits at the same topic, partition and offset in Sand Bench and in Kafka Desk"),
+  kd(`${id}d`, "Kafka Desk found the messages in the wire form Sand Bench was told to use"),
+  kd(`${id}e`, "No message is on the topic more than once"),
+  ...(ordered ? [kd(`${id}f`, "On the topic the messages are in the order Sand Bench sent them")] : []),
+];
+const FORMATS = ["json", "xml", "flat"], ENCODINGS = ["plain", "base64"], LAYOUTS = ["compact", "pretty"];
+const FORMAT_VARIANTS = FORMATS.flatMap((f) => ENCODINGS.flatMap((e) => LAYOUTS.map((l) => `${f}-${e}-${l}`)));
+const FEEDER_VARIANTS = ["feeder-xml-xml-base64-pretty", "feeder-json-xml-plain-compact", "feeder-xml-flat-base64-compact"];
+const variantCheckpoints = (v) => [
+  sb(`FMT-${v}-C`, `[${v}] Dataset and test case created`), sb(`FMT-${v}-CX`, `[${v}] Kafka connection saved with the chosen wire options`),
+  sb(`FMT-${v}-R`, `[${v}] The run delivered every message`), ...acked(`FMT-${v}-SB`).map((c) => ({ ...c, title: `[${v}] ${c.title}` })),
+  sb(`FMT-${v}-W`, `[${v}] Sand Bench's acknowledgement names the wire form used`),
+  ...confirmed(`FMT-${v}-KD`).map((c) => ({ ...c, title: `[${v}] ${c.title}` })),
+];
+const feederVariantCheckpoints = (v) => [
+  sb(`FMT-${v}-DS`, `[${v}] Dataset of stored messages with known IDs`), sb(`FMT-${v}-CX`, `[${v}] Kafka connection saved with the chosen wire options`),
+  sb(`FMT-${v}-F`, `[${v}] Data feeder created`), sb(`FMT-${v}-S`, `[${v}] Feeder started`), sb(`FMT-${v}-RUN`, `[${v}] The feeder sent every stored message`),
+  ...acked(`FMT-${v}-SB`).map((c) => ({ ...c, title: `[${v}] ${c.title}` })),
+  ...confirmed(`FMT-${v}-KD`, true).map((c) => ({ ...c, title: `[${v}] ${c.title}` })),
+  sb(`FMT-${v}-O`, `[${v}] Sent in dataset order`),
+];
+
 export const KAFKA_TEST_CASES = [
   {
     key: "kafka-schedule",
@@ -28,6 +60,8 @@ export const KAFKA_TEST_CASES = [
       kd("SCH-KD-02a", "Kafka Desk answered the checkpoint request"),
       kd("SCH-KD-02b", "Kafka Desk consumed every message ID from Kafka"),
       kd("SCH-KD-02c", "Each message sits at the same topic, partition and offset in Sand Bench and in Kafka Desk"),
+      kd("SCH-KD-02d", "Kafka Desk found the messages in the wire form Sand Bench was told to use"),
+      kd("SCH-KD-02e", "No message is on the topic more than once"),
       kd("SCH-KD-03", "The message is listed in Kafka Desk's Receive list and can be found by its ID"),
     ],
   },
@@ -55,8 +89,104 @@ export const KAFKA_TEST_CASES = [
       kd("FDR-KD-02a", "Kafka Desk answered the checkpoint request"),
       kd("FDR-KD-02b", "Kafka Desk consumed every message ID from Kafka"),
       kd("FDR-KD-02c", "Each message sits at the same topic, partition and offset in Sand Bench and in Kafka Desk"),
+      kd("FDR-KD-02d", "Kafka Desk found the messages in the wire form Sand Bench was told to use"),
+      kd("FDR-KD-02e", "No message is on the topic more than once"),
       kd("FDR-KD-04", "On the topic the messages are in the order the feeder sent them"),
       kd("FDR-KD-03", "The message is listed in Kafka Desk's Receive list and can be found by its ID"),
     ],
   },
+  {
+    key: "kafka-formats",
+    file: "27-kafka-formats.sit.ts",
+    title: "Formats: JSON · XML · flat file",
+    summary: "Every combination the Sand Bench endpoint chooser offers — format (JSON, XML, flat file) × encoding (human readable, base64) × layout (compact, pretty-printed) — for generated messages, plus stored XML/JSON documents sent by a data feeder in a different form. Kafka Desk must find the same message IDs and recognise the form.",
+    checkpoints: [
+      sb("FMT-SB-01", "Sand Bench is ready and its Kafka channel delivers to a real broker"),
+      kd("FMT-KD-01", "Kafka Desk is up and consuming the topic from the broker"),
+      sb("FMT-SB-02", "Sand Bench has the Kafka Desk connection, enabled, with a topic"),
+      ...FORMAT_VARIANTS.flatMap((v) => variantCheckpoints(v)),
+      ...FEEDER_VARIANTS.flatMap((v) => feederVariantCheckpoints(v)),
+    ],
+  },
+  {
+    key: "kafka-exceptions",
+    file: "28-kafka-exceptions.sit.ts",
+    title: "Exceptions: Kafka down, recovery, interruption",
+    summary: "What happens when Kafka is not reachable (run, data feeder and schedule), when it comes back, when one connection's broker is dead but another's is fine, when a feeder is cancelled or paused, and when a connection is disabled. Failures must be visible in Sand Bench and nothing may leak into Kafka Desk.",
+    checkpoints: [
+      sb("EXC-SB-01", "Sand Bench is ready and its Kafka channel delivers to a real broker"),
+      kd("EXC-KD-01", "Kafka Desk is up and consuming the topic from the broker"),
+      sb("EXC-SB-02", "Sand Bench has the Kafka Desk connection, enabled, with a topic"),
+      sb("EXC-DOWN-C", "Dataset and test case created for generated messages"),
+      sb("EXC-DOWN-CX", "Kafka connection saved with an unreachable broker endpoint"),
+      sb("EXC-DOWN-R", "Kafka down (run): every message counted failed, run ends failed"),
+      sb("EXC-DOWN-D", "Kafka down (run): every delivery row says failed and why"),
+      kd("EXC-DOWN-KD", "Kafka down (run): Kafka Desk has none of the messages"),
+      sb("EXC-DFEED-DS", "Dataset of stored messages with known IDs"),
+      sb("EXC-DFEED-CX", "Kafka connection saved with an unreachable broker endpoint"),
+      sb("EXC-DFEED-S", "Kafka down (feeder): feeder starts"),
+      sb("EXC-DFEED-R", "Kafka down (feeder): all messages counted failed, none sent"),
+      sb("EXC-DFEED-E", "Kafka down (feeder): the run carries the failure reason"),
+      sb("EXC-DFEED-D", "Kafka down (feeder): every delivery row is failed"),
+      kd("EXC-DFEED-KD", "Kafka down (feeder): Kafka Desk has none of the messages"),
+      sb("EXC-DSCH-C", "Dataset and test case created for generated messages"),
+      sb("EXC-DSCH-CX", "Kafka connection saved with an unreachable broker endpoint"),
+      sb("EXC-DSCH-S", "Kafka down (schedule): schedule created"),
+      sb("EXC-DSCH-F", "Kafka down (schedule): the worker ran the schedule"),
+      sb("EXC-DSCH-D", "Kafka down (schedule): deliveries are all failed"),
+      kd("EXC-DSCH-KD", "Kafka down (schedule): Kafka Desk has none of the messages"),
+      sb("EXC-REC-C", "Dataset and test case created for generated messages"),
+      sb("EXC-REC-CX1", "Kafka connection saved with an unreachable broker endpoint"),
+      sb("EXC-REC-DOWN", "Recovery: while unreachable the run fails"),
+      sb("EXC-REC-CX2", "Kafka connection saved again with the default broker"),
+      sb("EXC-REC-C2", "Dataset and test case created for generated messages"),
+      sb("EXC-REC-UP", "Recovery: after the fix the same connection delivers"),
+      ...acked("EXC-REC-SB"), ...confirmed("EXC-REC-KD"),
+      sb("EXC-ISO-CX1", "Kafka connection saved with an unreachable broker endpoint"),
+      sb("EXC-ISO-CX2", "Kafka connection saved with the default broker"),
+      sb("EXC-ISO-C1", "Dataset and test case created for generated messages"),
+      sb("EXC-ISO-C2", "Dataset and test case created for generated messages"),
+      sb("EXC-ISO-R", "Isolation: the dead connection fails, the healthy one delivers"),
+      ...confirmed("EXC-ISO-KD"),
+      sb("EXC-CAN-DS", "Dataset of stored messages with known IDs"),
+      sb("EXC-CAN-CX", "Kafka connection saved with the default broker"),
+      sb("EXC-CAN-MID", "Cancel: feeder is part-way through"),
+      sb("EXC-CAN-C", "Cancel: Sand Bench accepts the cancel"),
+      sb("EXC-CAN-STOP", "Cancel: no further messages are sent"),
+      kd("EXC-CAN-KD", "Cancel: Kafka Desk has what was sent before the cancel and nothing after"),
+      sb("EXC-PAU-DS", "Dataset of stored messages with known IDs"),
+      sb("EXC-PAU-CX", "Kafka connection saved with the default broker"),
+      sb("EXC-PAU-P", "Pause: feeder paused part-way"),
+      kd("EXC-PAU-HOLD", "Pause: nothing new reaches Kafka Desk while paused"),
+      sb("EXC-PAU-R", "Pause: feeder resumed"),
+      sb("EXC-PAU-DONE", "Pause: the rest is sent after the resume"),
+      ...confirmed("EXC-PAU-KD", true),
+      sb("EXC-DIS-DS", "Dataset of stored messages with known IDs"),
+      sb("EXC-DIS-CX", "Kafka connection saved with the default broker"),
+      sb("EXC-DIS-R", "Refused: starting a feeder on a disabled connection is refused"),
+      kd("EXC-DIS-KD", "Refused: nothing reached Kafka Desk"),
+    ],
+  },
+  {
+    key: "kafka-load",
+    file: "29-kafka-load.sit.ts",
+    title: "Load: many messages, every wire form",
+    summary: "Hundreds of messages per test (SIT_KAFKA_LOAD_MESSAGES, default 200): a test-case run as JSON, as XML/base64/pretty and as a flat file; a data feeder at a high rate; three feeders at once. Kafka Desk must have every message exactly once, in order, and the evidence records the throughput.",
+    checkpoints: [
+      sb("LOAD-SB-01", "Sand Bench is ready and its Kafka channel delivers to a real broker"),
+      kd("LOAD-KD-01", "Kafka Desk is up and consuming the topic from the broker"),
+      sb("LOAD-SB-02", "Sand Bench has the Kafka Desk connection, enabled, with a topic"),
+      ...["JSON", "XML_B64_PRETTY", "FLAT"].flatMap((n) => [
+        sb(`LOAD-${n}-C`, "Dataset and test case created for generated messages"), sb(`LOAD-${n}-CX`, "Kafka connection saved"),
+        sb(`LOAD-${n}-R`, "Sand Bench delivered every message"), ...acked(`LOAD-${n}-SB`), ...confirmed(`LOAD-${n}-KD`, true),
+      ]),
+      ...[["FEEDER", 1], ["FEEDERS3", 3]].flatMap(([n, k]) => [
+        sb(`LOAD-${n}-CX`, "Kafka connection saved"),
+        ...Array.from({ length: k }, (_u, i) => sb(`LOAD-${n}-DS${i + 1}`, "Dataset of stored messages with known IDs")),
+        sb(`LOAD-${n}-RUN`, "Feeder(s) completed, none failed"), sb(`LOAD-${n}-T`, "Feeding kept to its schedule"),
+        ...Array.from({ length: k }, (_u, i) => [...acked(`LOAD-${n}-SB${i + 1}`), ...confirmed(`LOAD-${n}-KD${i + 1}`, true)]).flat(),
+      ]),
+    ],
+  },
 ];
+

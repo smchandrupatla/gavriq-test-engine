@@ -125,7 +125,7 @@ test("schedule and data feeder: every message Sand Bench sends is confirmed by K
   assert.ok(progress.some((p) => p.seenByDesk >= 1 && p.seenByDesk < 5), "Kafka Desk showed messages arriving while the feeder was still sending");
 
   // the menu's plan (sit/kafka-test/plan.mjs) lists exactly the checkpoints the cases write
-  for (const def of KAFKA_TEST_CASES) {
+  for (const def of KAFKA_TEST_CASES.filter((c: { key: string }) => evidence[c.key])) {
     const written = evidence[def.key]!.checkpoints.map((c) => c.id).sort();
     assert.deepEqual(def.checkpoints.map((c: { id: string }) => c.id).sort(), written, `plan for ${def.key} drifted from the checkpoints the case writes`);
   }

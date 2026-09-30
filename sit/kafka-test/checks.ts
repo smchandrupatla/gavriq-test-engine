@@ -30,12 +30,23 @@ export function checkSandBenchDeliveries(ev: Evidence, id: string, runId: string
  * Kafka Desk side: the desk consumed every message from the broker (not merely "was told"),
  * at the very topic/partition/offset Sand Bench was given.
  */
-export async function confirmOnKafkaDesk(ev: Evidence, id: string, runId: string, rows: Delivery[]): Promise<MessageEvidence[]> {
+export type ConfirmOptions = {
+  variant?: string;
+  /** The wire form Kafka Desk must have found the messages in. Default: the JSON object. */
+  wire?: { format: string; encoding: string; layout: string };
+  waitMs?: number;
+  /** Require the messages on the topic in the order Sand Bench sent them (single partition). */
+  ordered?: boolean;
+  /** Keep at most this many messages in the evidence (first, last and every problem message); default 60. */
+  maxRecorded?: number;
+};
+
+export async function confirmOnKafkaDesk(ev: Evidence, id: string, runId: string, rows: Delivery[], options: ConfirmOptions = {}): Promise<MessageEvidence[]> {
   const items = rows.map((row) => {
     const messageId = messageIdOf(row.request_payload);
     return messageId ? { id: messageId } : { payload: row.request_payload };
   });
-  const verify = await verifyOnDesk(items, KAFKA_TEST.deskConfirmMs);
+  const verify = await verifyOnDesk(items, options.waitMs ?? KAFKA_TEST.deskConfirmMs);
   ev.check(verify.status === 200, `${id}a`, "kafka-desk", "Kafka Desk answered the checkpoint request", `POST /app/checkpoints/verify → ${verify.status}`);
 
   const messages: MessageEvidence[] = rows.map((row, index) => {
@@ -44,13 +55,16 @@ export async function confirmOnKafkaDesk(ev: Evidence, id: string, runId: string
     const seen = coordinatesOf(result?.evidence);
     return {
       ordinal: index + 1,
+      ...(options.variant ? { variant: options.variant } : {}),
       messageId: messageIdOf(row.request_payload),
       sandBench,
-      kafkaDesk: { found: Boolean(result?.found), source: result?.evidence?.source, coordinates: seen, seenAt: result?.evidence?.seenAt, matchedBy: result?.matchedBy },
+      kafkaDesk: { found: Boolean(result?.found), source: result?.evidence?.source, coordinates: seen, seenAt: result?.evidence?.seenAt, matchedBy: result?.matchedBy, format: result?.evidence?.format, encoding: result?.evidence?.encoding, layout: result?.evidence?.layout, copies: result?.count },
       coordinatesMatch: Boolean(sandBench.coordinates && seen && sandBench.coordinates.topic === seen.topic && sandBench.coordinates.partition === seen.partition && sandBench.coordinates.offset === seen.offset),
     };
   });
-  ev.messages.push(...messages);
+  const cap = options.maxRecorded ?? 60;
+  const problem = (m: MessageEvidence) => !m.kafkaDesk.found || !m.coordinatesMatch;
+  ev.messages.push(...(messages.length <= cap ? messages : messages.filter((m, i) => i < cap / 2 || i >= messages.length - cap / 2 || problem(m))));
 
   const missing = messages.filter((m) => !m.kafkaDesk.found);
   ev.check(
@@ -69,6 +83,20 @@ export async function confirmOnKafkaDesk(ev: Evidence, id: string, runId: string
       ? mismatched.slice(0, 3).map((m) => `${m.messageId ?? `#${m.ordinal}`}: Sand Bench ${fmt(m.sandBench.coordinates)} vs Kafka Desk ${fmt(m.kafkaDesk.coordinates)}`).join("; ")
       : messages.slice(0, 3).map((m) => `${m.messageId ?? `#${m.ordinal}`} @ ${fmt(m.kafkaDesk.coordinates)}`).join(" | ") + (messages.length > 3 ? " | …" : "")
   );
+  const want = options.wire || { format: "json", encoding: "none", layout: "object" };
+  const wrongForm = messages.filter((m) => m.kafkaDesk.found && (m.kafkaDesk.format !== want.format || m.kafkaDesk.encoding !== want.encoding || m.kafkaDesk.layout !== want.layout));
+  ev.check(
+    wrongForm.length === 0,
+    `${id}d`, "kafka-desk", `Kafka Desk found the messages in the wire form Sand Bench was told to use (${want.format}, ${want.encoding}, ${want.layout})`,
+    () => wrongForm.length ? `#${wrongForm[0]!.ordinal} arrived as ${wrongForm[0]!.kafkaDesk.format}, ${wrongForm[0]!.kafkaDesk.encoding}, ${wrongForm[0]!.kafkaDesk.layout}` : `${messages.length}/${messages.length} as ${want.format}, ${want.encoding}, ${want.layout}`
+  );
+  const dupes = messages.filter((m) => (m.kafkaDesk.copies ?? 1) > 1);
+  ev.check(dupes.length === 0, `${id}e`, "kafka-desk", "No message is on the topic more than once", () => dupes.length ? `${dupes.length} duplicated, e.g. ${dupes[0]!.messageId} ×${dupes[0]!.kafkaDesk.copies}` : "each ID appears exactly once");
+  if (options.ordered) {
+    const offs = messages.map((m) => m.kafkaDesk.coordinates);
+    const oneP = new Set(offs.map((o) => o?.partition)).size === 1;
+    ev.check(!oneP || offs.every((o, i) => i === 0 || (o && offs[i - 1] && o.offset > offs[i - 1]!.offset)), `${id}f`, "kafka-desk", "On the topic the messages are in the order Sand Bench sent them", `first ${fmt(offs[0])} … last ${fmt(offs[offs.length - 1])}`);
+  }
   return messages;
 }
 

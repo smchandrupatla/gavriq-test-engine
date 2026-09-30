@@ -32,6 +32,9 @@ const KNOWN_FILES = [
   '20-kafka-round-trip.sit.ts',
   '25-kafka-schedule.sit.ts',
   '26-kafka-data-feeder.sit.ts',
+  '27-kafka-formats.sit.ts',
+  '28-kafka-exceptions.sit.ts',
+  '29-kafka-load.sit.ts',
   '30-api-round-trip.sit.ts',
   '40-worker-job.sit.ts',
   '50-dbviewer-cross-check.sit.ts',
@@ -60,7 +63,7 @@ const KNOWN_FILES = [
 ];
 
 export function suiteOf(fileName: string): string {
-  if (fileName.startsWith('25-') || fileName.startsWith('26-')) return 'kafka-test';
+  if (/^2[5-9]-kafka/.test(fileName)) return 'kafka-test';
   if (fileName.startsWith('51-') || fileName.startsWith('00-')) return fileName.startsWith('00-') ? 'health' : 'integration';
   if (fileName.startsWith('30-') || fileName.startsWith('10-') || fileName.startsWith('20-') || fileName.startsWith('40-') || fileName.startsWith('50-')) return 'integration';
   if (fileName.startsWith('60-') || fileName.startsWith('61-') || fileName.startsWith('62-') || fileName.startsWith('63-') || fileName.startsWith('64-') || fileName.startsWith('66-') || fileName.startsWith('67-') || fileName.startsWith('68-')) return 'gui';
@@ -74,6 +77,9 @@ export function suiteOf(fileName: string): string {
 export function groupOf(fileName: string): string {
   if (fileName.startsWith('25-')) return 'schedule';
   if (fileName.startsWith('26-')) return 'data-feeder';
+  if (fileName.startsWith('27-')) return 'formats';
+  if (fileName.startsWith('28-')) return 'exceptions';
+  if (fileName.startsWith('29-')) return 'load';
   if (fileName.startsWith('51-') || fileName.startsWith('64-')) return 'use-cases';
   if (fileName.startsWith('90-')) return 'workers';
   if (fileName.startsWith('91-')) return 'soak';
@@ -100,7 +106,7 @@ export function groupOf(fileName: string): string {
 }
 
 export function appOf(fileName: string): string {
-  if (fileName.startsWith('25-') || fileName.startsWith('26-')) return 'desks';
+  if (/^2[5-9]-kafka/.test(fileName)) return 'desks';
   if (fileName.startsWith('90-')) return 'agentdesk';
   if (fileName.startsWith('8') && !fileName.startsWith('80-ui')) return 'security';
   if (/^(10-|20-|30-)/.test(fileName)) return 'testhub';
