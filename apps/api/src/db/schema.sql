@@ -563,3 +563,62 @@ VALUES (
   '{"functional_smoke":"allowed","read_only_api":"allowed","write_api":"allowed","load":"approval_required","stress":"prohibited","chaos":"prohibited","destructive_db":"prohibited"}'::jsonb
 )
 ON CONFLICT (key) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Security: scan reports from the core scanner and the CVE Watch agent
+-- ---------------------------------------------------------------------------
+CREATE SEQUENCE IF NOT EXISTS vulnerability_key_seq;
+CREATE SEQUENCE IF NOT EXISTS security_scan_key_seq;
+
+CREATE TABLE IF NOT EXISTS security_scans (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key         TEXT NOT NULL UNIQUE,                   -- SCAN-00012
+  project     TEXT NOT NULL,
+  branch      TEXT,
+  commit_ref  TEXT,
+  trigger     TEXT,
+  result      TEXT NOT NULL,                          -- passed|failed|error
+  summary     JSONB NOT NULL DEFAULT '{}',
+  report      JSONB NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_security_scans_project ON security_scans(project, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS vulnerabilities (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key          TEXT NOT NULL UNIQUE,                  -- VULN-00042
+  fingerprint  TEXT NOT NULL,
+  project      TEXT NOT NULL,
+  source       TEXT NOT NULL,                         -- scan|cve-watch
+  category     TEXT NOT NULL DEFAULT 'dependencies',
+  cve          TEXT,
+  advisory_id  TEXT,
+  package      TEXT,
+  version      TEXT,
+  severity     TEXT NOT NULL,
+  verdict      TEXT,                                  -- confirmed|dev_only|exploited (cve-watch)
+  exploited    BOOLEAN NOT NULL DEFAULT false,
+  status       TEXT NOT NULL DEFAULT 'open',          -- open|accepted|fixed
+  title        TEXT NOT NULL,
+  detail       TEXT,
+  fixed_in     TEXT[] NOT NULL DEFAULT '{}',
+  url          TEXT,
+  history      JSONB NOT NULL DEFAULT '[]',
+  first_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  fixed_at     TIMESTAMPTZ,
+  UNIQUE (project, source, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_vulnerabilities_status ON vulnerabilities(status, severity);
+CREATE INDEX IF NOT EXISTS idx_vulnerabilities_cve ON vulnerabilities(cve);
+
+CREATE TABLE IF NOT EXISTS cve_watch_runs (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at  TIMESTAMPTZ,
+  status       TEXT NOT NULL DEFAULT 'running',       -- running|ok|partial|failed
+  trigger      TEXT NOT NULL DEFAULT 'timer',         -- timer|manual|startup
+  projects     JSONB NOT NULL DEFAULT '[]',           -- per project: components, added, resolved, error
+  added        INT NOT NULL DEFAULT 0,
+  resolved     INT NOT NULL DEFAULT 0
+);
