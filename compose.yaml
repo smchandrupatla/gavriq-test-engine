@@ -34,6 +34,11 @@ services:
       AUTO_SEED: "true"
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       EVIDENCE_DIR: /data/evidence
+      # Evidence gate: enforce | report | off (docs/RUN-TRIGGER-AND-EVIDENCE.md)
+      EVIDENCE_GATE: ${EVIDENCE_GATE:-report}
+      EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-0}
+      SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
+      TRIGGER_API_KEYS: ${TRIGGER_API_KEYS:-}
       LOG_DIR: /var/log/sandbench
       LOG_SERVICE: sit-console
       SIT_CONSOLE_STORE: /data/history.json
@@ -91,10 +96,29 @@ services:
       - test-engine-evidence:/data/evidence
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    shm_size: "256mb"
+    # Chromium, Firefox and WebKit all keep their render buffers in /dev/shm;
+    # 256mb was sized for Chrome alone and lets the larger engines crash mid-page.
+    shm_size: "1gb"
     restart: unless-stopped
     profiles:
       - workers
+
+  # Fires due schedules through the API (cron expressions in SCHEDULER_TZ).
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gavriq-test-engine:local
+    command: ["npx", "tsx", "apps/api/src/scheduler.ts"]
+    depends_on:
+      test-engine:
+        condition: service_healthy
+    environment:
+      TEST_ENGINE_API: http://test-engine:8787
+      WORKER_API_KEY: ${WORKER_API_KEY:-}
+      SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
+      SCHEDULER_POLL_MS: "60000"
+    restart: unless-stopped
 
   sit:
     build:

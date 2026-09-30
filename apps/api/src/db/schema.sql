@@ -315,6 +315,7 @@ CREATE TABLE IF NOT EXISTS environments (
 CREATE TABLE IF NOT EXISTS executions (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   key                 TEXT NOT NULL UNIQUE,
+  name                TEXT,                  -- human display name: case/suite name + timestamp
   requested_by        TEXT,
   test_plan_id        UUID REFERENCES test_plans(id) ON DELETE SET NULL,
   test_suite_id       UUID REFERENCES test_suites(id) ON DELETE SET NULL,
@@ -330,6 +331,8 @@ CREATE TABLE IF NOT EXISTS executions (
   metadata            JSONB NOT NULL DEFAULT '{}',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
 CREATE INDEX IF NOT EXISTS idx_executions_env ON executions(environment_id);
@@ -409,6 +412,10 @@ CREATE TABLE IF NOT EXISTS schedules (
   test_suite_id   UUID REFERENCES test_suites(id) ON DELETE SET NULL,
   test_case_ids   UUID[] DEFAULT '{}',
   environment_id  UUID REFERENCES environments(id) ON DELETE SET NULL,
+  -- Application schedules run the whole application on the environment through
+  -- the run planner (one execution per suite), narrowed by scope.
+  application_id  UUID REFERENCES applications(id) ON DELETE CASCADE,
+  scope           JSONB NOT NULL DEFAULT '{}',
   enabled         BOOLEAN NOT NULL DEFAULT true,
   last_run_at     TIMESTAMPTZ,
   next_run_at     TIMESTAMPTZ,
@@ -416,6 +423,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by      TEXT
 );
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS application_id UUID REFERENCES applications(id) ON DELETE CASCADE;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS scope JSONB NOT NULL DEFAULT '{}';
 
 -- ---------------------------------------------------------------------------
 -- AI Proposals (Prompt 2 / 10)
@@ -463,6 +472,17 @@ CREATE TABLE IF NOT EXISTS test_packs (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Settings (engine-wide configuration, e.g. run retention)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS settings (
+  id                 BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),  -- singleton row
+  run_retention_days INT NOT NULL DEFAULT 5,
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by         TEXT
+);
+INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
 -- Seed baseline application (Sand Bench)

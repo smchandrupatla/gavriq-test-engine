@@ -215,6 +215,44 @@ describe('evidence gate and run trigger', () => {
     assert.ok(!JSON.stringify(transcript).includes('sup3r-s3cret-pw'), 'secret leaked into evidence');
   });
 
+  it('runs a scheduled application through the same planner', async (t) => {
+    if (!ready) return t.skip('set EVIDENCE_TEST_API to a disposable engine running EVIDENCE_GATE=enforce');
+    const bad = await post('/api/v1/schedules', { name: 'bad expr', cron_expression: '99 * * * *', application: APP, environment: ENV_KEY });
+    assert.equal(bad.status, 400);
+
+    const made = await post('/api/v1/schedules', {
+      name: 'gate test nightly',
+      cron_expression: '0 2 * * *',
+      application: APP,
+      environment: ENV_KEY,
+      scope: { methods: ['http'] },
+    });
+    assert.equal(made.status, 201, JSON.stringify(made.body));
+    const schedule = made.body.data;
+    assert.equal(schedule.application_id.length, 36);
+    assert.match(schedule.next_run_at, /T02:00:00\.000Z$/, 'next firing is reported (UTC by default)');
+
+    const listed = await api('/api/v1/schedules');
+    assert.ok(listed.body.data.some((s: any) => s.id === schedule.id && s.application_key === APP && s.environment_key === ENV_KEY));
+
+    const fired = await post(`/api/v1/schedules/${schedule.id}/run`, { requested_by: 'scheduler-daemon' });
+    assert.equal(fired.status, 202, JSON.stringify(fired.body));
+    assert.match(fired.body.data.run_id, /^run-/);
+    assert.ok(fired.body.data.executions.length >= 1);
+
+    const run = await api(`/api/v1/runs/${fired.body.data.run_id}`);
+    assert.equal(run.body.data.trigger_source, 'schedule');
+    assert.equal(run.body.data.reason, 'gate test nightly');
+    assert.equal(run.body.data.state, 'queued');
+
+    // Leave nothing queued for the worker-style tests below to claim by accident.
+    for (const e of fired.body.data.executions) {
+      assert.equal((await post(`/api/v1/executions/${e.id}/cancel`, {})).status, 200);
+    }
+    const gone = await fetch(`${API}/api/v1/schedules/${schedule.id}`, { method: 'DELETE' });
+    assert.equal(gone.status, 204);
+  });
+
   it('keeps a failure on record when the target never answers', async () => {
     const result = await runHttp({ baseUrl: 'http://127.0.0.1:9', timeoutSeconds: 2, steps: [{ action: 'request', path: '/health' }] });
     assert.equal(result.status, 'failed');

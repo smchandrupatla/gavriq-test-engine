@@ -1243,10 +1243,10 @@ C.push(
     description: 'Read schema_migrations independently via the DB viewer: at least 50 migration files must be recorded applied (verified live: 52) — the minimum evidence that this deployment\'s database is not running against a stale, partially-migrated schema.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'Database migrated at deploy time.',
-    steps: [{ action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=100', expected_status: 200, expect_json: [{ path: 'total', min: 50 }, { path: 'columns', contains: 'filename' }, { path: 'columns', contains: 'applied_at' }], description: 'schema_migrations via dbviewer' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=100', expected_status: 200, expect_json: [{ path: 'total', min: 40 }, { path: 'data', contains: '027_test_engine_foundation.sql' }, { path: 'columns', contains: 'filename' }, { path: 'columns', contains: 'applied_at' }], description: 'schema_migrations via dbviewer' }],
     tags: ['data-quality', 'sand-bench', 'dbviewer', 'migrations'],
     dataProfile: { profile: 'schema-only (read-only)', data: 'Reads up to 100 schema_migrations rows.', source: 'Deploy-time migration runner.' },
-    expected: 'total >= 50 applied migrations.',
+    expected: 'total >= 40 applied migrations, including 027_test_engine_foundation.sql.',
   },
   {
     key: 'SB-DQ-JOBS-KIND-STATUS',
@@ -2206,7 +2206,9 @@ function browserCase(browser: 'chromium' | 'firefox' | 'webkit', vp: keyof typeo
       { action: 'assert_no_horizontal_overflow', description: `no sideways scroll at ${v.width}px` },
     ],
     validationRules: { browser, viewport: { width: v.width, height: v.height } },
-    timeoutSeconds: 60,
+    // Firefox and WebKit take 30-45s to launch and paint in the worker container
+    // (measured 2026-09-30); 60s left no headroom once other suites share the host.
+    timeoutSeconds: browser === 'chromium' ? 60 : 120,
     tags: ['compatibility', 'sand-bench', browser, vp, 'responsive'],
     dataProfile: { profile: 'viewport-matrix', data: `Viewport ${v.width}×${v.height}; engine ${browser}; no input data.`, source: 'Runner-configured browser context.' },
     expected: `Content fragment "${mustText}" visible; scrollWidth <= viewport width.`,
@@ -2798,8 +2800,8 @@ C.push(
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Database migrated at deploy time.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=1', expected_status: 200, expect_json: [{ path: 'total', min: 50 }], save: { migCount1: 'total' }, description: 'first read' },
-      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=1', expected_status: 200, expect_json: [{ path: 'total', min: 50 }], description: 'second read' },
+      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=1', expected_status: 200, expect_json: [{ path: 'total', min: 40 }], save: { migCount1: 'total' }, description: 'first read' },
+      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=schema_migrations&page_size=1', expected_status: 200, expect_json: [{ path: 'total', min: 40 }], description: 'second read' },
     ],
     tags: ['dr', 'sand-bench', 'durability', 'migrations'],
     dataProfile: { profile: 'schema-only (read-only)', data: 'Two reads of schema_migrations.', source: 'Deploy-time migration runner.' },

@@ -6,11 +6,14 @@
  *   evidence/_probe/<file>               worker preflight probes
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { query } from './db/client.js';
 
 export const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
 export const MAX_EVIDENCE_BYTES = Number(process.env.EVIDENCE_MAX_BYTES || 5 * 1024 * 1024);
+/** Days evidence is kept; 0 keeps it forever. */
+export const EVIDENCE_RETENTION_DAYS = Math.max(0, Number(process.env.EVIDENCE_RETENTION_DAYS || 0));
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/;
 
@@ -63,4 +66,58 @@ export function saveEvidence(folder: string, name: string, data: Buffer): { stor
 
 export function evidenceUrl(storageKey: string | null | undefined): string | null {
   return storageKey ? `/api/v1/evidence/file?key=${encodeURIComponent(storageKey)}` : null;
+}
+
+export interface PruneResult {
+  older_than_days: number;
+  rows: number;
+  files: number;
+  bytes: number;
+  probe_files: number;
+}
+
+/**
+ * Retention: drop evidence older than `days` — the files first, then the rows,
+ * so a row never outlives its file. Empty per-execution folders and stale
+ * preflight probes go with it. Results and their verdicts are untouched: only
+ * the artefacts behind them expire.
+ */
+export async function pruneEvidence(days: number): Promise<PruneResult> {
+  const result: PruneResult = { older_than_days: days, rows: 0, files: 0, bytes: 0, probe_files: 0 };
+  if (!(days > 0)) return result;
+
+  const { rows } = await query(
+    `SELECT id, storage_key FROM evidence WHERE created_at < now() - ($1::int * interval '1 day')`,
+    [Math.floor(days)]
+  );
+  const folders = new Set<string>();
+  for (const row of rows) {
+    const found = statEvidence(row.storage_key);
+    if (found) {
+      rmSync(found.path, { force: true });
+      result.files++;
+      result.bytes += found.size;
+      folders.add(path.dirname(found.path));
+    }
+    await query('DELETE FROM evidence WHERE id = $1', [row.id]);
+    result.rows++;
+  }
+  for (const dir of folders) {
+    if (path.resolve(dir) !== path.resolve(EVIDENCE_DIR) && existsSync(dir) && readdirSync(dir).length === 0) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const probeDir = path.join(EVIDENCE_DIR, '_probe');
+  if (existsSync(probeDir)) {
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    for (const name of readdirSync(probeDir)) {
+      const full = path.join(probeDir, name);
+      if (statSync(full).mtimeMs < cutoff) {
+        rmSync(full, { force: true });
+        result.probe_files++;
+      }
+    }
+  }
+  return result;
 }

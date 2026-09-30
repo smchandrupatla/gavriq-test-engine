@@ -7,7 +7,8 @@ import type { FastifyInstance } from 'fastify';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { query } from '../db/client.js';
-import { evidenceUrl, saveEvidence, statEvidence } from '../evidence-store.js';
+import { EVIDENCE_RETENTION_DAYS, evidenceUrl, pruneEvidence, saveEvidence, statEvidence } from '../evidence-store.js';
+import { audit } from '../middleware/rbac.js';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
@@ -90,6 +91,15 @@ export async function evidenceRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.status(400).send({ error: (err as Error).message });
     }
+  });
+
+  /** Retention on demand: drop evidence older than N days (default EVIDENCE_RETENTION_DAYS). */
+  app.post<{ Body: { older_than_days?: number } }>('/api/v1/evidence/prune', async (req, reply) => {
+    const days = Number(req.body?.older_than_days ?? EVIDENCE_RETENTION_DAYS);
+    if (!(days >= 1)) return reply.status(400).send({ error: 'older_than_days must be at least 1 (or set EVIDENCE_RETENTION_DAYS)' });
+    const result = await pruneEvidence(days);
+    await audit(req, 'evidence.prune', 'evidence', undefined, { ...result });
+    return reply.send({ data: result });
   });
 
   // Serve a file by storage_key (resolved inside the evidence store only)

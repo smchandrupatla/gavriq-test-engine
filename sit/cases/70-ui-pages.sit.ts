@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import type { WebDriver } from "selenium-webdriver";
-import { newDriver, openConsole, openNav, pageTitle } from "../lib/selenium.ts";
+import { newDriver, openConsole, openNav, waitForPageTitle } from "../lib/selenium.ts";
 
 // Selenium-driven per-page coverage: every leaf page reachable from the Ops Console
 // sidebar (apps/web/public/js/ops-console-preview.js CONFIG.nav) is navigated to the
@@ -24,6 +24,12 @@ import { newDriver, openConsole, openNav, pageTitle } from "../lib/selenium.ts";
 // CONFIG.messageDesigner in ops-console-preview.js — several diverge from their
 // sidebar label (e.g. "View saved definitions" routes to a page titled "Saved message
 // definitions"), which is exactly the kind of drift this case exists to catch.
+//
+// Navigation paths follow the console as deployed (checked against the live sidebar on
+// 2026-09-30): Datasets, Test Cases and Test Suites became groups with their own
+// sub-items, schema import moved to the Message Schemes group, Configuration became a
+// group without a page of its own, and Naming conventions moved under it. Each case
+// still opens the page its name promises; only the clicks to get there changed.
 
 let driver: WebDriver;
 
@@ -38,7 +44,7 @@ after(async () => {
 
 async function assertPage(top: string, sub: string | undefined, expectedTitle: string) {
   await openNav(driver, top, sub);
-  const title = await pageTitle(driver);
+  const title = await waitForPageTitle(driver, expectedTitle);
   const label = sub ? `${top} → ${sub}` : top;
   assert.equal(title, expectedTitle, `navigating to "${label}" did not render the expected page header`);
 }
@@ -76,7 +82,7 @@ test("the Message Designer → View saved definitions page renders its own real 
 });
 
 test("the Message Designer → Import schema page renders its own real page header", async () => {
-  await assertPage("Message Designer", "Import schema", "Import schema");
+  await assertPage("Message Schemes", "Import Scheme", "Import schema");
 });
 
 test("the Message Designer → Export template page renders its own real page header", async () => {
@@ -84,15 +90,15 @@ test("the Message Designer → Export template page renders its own real page he
 });
 
 test("the Datasets page renders its own real page header", async () => {
-  await assertPage("Datasets", undefined, "Datasets");
+  await assertPage("Datasets", "Saved datasets", "Saved datasets");
 });
 
 test("the Test Cases page renders its own real page header", async () => {
-  await assertPage("Test Cases", undefined, "Test Cases");
+  await assertPage("Test Cases", "Browse test cases", "Test cases");
 });
 
 test("the Test Suites page renders its own real page header", async () => {
-  await assertPage("Test Suites", undefined, "Test Suites");
+  await assertPage("Test Suites", "All test suites", "Test suites");
 });
 
 test("the Test Runs → Active runs page renders its own real page header", async () => {
@@ -140,9 +146,9 @@ test("the Reports → Scheduled exports page renders its own real page header", 
 });
 
 test("the Configuration page renders its own real page header", async () => {
-  await assertPage("Configuration", undefined, "Configuration");
+  await assertPage("Configuration", "Environment defaults", "Environment defaults");
 });
 
 test("the Naming conventions page renders its own real page header", async () => {
-  await assertPage("Naming conventions", undefined, "Naming conventions");
+  await assertPage("Configuration", "Naming conventions", "Naming conventions");
 });

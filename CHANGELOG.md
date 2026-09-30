@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+**Fixed — cases that failed instantly or "never ran" (137 of 414)**
+- Worker image had no `sit/` folder, so all 92 imported SIT cases failed in milliseconds with `SIT file not found`. `Dockerfile.worker` now ships `sit/`, `dev/`, `docs/use-cases` and the report helpers the security cases import (`apps/secportal/*`)
+- Worker image had no Firefox or WebKit, so 12 cells of the browser matrix failed with `Executable doesn't exist`. The image installs both for the pinned Playwright version; worker `shm_size` raised to 1gb; Firefox/WebKit cases get a 120s step budget
+- A containerized worker claiming a job for an environment written as `127.0.0.1`/`localhost` (`local-dev`, `sand-bench-local`, `engine-local`) targeted itself: every HTTP case failed with `fetch failed` and every performance case with a 100% error rate. The worker re-points loopback targets at the host gateway (`WORKER_LOOPBACK_HOST`, `WORKER_IN_CONTAINER`), so any environment picked in the console runs on whichever worker is online
+- `execution_method: endurance` fell through to the Selenium runner and "passed" without sending a request. Endurance/soak cases run in the performance runner for `validation_rules.duration_seconds`
+- SIT runner: environment variables (`{{api}}`, `{{testhub}}`, `{{dbviewer}}`, tenant, user) are mapped onto the `SIT_*` contract instead of only the web base URL; parameterised test names (`${page.path}`) match every generated instance; a name that matches no test is a failure, not a pass; every test skipped is `skipped`, not `passed`; failures carry the assertion message; a timeout kills the browsers the case started; a ChromeDriver is started for the raw-WebDriver screen cases, which used to skip themselves
+- Performance runner: a run in which nothing answered reports why (`network_failure` / `environment_problem` with the first error) instead of `SLA violated: error_rate 100%`
+- Executions left `running` by a worker that died are closed as `error` with `metadata.abandoned` after three silent minutes (five had been "running" for up to six days)
+- SIT suite brought level with `sand-bench-enterprise/sit` and the console as deployed: sign-in through the gate, navigation groups and `/v/<id>` screens, forms addressed by control name, DB-viewer reads of the newest page, TRACE probe sent with `node:http`
+
+**Added — evidence gate and run trigger API**
+- Evidence is the exit criterion of a run. Every runner now leaves evidence on pass and on fail: HTTP request/response transcripts, a final-page screenshot plus step log for Playwright and Selenium, a metric report for performance/endurance, the TAP output for SIT files. Secrets are masked before a file is written
+- Workers upload evidence to the engine (`POST /api/v1/evidence/upload`, stored per execution with a SHA-256) instead of relying on a shared folder, so a worker on another machine produces evidence the console can serve
+- Evidence gate (`EVIDENCE_GATE=enforce|report|off`, default `report`): the API verifies evidence against the store, records a pass/fail without it as `error` / `inconclusive`, derives the final execution status from the recorded results, and writes `metadata.exit_criteria`
+- Run trigger API: `POST /api/v1/runs {application, environment, scope?, exclusive?, dry_run?}`, `GET /api/v1/runs/:runId` (state, verdict, exit criteria), `GET /api/v1/runs/:runId/evidence` (manifest), `GET /api/v1/runs`. Honors the environment safety policy per case
+- `scripts/trigger-run.mjs` starts a run and waits for the verdict; its exit code gates a pipeline
+- `X-Api-Key` callers (`TRIGGER_API_KEYS`) for machine-to-machine triggers
+- Schedules run an application on an environment through the same planner (`application` + `environment` + optional `scope`), on real five-field cron expressions evaluated in `SCHEDULER_TZ` (`@hourly`/`@daily`/`@weekly` and `every:N` still accepted); `GET /api/v1/schedules` reports `next_run_at`; `DELETE /api/v1/schedules/:id`; a new cron schedule waits for its next firing instead of firing on creation. The poller (`npm run start:scheduler`) fires through the API and catches up a missed firing once
+- See `docs/RUN-TRIGGER-AND-EVIDENCE.md`
+
+**Fixed**
+- `POST /api/v1/environments` failed with `env_type is of type environment_type but expression is of type text` whenever `env_type` was supplied
+- `POST /api/v1/test-cases` failed the same way for `test_type`, `severity`, `priority`, `automation_status`, `lifecycle` and `tags`, so no case could be created through the API
+
 **Added**
 - Console status tiles: one tile per SIT area, QA/QC type, baseline and in-container build on Overview, and one per suite on every sub-menu page. Red = a case failed, green = everything that ran passed, amber = only skipped/blocked, dashed grey = never run; a pulsing chip marks tiles with cases in an active run
 - Per-tile history panel (loaded on click): results-per-run stacked chart, pass-rate trend, last/average pass rate, most frequent failures, and a run table; "Open details" goes to that tile's page

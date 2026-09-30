@@ -166,158 +166,178 @@ function summarize(runId: string, executions: any[], results: any[], workers: nu
   };
 }
 
-export async function triggerRoutes(app: FastifyInstance) {
-  app.post<{ Body: Record<string, unknown> }>('/api/v1/runs', async (req, reply) => {
-    const b = req.body || {};
-    const appRef = typeof b.application === 'string' ? b.application : '';
-    const envRef = typeof b.environment === 'string' ? b.environment : '';
-    if (!appRef || !envRef) {
-      return reply.status(400).send({ error: 'application and environment are required (key or id)' });
-    }
+export interface RunRequest {
+  application: string;
+  environment: string;
+  scope?: Record<string, unknown>;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  requested_by?: string | null;
+  trigger_source?: string;
+  exclusive?: boolean;
+  approved_categories?: string[] | string;
+  dry_run?: boolean;
+}
 
-    const appRow = await query(`SELECT id, key, name, status FROM applications WHERE id::text = $1 OR key = $1`, [appRef]);
-    const application = appRow.rows[0];
-    if (!application) return reply.status(404).send({ error: 'Application not found', application: appRef });
+export interface RunOutcome {
+  status: number;
+  body: Record<string, any>;
+  /** Set when executions were queued: what to audit. */
+  queued?: { run_id: string; application_id: string; environment: string; executions: number; total_cases: number; excluded: number; trigger_source: string };
+}
 
-    const envRow = await query(
-      `SELECT id, key, name, env_type, base_url, status, safety_policy FROM environments WHERE id::text = $1 OR key = $1`,
-      [envRef]
+/**
+ * Plan and queue a run of one application on one environment. Shared by the
+ * trigger API and by schedules, so both honor the same scope filters, safety
+ * policy and grouping. Never throws for a caller mistake: the outcome carries
+ * the HTTP status and body to answer with.
+ */
+export async function queueRun(r: RunRequest, actorId?: string | null): Promise<RunOutcome> {
+  const appRef = typeof r.application === 'string' ? r.application : '';
+  const envRef = typeof r.environment === 'string' ? r.environment : '';
+  if (!appRef || !envRef) {
+    return { status: 400, body: { error: 'application and environment are required (key or id)' } };
+  }
+
+  const appRow = await query(`SELECT id, key, name, status FROM applications WHERE id::text = $1 OR key = $1`, [appRef]);
+  const application = appRow.rows[0];
+  if (!application) return { status: 404, body: { error: 'Application not found', application: appRef } };
+
+  const envRow = await query(
+    `SELECT id, key, name, env_type, base_url, status, safety_policy FROM environments WHERE id::text = $1 OR key = $1`,
+    [envRef]
+  );
+  const environment = envRow.rows[0];
+  if (!environment) return { status: 404, body: { error: 'Environment not found', environment: envRef } };
+  if (environment.status !== 'active') {
+    return { status: 409, body: { error: `Environment is ${environment.status}`, environment: environment.key } };
+  }
+
+  if (r.exclusive === true) {
+    const busy = await query(
+      `SELECT DISTINCT metadata->>'run_group' AS run_id FROM executions
+       WHERE status = ANY($1::execution_status[]) AND environment_id = $2
+         AND metadata->>'application_key' = $3 AND metadata->>'run_group' IS NOT NULL`,
+      [ACTIVE, environment.id, application.key]
     );
-    const environment = envRow.rows[0];
-    if (!environment) return reply.status(404).send({ error: 'Environment not found', environment: envRef });
-    if (environment.status !== 'active') {
-      return reply.status(409).send({ error: `Environment is ${environment.status}`, environment: environment.key });
-    }
-
-    if (b.exclusive === true) {
-      const busy = await query(
-        `SELECT DISTINCT metadata->>'run_group' AS run_id FROM executions
-         WHERE status = ANY($1::execution_status[]) AND environment_id = $2
-           AND metadata->>'application_key' = $3 AND metadata->>'run_group' IS NOT NULL`,
-        [ACTIVE, environment.id, application.key]
-      );
-      if (busy.rows[0]) {
-        const active = busy.rows[0].run_id;
-        return reply.status(409).send({
+    if (busy.rows[0]) {
+      const active = busy.rows[0].run_id;
+      return {
+        status: 409,
+        body: {
           error: 'A run for this application and environment is already in progress',
           run_id: active,
           status_url: `/api/v1/runs/${encodeURIComponent(active)}`,
-        });
-      }
+        },
+      };
+    }
+  }
+
+  const raw = (r.scope && typeof r.scope === 'object' ? r.scope : {}) as Record<string, unknown>;
+  const scope: Scope = {
+    suites: strings(raw.suites),
+    tags: strings(raw.tags),
+    test_types: strings(raw.test_types),
+    methods: strings(raw.methods)?.map((m) => m.toLowerCase()),
+    case_keys: strings(raw.case_keys),
+  };
+
+  const { rows: candidates } = await query(
+    `SELECT tc.id, tc.key, tc.execution_method, tc.test_type::text AS test_type, tc.tags,
+            tc.automation_status::text AS automation_status,
+            s.id AS suite_id, s.key AS suite_key, s.name AS suite_name
+     FROM test_cases tc
+     LEFT JOIN test_case_suites m ON m.test_case_id = tc.id
+     LEFT JOIN test_suites s ON s.id = m.test_suite_id
+     WHERE tc.application_id = $1 AND tc.lifecycle NOT IN ('deprecated','archived')
+     ORDER BY s.key NULLS LAST, m.sort_order, tc.key`,
+    [application.id]
+  );
+
+  const policy = (environment.safety_policy || {}) as Record<string, string>;
+  const approved = new Set(strings(r.approved_categories) || []);
+  const seen = new Set<string>();
+  const excluded: Array<{ case_key: string; reason: string }> = [];
+  type Group = { suite_id: string | null; suite_key: string; suite_name: string; case_ids: string[] };
+  const plan = new Map<string, Group>();
+
+  for (const c of candidates) {
+    if (scope.suites && !scope.suites.includes(c.suite_key)) continue;
+    if (scope.case_keys && !scope.case_keys.includes(c.key)) continue;
+    if (scope.test_types && !scope.test_types.includes(c.test_type)) continue;
+    if (scope.methods && !scope.methods.includes(String(c.execution_method || '').toLowerCase())) continue;
+    if (scope.tags && !scope.tags.some((t) => (c.tags || []).includes(t))) continue;
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+
+    if (!['automated', 'partially_automated'].includes(c.automation_status)) {
+      excluded.push({ case_key: c.key, reason: `not automated (${c.automation_status})` });
+      continue;
+    }
+    const category = safetyCategory(c);
+    const decision = policy[category];
+    if (decision === 'prohibited' || (decision === 'approval_required' && !approved.has(category))) {
+      excluded.push({ case_key: c.key, reason: `${category} is ${decision} on ${environment.key}` });
+      continue;
     }
 
-    const raw = (b.scope && typeof b.scope === 'object' ? b.scope : {}) as Record<string, unknown>;
-    const scope: Scope = {
-      suites: strings(raw.suites),
-      tags: strings(raw.tags),
-      test_types: strings(raw.test_types),
-      methods: strings(raw.methods)?.map((m) => m.toLowerCase()),
-      case_keys: strings(raw.case_keys),
-    };
+    const suiteKey = c.suite_key || 'unassigned';
+    const group: Group = plan.get(suiteKey) || { suite_id: c.suite_id ?? null, suite_key: suiteKey, suite_name: c.suite_name || 'Unassigned cases', case_ids: [] };
+    group.case_ids.push(c.id);
+    plan.set(suiteKey, group);
+  }
 
-    const { rows: candidates } = await query(
-      `SELECT tc.id, tc.key, tc.execution_method, tc.test_type::text AS test_type, tc.tags,
-              tc.automation_status::text AS automation_status,
-              s.id AS suite_id, s.key AS suite_key, s.name AS suite_name
-       FROM test_cases tc
-       LEFT JOIN test_case_suites m ON m.test_case_id = tc.id
-       LEFT JOIN test_suites s ON s.id = m.test_suite_id
-       WHERE tc.application_id = $1 AND tc.lifecycle NOT IN ('deprecated','archived')
-       ORDER BY s.key NULLS LAST, m.sort_order, tc.key`,
-      [application.id]
+  const groups = [...plan.values()];
+  const totalCases = groups.reduce((n, g) => n + g.case_ids.length, 0);
+  const workers = await onlineWorkers();
+  const planView = {
+    application: application.key,
+    environment: environment.key,
+    base_url: environment.base_url,
+    total_cases: totalCases,
+    suites: groups.map((g) => ({ key: g.suite_key, name: g.suite_name, cases: g.case_ids.length })),
+    excluded,
+    workers_online: workers,
+    evidence_gate: gateMode(),
+  };
+
+  if (r.dry_run === true) return { status: 200, body: { data: planView } };
+  if (!totalCases) {
+    return { status: 422, body: { error: 'No runnable cases match this application, environment and scope', data: planView } };
+  }
+
+  const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+  const requestedBy = (typeof r.requested_by === 'string' && r.requested_by) || actorId || null;
+  const source = typeof r.trigger_source === 'string' && /^[\w-]{1,40}$/.test(r.trigger_source) ? r.trigger_source : 'api';
+  const callerMeta = r.metadata && typeof r.metadata === 'object' ? r.metadata : {};
+  const created: any[] = [];
+
+  for (const g of groups) {
+    const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const { rows } = await query(
+      `INSERT INTO executions (
+         key, requested_by, test_suite_id, test_case_ids, environment_id,
+         execution_location, status, trigger_source, metadata
+       ) VALUES ($1,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
+       RETURNING id, key, status, created_at`,
+      [
+        key, requestedBy, g.suite_id, g.case_ids, environment.id, source,
+        JSON.stringify({
+          ...callerMeta,
+          run_group: runId,
+          suite_key: g.suite_key,
+          application_key: application.key,
+          environment_key: environment.key,
+          trigger: { reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : null, scope },
+        }),
+      ]
     );
+    created.push({ ...rows[0], suite_key: g.suite_key, cases: g.case_ids.length });
+  }
 
-    const policy = (environment.safety_policy || {}) as Record<string, string>;
-    const approved = new Set(strings(b.approved_categories) || []);
-    const seen = new Set<string>();
-    const excluded: Array<{ case_key: string; reason: string }> = [];
-    type Group = { suite_id: string | null; suite_key: string; suite_name: string; case_ids: string[] };
-    const plan = new Map<string, Group>();
-
-    for (const c of candidates) {
-      if (scope.suites && !scope.suites.includes(c.suite_key)) continue;
-      if (scope.case_keys && !scope.case_keys.includes(c.key)) continue;
-      if (scope.test_types && !scope.test_types.includes(c.test_type)) continue;
-      if (scope.methods && !scope.methods.includes(String(c.execution_method || '').toLowerCase())) continue;
-      if (scope.tags && !scope.tags.some((t) => (c.tags || []).includes(t))) continue;
-      if (seen.has(c.id)) continue;
-      seen.add(c.id);
-
-      if (!['automated', 'partially_automated'].includes(c.automation_status)) {
-        excluded.push({ case_key: c.key, reason: `not automated (${c.automation_status})` });
-        continue;
-      }
-      const category = safetyCategory(c);
-      const decision = policy[category];
-      if (decision === 'prohibited' || (decision === 'approval_required' && !approved.has(category))) {
-        excluded.push({ case_key: c.key, reason: `${category} is ${decision} on ${environment.key}` });
-        continue;
-      }
-
-      const suiteKey = c.suite_key || 'unassigned';
-      const group: Group = plan.get(suiteKey) || { suite_id: c.suite_id ?? null, suite_key: suiteKey, suite_name: c.suite_name || 'Unassigned cases', case_ids: [] };
-      group.case_ids.push(c.id);
-      plan.set(suiteKey, group);
-    }
-
-    const groups = [...plan.values()];
-    const totalCases = groups.reduce((n, g) => n + g.case_ids.length, 0);
-    const workers = await onlineWorkers();
-    const planView = {
-      application: application.key,
-      environment: environment.key,
-      base_url: environment.base_url,
-      total_cases: totalCases,
-      suites: groups.map((g) => ({ key: g.suite_key, name: g.suite_name, cases: g.case_ids.length })),
-      excluded,
-      workers_online: workers,
-      evidence_gate: gateMode(),
-    };
-
-    if (b.dry_run === true) return reply.send({ data: planView });
-    if (!totalCases) {
-      return reply.status(422).send({ error: 'No runnable cases match this application, environment and scope', data: planView });
-    }
-
-    const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-    const requestedBy = (typeof b.requested_by === 'string' && b.requested_by) || req.actor?.id || null;
-    const source = typeof b.trigger_source === 'string' && /^[\w-]{1,40}$/.test(b.trigger_source) ? b.trigger_source : 'api';
-    const callerMeta = b.metadata && typeof b.metadata === 'object' ? (b.metadata as Record<string, unknown>) : {};
-    const created: any[] = [];
-
-    for (const g of groups) {
-      const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-      const { rows } = await query(
-        `INSERT INTO executions (
-           key, requested_by, test_suite_id, test_case_ids, environment_id,
-           execution_location, status, trigger_source, metadata
-         ) VALUES ($1,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
-         RETURNING id, key, status, created_at`,
-        [
-          key, requestedBy, g.suite_id, g.case_ids, environment.id, source,
-          JSON.stringify({
-            ...callerMeta,
-            run_group: runId,
-            suite_key: g.suite_key,
-            application_key: application.key,
-            environment_key: environment.key,
-            trigger: { reason: typeof b.reason === 'string' ? b.reason.slice(0, 300) : null, scope },
-          }),
-        ]
-      );
-      created.push({ ...rows[0], suite_key: g.suite_key, cases: g.case_ids.length });
-    }
-
-    await audit(req, 'run.trigger', 'application', application.id, {
-      run_id: runId,
-      environment: environment.key,
-      executions: created.length,
-      total_cases: totalCases,
-      excluded: excluded.length,
-      trigger_source: source,
-    });
-
-    return reply.status(202).send({
+  return {
+    status: 202,
+    body: {
       data: {
         run_id: runId,
         ...planView,
@@ -327,7 +347,27 @@ export async function triggerRoutes(app: FastifyInstance) {
       },
       message: `Queued ${totalCases} cases in ${created.length} executions`,
       ...(workers === 0 ? { warning: 'No worker is online — the run stays queued until one registers' } : {}),
-    });
+    },
+    queued: {
+      run_id: runId,
+      application_id: application.id,
+      environment: environment.key,
+      executions: created.length,
+      total_cases: totalCases,
+      excluded: excluded.length,
+      trigger_source: source,
+    },
+  };
+}
+
+export async function triggerRoutes(app: FastifyInstance) {
+  app.post<{ Body: Record<string, unknown> }>('/api/v1/runs', async (req, reply) => {
+    const b = req.body || {};
+    const outcome = await queueRun(b as unknown as RunRequest, req.actor?.id);
+    if (outcome.queued) {
+      await audit(req, 'run.trigger', 'application', outcome.queued.application_id, outcome.queued);
+    }
+    return reply.status(outcome.status).send(outcome.body);
   });
 
   app.get('/api/v1/runs', async (req, reply) => {

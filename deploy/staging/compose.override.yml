@@ -1,0 +1,68 @@
+# Staging overlay for Sand Bench.
+#
+# Applied on top of the docker-compose.yml of an exported, pinned Sand Bench
+# commit (see deploy.mjs) under the compose project "sand-bench-staging", so it
+# shares no containers, network, volumes, images or host ports with the
+# development stack (project "sand-bench-enterprise" on 8080/8787/8091/8090).
+#
+# Differences from development:
+#   - images are tagged sand-bench-staging-*:<commit>, never the dev tags
+#   - the web tier serves what is baked into its image (no bind mount of a
+#     working tree that changes under the tests)
+#   - the database and object store publish no host ports
+#   - everything published binds to 127.0.0.1 only
+#   - classification "test": non-production, demo identities and passwordless
+#     demo sign-in stay available to the catalogue
+#   - the database starts empty and the API applies every migration in order.
+#     The development compose file seeds the first migrations through
+#     docker-entrypoint-initdb.d; on a new database that makes the API stamp
+#     022–026 as applied without running them, and boot then fails in 027.
+services:
+  db:
+    image: sand-bench-staging-db:${SBE_STAGING_TAG:?set by deploy.mjs}
+    ports: !reset []
+    volumes: !override
+      - sandbench-pg:/var/lib/postgresql/data
+
+  minio:
+    ports: !reset []
+
+  api:
+    image: sand-bench-staging-app:${SBE_STAGING_TAG}
+    build:
+      args:
+        SBE_VERSION: ${SBE_STAGING_VERSION:-0.0.0-staging}
+        SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
+    ports: !override
+      - "127.0.0.1:${STAGING_API_PORT:-18787}:8787"
+    environment:
+      ENVIRONMENT_CLASSIFICATION: test
+
+  worker:
+    image: sand-bench-staging-app:${SBE_STAGING_TAG}
+    build:
+      args:
+        SBE_VERSION: ${SBE_STAGING_VERSION:-0.0.0-staging}
+        SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
+    environment:
+      ENVIRONMENT_CLASSIFICATION: test
+
+  web:
+    image: sand-bench-staging-web:${SBE_STAGING_TAG}
+    build:
+      args:
+        SBE_VERSION: ${SBE_STAGING_VERSION:-0.0.0-staging}
+        SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
+    ports: !override
+      - "127.0.0.1:${STAGING_WEB_PORT:-18080}:80"
+    volumes: !reset []
+
+  dbviewer:
+    image: sand-bench-staging-dbviewer:${SBE_STAGING_TAG}
+    ports: !override
+      - "127.0.0.1:${STAGING_DBVIEWER_PORT:-18090}:8090"
+
+  testhub:
+    image: sand-bench-staging-testhub:${SBE_STAGING_TAG}
+    ports: !override
+      - "127.0.0.1:${STAGING_TESTHUB_PORT:-18091}:8091"

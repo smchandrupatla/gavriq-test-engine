@@ -55,6 +55,12 @@ const state={
   envId:null,headed:false,search:'',selected:new Set(),rowLimit:ROWS,tile:null,tiles:new Map(),panels:new Set(),
   history:new Map(),charts:new Map(),open:new Set(),section:null,live:{inRun:new Map(),current:new Set()},
   run:null,evidence:new Map(),buildRows:null,
+  // Inline case detail (replaces the old modal): #/case/:id and #/case/:id/runs
+  caseId:null,caseTab:'details',caseDetail:null,
+  // Filter views reached from case-detail links
+  methodName:null,tagName:null,
+  // Configuration page (run retention)
+  settings:null,
 };
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -93,6 +99,28 @@ function typeOfCase(c,types,suiteById){
 }
 function suitesForType(typeKey){return state.suites.filter(s=>{if(isSitSuite(s))return false;if(String(s.key||'').startsWith('sb-type-'))return false;if(String(s.suite_type||'')===typeKey)return true;return String(s.key||'').startsWith('sb-'+typeKey+'-');});}
 function sitSuitesInGroup(g){const keys=new Set((g.keys||[]).map(k=>k.toLowerCase()));return state.suites.filter(s=>{if(!isSitSuite(s))return false;const k=String(s.key||'').toLowerCase();return keys.has(k)||[...keys].some(prefix=>k.startsWith(prefix+'-'));});}
+// Case-detail hyperlinks: which nav destination a case's type/suite resolves to.
+function typeIdOfCase(id){if(!state.idx)return null;for(const [tid,list] of state.idx.casesByType){if(list.some(c=>c.id===id))return tid;}return null;}
+function caseTypeHref(c){
+  const tid=typeIdOfCase(c.id);
+  if(!tid)return null;
+  if(tid==='sit'){
+    for(const g of SIT_GROUPS){if((state.idx.sitGroupCases.get(g.id)||[]).some(x=>x.id===c.id))return {href:'#/sit/'+g.id,label:'SIT · '+g.title};}
+    return {href:'#/sit',label:'SIT'};
+  }
+  if(tid==='selenium-baseline'&&!typeList().some(t=>t.id==='selenium-baseline'))return {href:'#/baseline',label:typeTitle(tid)};
+  return {href:'#/type/'+encodeURIComponent(tid),label:typeTitle(tid)};
+}
+function caseTypeLinkHtml(c){const h=caseTypeHref(c);return h?`<a href="${esc(h.href)}">${esc(h.label)}</a>`:'—';}
+function suiteHref(s){
+  if(!state.idx)return '#/overview';
+  if(isSitSuite(s)){
+    for(const g of SIT_GROUPS){if((state.idx.sitGroupSuites.get(g.id)||[]).some(x=>x.id===s.id))return '#/sit/'+g.id+'/suite/'+s.id;}
+    return '#/sit';
+  }
+  for(const t of typeList()){if(suitesForType(t.id).some(x=>x.id===s.id))return '#/type/'+encodeURIComponent(t.id)+'/suite/'+s.id;}
+  return '#/type/other';
+}
 function indexSummary(){
   const caseById=new Map(state.cases.map(c=>[c.id,c]));
   const suiteById=new Map(state.suites.map(s=>[s.id,s]));
@@ -123,6 +151,11 @@ function filterCases(list){const q=state.search.trim().toLowerCase();if(!q)retur
 // Data loading
 // ---------------------------------------------------------------------------
 function appQuery(prefix){return (prefix||'?')+'application_key='+encodeURIComponent(state.appKey||'sand-bench');}
+// Statuses and history are per environment: the same case can pass on staging and fail on development.
+function envQuery(){return state.envId?'&environment_id='+encodeURIComponent(state.envId):'';}
+const envStoreKey=()=>'te.env.'+(state.appKey||'sand-bench');
+const currentEnv=()=>state.environments.find(e=>e.id===state.envId)||null;
+const envName=()=>{const e=currentEnv();return e?(e.name||e.key):'any environment';};
 async function loadApplications(){
   try{state.applications=(await api('/api/v1/applications')).data||[];}catch{state.applications=[];}
   if(!state.appKey){
@@ -132,9 +165,15 @@ async function loadApplications(){
   }
   renderAppSelect();
 }
-async function loadSummary(){
-  const d=(await api('/api/v1/ui/summary'+appQuery())).data||{};
-  state.cases=d.cases||[];state.suites=d.suites||[];state.environments=d.environments||[];
+async function loadSummary(retry){
+  if(!state.envId&&!retry){try{state.envId=localStorage.getItem(envStoreKey())||null;}catch{}}
+  const sent=state.envId;
+  const d=(await api('/api/v1/ui/summary'+appQuery()+envQuery())).data||{};
+  state.environments=d.environments||[];
+  renderEnvSelect();
+  // The environment is only known once the list arrives (first visit, or a saved one that was retired).
+  if(state.envId!==sent&&!retry)return loadSummary(true);
+  state.cases=d.cases||[];state.suites=d.suites||[];
   state.application=d.application||null;state.build=d.build||null;state.stats=d.stats||{};
   const meta=d.application&&d.application.types;
   state.typesFromDb=Array.isArray(meta)&&meta.length?meta.map(t=>({id:t.key,title:t.label||t.key,summary:t.subtitle||'',category:t.category==='qc'?'qc':'qa'})):null;
@@ -142,15 +181,18 @@ async function loadSummary(){
   state.loaded=true;state.buildRows=null;
   indexSummary();
   markHistoryStale();
-  renderEnvSelect();
 }
 let polling=false,pollTimer=null;
 async function pollLive(){
   if(polling)return;
   polling=true;clearTimeout(pollTimer);
   try{
-    const res=await api('/api/v1/ui/live'+appQuery()+(state.since?'&since='+encodeURIComponent(state.since):''));
-    await applyLive(res.data||{});
+    const env=state.envId;
+    const res=await api('/api/v1/ui/live'+appQuery()+envQuery()+(state.since?'&since='+encodeURIComponent(state.since):''));
+    const d=res.data||{};
+    // A poll answered after the environment changed carries the previous one's statuses.
+    if(env!==state.envId)d.changed=[];
+    await applyLive(d);
   }catch(e){/* keep the last frame; the health pill shows reachability */}
   finally{
     polling=false;
@@ -186,9 +228,22 @@ async function loadRun(id){
   try{state.run=(await api('/api/v1/ui/executions/'+encodeURIComponent(id))).data;}
   catch(e){state.run={id,error:e.message};}
 }
+async function loadCaseDetail(id){
+  try{
+    const [res,hist]=await Promise.all([
+      api('/api/v1/test-cases/'+encodeURIComponent(id)),
+      postJson('/api/v1/ui/history',{case_ids:[id],limit:20,environment_id:state.envId}).catch(()=>({data:{runs:[]}})),
+    ]);
+    state.caseDetail={id,case:res.data,runs:hist.data.runs||[]};
+  }catch(e){state.caseDetail={id,error:e.message};}
+}
 async function loadBuildRows(){
   try{state.buildRows=(await api('/api/v1/build-results'+appQuery())).data||[];}catch{state.buildRows=[];}
   if(state.view==='builds')renderCurrentView();
+}
+async function loadSettings(){
+  try{state.settings=(await api('/api/v1/settings')).data;}catch(e){state.settings={error:e.message};}
+  if(state.view==='config')renderCurrentView();
 }
 function markHistoryStale(){for(const h of state.history.values())h.stale=true;}
 async function loadHistory(tile){
@@ -200,7 +255,7 @@ async function loadHistory(tile){
   try{
     const res=tile.kind==='build'
       ?await api('/api/v1/ui/build-history'+appQuery()+'&limit=30')
-      :await postJson('/api/v1/ui/history',{case_ids:(tile.cases||[]).map(c=>c.id),limit:30});
+      :await postJson('/api/v1/ui/history',{case_ids:(tile.cases||[]).map(c=>c.id),limit:30,environment_id:state.envId});
     next={data:res.data};
   }catch(e){next={data:prev&&prev.data,error:e.message};}
   state.history.set(tile.key,next);
@@ -341,7 +396,7 @@ function topFailingHtml(rows,isBuild){
   return `<div class="top-fail"><h3>Most frequent failures</h3><ol>${rows.map(r=>`<li>${isBuild?`<span>${esc(r.name||r.key)}</span>`:`<button class="case-name" data-case="${esc(r.test_case_id)}">${esc(r.name)}</button>`}<span class="key small">${esc(r.key)}</span><span class="muted small">failed ${r.failures} of ${plural(r.runs,'run')} · last ${esc(when(r.last_failed_at))}</span></li>`).join('')}</ol></div>`;
 }
 function historyTableHtml(runs,isBuild){
-  const rows=runs.map(r=>{const t=r.passed+r.failed+r.other;return `<tr${isBuild?'':` class="clickable" data-run="${esc(r.id)}"`}><td class="key">${esc(r.key)}</td><td>${esc(when(r.created_at))}</td><td class="num">${r.passed}</td><td class="num">${r.failed}</td><td class="num">${r.other}</td><td class="num">${t?Math.round(r.passed/t*100)+'%':'—'}</td>${isBuild?'':`<td>${badge(r.status)}</td>`}</tr>`;}).join('');
+  const rows=runs.map(r=>{const t=r.passed+r.failed+r.other;return `<tr${isBuild?'':` class="clickable" data-run="${esc(r.id)}"`}><td>${isBuild?esc(r.key):esc(r.name||r.key)}${isBuild?'':'<div class="key small">'+esc(r.key)+'</div>'}</td><td>${esc(when(r.created_at))}</td><td class="num">${r.passed}</td><td class="num">${r.failed}</td><td class="num">${r.other}</td><td class="num">${t?Math.round(r.passed/t*100)+'%':'—'}</td>${isBuild?'':`<td>${badge(r.status)}</td>`}</tr>`;}).join('');
   return `<div class="table-wrap"><table><thead><tr><th>${isBuild?'Build':'Run'}</th><th>Date</th><th class="num">Passed</th><th class="num">Failed</th><th class="num">Other</th><th class="num">Pass rate</th>${isBuild?'':'<th>Run status</th>'}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function drawCharts(){document.querySelectorAll('#content [data-chart]').forEach(host=>{const spec=state.charts.get(host.dataset.chart);if(spec&&spec.runs.length)Charts[spec.type](host,spec.runs,spec.opts);});}
@@ -377,8 +432,8 @@ function liveCardHtml(e){
   const total=Math.max(e.total||0,e.done||0);
   const noWorker=!state.workers.some(workerFresh);
   const now=e.status==='running'?(cur?`Now running <b>${esc(cur.name)}</b>`:'Finishing up'):e.status==='queued'?(noWorker?'Waiting — no live worker connected':'Waiting for a worker to claim it'):'Preparing';
-  return `<article class="live-card${stalled?' stalled':''}" data-run="${esc(e.id)}" tabindex="0" aria-label="Run ${esc(e.key)}, ${esc(e.status)}">
-    <div class="live-head"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.key)}</span>${badge(e.status)}<span class="muted small">${esc(suite?suite.name:plural(total,'case'))} · ${esc(e.trigger_source||'manual')}</span><span class="live-elapsed" title="Elapsed"><span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-ms(e.started_at||e.created_at))}</span></span></div>
+  return `<article class="live-card${stalled?' stalled':''}" data-run="${esc(e.id)}" tabindex="0" aria-label="Run ${esc(e.name||e.key)}, ${esc(e.status)}">
+    <div class="live-head"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.name||e.key)}</span>${badge(e.status)}<span class="muted small">${esc(suite?suite.name:plural(total,'case'))} · ${esc(e.trigger_source||'manual')}</span><span class="live-elapsed" title="Elapsed"><span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-ms(e.started_at||e.created_at))}</span></span></div>
     ${progressHtml(e,'big')}
     <div class="live-meta"><span><b>${e.done||0}</b> / ${total} done</span>${countsHtml(e)}</div>
     <div class="live-now">${stalled?`<span class="stall">Last activity <span data-ago="${esc(e.last_activity_at||e.started_at||e.created_at)}">${ago(e.last_activity_at||e.started_at||e.created_at)}</span> — the worker may have stopped.</span><button class="btn" data-action="cancel-run" data-id="${esc(e.id)}">Cancel run</button>`:now}</div>
@@ -387,7 +442,7 @@ function liveCardHtml(e){
 function liveStripHtml(){
   const a=activeRuns().filter(e=>!isStalled(e));
   if(!a.length)return '';
-  return `<div class="live-strip">${a.slice(0,3).map(e=>`<a class="ls-item" href="#/run/${esc(e.id)}"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.key)}</span><span class="muted small">${e.done||0}/${Math.max(e.total||0,e.done||0)} done · ${e.failed||0} failed</span>${progressHtml(e,'thin')}<span class="small">Watch →</span></a>`).join('')}${a.length>3?`<a class="small" href="#/history">+${a.length-3} more running</a>`:''}</div>`;
+  return `<div class="live-strip">${a.slice(0,3).map(e=>`<a class="ls-item" href="#/run/${esc(e.id)}"><span class="pulse ${esc(e.status)}"></span><span class="run-key">${esc(e.name||e.key)}</span><span class="muted small">${e.done||0}/${Math.max(e.total||0,e.done||0)} done · ${e.failed||0} failed</span>${progressHtml(e,'thin')}<span class="small">Watch →</span></a>`).join('')}${a.length>3?`<a class="small" href="#/history">+${a.length-3} more running</a>`:''}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +460,7 @@ function renderSideNav(){
   h+=navItem('overview',null,'Overview');
   h+=navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null);
   h+=navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot);
+  h+=navItem('config',null,'Configuration');
   if(sitCases().length){
     h+='<div class="nav-section">SIT console</div>';
     h+=navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit');
@@ -444,12 +500,12 @@ function renderOverview(){
   const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
   let h='';
   if(live.length)h+=`<div class="group-head first"><h2>${liveHeading(live)}</h2><a class="small" href="#/history">Open run screen →</a></div><div class="live-board">${live.map(liveCardHtml).join('')}</div>`;
-  h+=`<div class="group-head first"><h2>${esc(appName)}</h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment">▶ Run everything (${all.total})</button></div></div>`;
+  h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span></h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment">▶ Run everything (${all.total})</button></div></div>`;
   h+='<div class="kpi-grid">'+
     kpi('All cases',all.total,'in repository')+
     kpi('Passing',all.passed,'latest result passed',all.passed?'green':'')+
     kpi('Failing',all.failed,'latest result failed',all.failed?'red':'')+
-    kpi('Never run',all.never,'no result recorded')+
+    kpi('Never run',all.never,'no result on '+esc(envName()))+
     kpi('Active runs',hot,`${state.stats.runs_7d||0} runs in the last 7 days`,hot?'amber':'')+
     kpi('Last build',b?esc(String(b.build_id).slice(0,14)):'—',b?`${b.passed} passed · ${b.failed} failed (in-container)`:'no CI results yet','sm'+(b&&b.failed?' red':''))+
   '</div>';
@@ -499,9 +555,9 @@ function renderHistory(){
   const rows=state.executions.map(e=>{
     const end=e.finished_at?ms(e.finished_at):null,start=ms(e.started_at||e.created_at);
     const time=ACTIVE.has(String(e.status))?`<span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-start)}</span>`:end?dur(end-start):'—';
-    return `<tr class="clickable" data-run="${esc(e.id)}"><td class="key">${esc(e.key)}</td><td>${badge(e.status)}${isStalled(e)?' <span class="muted small">stalled</span>':''}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${time}</td></tr>`;
+    return `<tr class="clickable" data-run="${esc(e.id)}"><td>${esc(e.name||e.key)}<div class="key small">${esc(e.key)}</div></td><td>${badge(e.status)}${isStalled(e)?' <span class="muted small">stalled</span>':''}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.environment_name||'—')}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${time}</td></tr>`;
   }).join('');
-  h+=`<div class="card"><div class="card-head"><h2>Recent executions</h2><span class="muted small">select a run for per-case results</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Trigger</th><th>Created</th><th>Duration</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">No executions yet.</td></tr>'}</tbody></table></div></div>`;
+  h+=`<div class="card"><div class="card-head"><h2>Recent executions</h2><span class="muted small">select a run for per-case results</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Duration</th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">No executions yet.</td></tr>'}</tbody></table></div></div>`;
   el('content').innerHTML=h;
 }
 function renderRun(){
@@ -509,7 +565,7 @@ function renderRun(){
   el('viewTitle').textContent='Run';
   if(!r||(r.id!==state.runId&&r.key!==state.runId)){el('content').innerHTML='<div class="skel" style="height:140px;margin-bottom:16px"></div><div class="skel" style="height:320px"></div>';return;}
   if(r.error){el('content').innerHTML=`<div class="card empty">Run not found (${esc(r.error)}). <a href="#/history">Back to test runs</a></div>`;return;}
-  el('viewTitle').textContent='Run '+r.key;
+  el('viewTitle').textContent=r.name||('Run '+r.key);
   const byCase=new Map();for(const x of r.results)byCase.set(x.test_case_id,x);
   const names=new Map((r.cases||[]).map(c=>[c.id,c]));
   const ids=[...(r.test_case_ids||[])];for(const x of r.results)if(!ids.includes(x.test_case_id))ids.push(x.test_case_id);
@@ -536,8 +592,8 @@ function renderRun(){
     return `<li class="run-case ${iconCls}"><span class="rc-icon ${iconCls}" aria-hidden="true">${icon}</span><div class="rc-main"><button class="case-name" data-case="${esc(id)}">${esc(c.name)}</button><div class="key small">${esc(c.key)}${x&&x.classification?' · '+esc(String(x.classification).replace(/_/g,' ')):''}</div>${x&&x.message&&s!=='passed'?`<div class="rc-msg">${esc(x.message)}</div>`:''}${evidence}${shots}</div><span>${s==='running'?'<span class="badge running">running</span>':s==='stalled'?'<span class="badge blocked">no progress</span>':s==='pending'?'<span class="badge queued">pending</span>':s==='not run'?'<span class="badge never">not run</span>':badge(s)}</span><span class="muted small rc-dur">${x?secs(x.duration_ms):s==='running'?'…':''}</span></li>`;
   }).join('');
   el('content').innerHTML=`<div class="card run-head">
-      <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
-        <div class="hp-actions"><a class="btn" href="#/history">← All runs</a><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
+      <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.name||r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
+        <div class="hp-actions"><button class="btn" data-action="nav-back">← Back</button><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
       <div class="run-body">
         ${progressHtml(e,'big')}
         <div class="live-meta"><span><b>${byCase.size}</b> / ${ids.length} done</span>${countsHtml(e)}${current?`<span>Now running <b>${esc((names.get(current)||{}).name||current)}</b></span>`:''}</div>
@@ -563,6 +619,65 @@ function renderBuilds(){
   h+=`<div class="card"><div class="card-head"><h2>Latest build results</h2><span class="muted small">${esc((b&&b.build_id)||'none')}</span></div>${body}</div>`;
   el('content').innerHTML=h;
 }
+function renderCaseView(){
+  const d=state.caseDetail;
+  el('viewTitle').textContent='Test case';
+  if(!d||d.id!==state.caseId){el('content').innerHTML='<div class="skel" style="height:220px"></div>';return;}
+  if(d.error){el('content').innerHTML=`<div class="card empty">Could not load case (${esc(d.error)}). <a href="#/overview">Back to overview</a></div>`;return;}
+  const c=d.case,lite=state.idx&&state.idx.caseById.get(c.id);
+  el('viewTitle').textContent=c.name||c.key;
+  const suites=((lite&&lite.suite_ids)||[]).map(s=>state.idx.suiteById.get(s)).filter(Boolean);
+  const latestRun=d.runs[0];
+  const head=`<div class="card-head"><button class="btn" data-action="nav-back">← Back</button><h2 style="margin:0">${esc(c.name||c.key)}</h2></div>`;
+  const tabs=`<div class="tabs">
+      <button class="tab-btn${state.caseTab==='details'?' active':''}" data-nav="#/case/${esc(c.id)}">Details</button>
+      <button class="tab-btn${state.caseTab==='runs'?' active':''}" data-nav="#/case/${esc(c.id)}/runs">Runs (${d.runs.length})</button>
+    </div>`;
+  let body;
+  if(state.caseTab==='runs'){
+    body=d.runs.length
+      ?`<div class="run-tiles">${d.runs.map(r=>`<button type="button" class="run-tile" data-run="${esc(r.id)}"><span class="run-tile-name">${esc(r.name||r.key)}</span>${badge(r.failed?'failed':r.passed?'passed':'other')}<span class="muted small">${esc(when(r.created_at))}</span></button>`).join('')}</div>`
+      :'<div class="empty">This case has never run.</div>';
+  }else{
+    body=`<div class="hp-body"><dl class="kv">
+      <dt>Key</dt><dd class="key">${esc(c.key)}</dd>
+      <dt>Status</dt><dd>${latestRun?`<a href="#/run/${esc(latestRun.id)}">${badge(lite&&lite.last_status?{status:lite.last_status}:null)}</a>`:badge(null)}${lite&&lite.last_at?' <span class="muted small">'+esc(when(lite.last_at))+'</span>':''}</dd>
+      <dt>Type</dt><dd>${caseTypeLinkHtml(c)}</dd>
+      <dt>Method</dt><dd>${c.execution_method?`<a href="#/method/${encodeURIComponent(c.execution_method)}">${esc(c.execution_method)}</a>`:'—'}</dd>
+      <dt>Suites</dt><dd>${suites.map(s=>`<a class="tag" href="${esc(suiteHref(s))}">${esc(s.name)}</a>`).join(' ')||'—'}</dd>
+      <dt>Tags</dt><dd>${(c.tags||[]).map(t=>`<a class="tag" href="#/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join(' ')||'—'}</dd>
+      <dt>Description</dt><dd>${esc(c.description||'—')}</dd>
+    </dl><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}">Run this case</button></div>`;
+  }
+  el('content').innerHTML=`<div class="card">${head}${tabs}${body}</div>`;
+}
+function renderMethodView(name){
+  el('viewTitle').textContent='Method · '+name;
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const cases=state.cases.filter(c=>String(c.execution_method||'').toLowerCase()===String(name).toLowerCase());
+  el('content').innerHTML=caseSectionHtml({title:name+' cases',cases,label:name});
+}
+function renderTagView(name){
+  el('viewTitle').textContent='Tag · '+name;
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  const cases=state.cases.filter(c=>(c.tags||[]).includes(name));
+  el('content').innerHTML=caseSectionHtml({title:'#'+name,cases,label:name});
+}
+function renderConfigView(){
+  el('viewTitle').textContent='Configuration';
+  const s=state.settings;
+  if(!s){el('content').innerHTML=skeletonHtml();return;}
+  if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
+  el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Run retention</h2></div>
+    <div class="hp-body">
+      <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted.</p>
+      <div class="toolbar" style="border:none;padding:0">
+        <input type="number" id="retentionDays" min="1" max="365" value="${esc(s.run_retention_days)}" style="width:90px">
+        <button class="btn primary" data-action="save-retention">Save</button>
+        ${s.updated_at?`<span class="muted small">last changed ${esc(when(s.updated_at))}</span>`:''}
+      </div>
+    </div></div>`;
+}
 function renderCurrentView(){
   state.tiles=new Map();state.charts=new Map();state.panels=new Set();state.section=null;
   state.live=liveCaseState();
@@ -570,6 +685,10 @@ function renderCurrentView(){
   if(v==='history')renderHistory();
   else if(v==='run')renderRun();
   else if(v==='builds')renderBuilds();
+  else if(v==='case')renderCaseView();
+  else if(v==='method')renderMethodView(state.methodName);
+  else if(v==='tag')renderTagView(state.tagName);
+  else if(v==='config')renderConfigView();
   else if(v==='type')renderTypeView(state.typeId);
   else if(v==='baseline')renderTypeView('selenium-baseline');
   else if(v==='sit'||v==='sit-all')renderSitView(state.sitGroupId);
@@ -584,17 +703,26 @@ function renderBanner(){
   banner(null);
 }
 function renderEnvSelect(){
-  if(!state.envId){try{state.envId=localStorage.getItem('te.env')||null;}catch{}}
   if(!state.envId||!state.environments.some(e=>e.id===state.envId)){
-    // Sensible default per application: the engine tests itself on engine-local,
-    // everything else defaults to the containerized-worker environment — the
-    // deployed worker runs inside Docker, where 127.0.0.1 is the container
-    // itself, not the host, so sand-bench-local only works with a host worker.
-    const prefer=state.appKey==='gavriq-test-engine'?['engine-local','sand-bench-local','local-dev']:['sand-bench-container','sand-bench-local','local-dev','sandbox'];
-    const hit=prefer.map(k=>state.environments.find(e=>e.key===k)).find(Boolean);
+    // The list is already scoped to the application. Default to the most
+    // stable target it has: staging is a pinned build, the local stacks are
+    // rebuilt from a working tree.
+    const prefer=['staging','pre_prod','uat','sit','qa','docker','localhost'];
+    const hit=prefer.map(t=>state.environments.find(e=>e.env_type===t)).find(Boolean);
     state.envId=(hit&&hit.id)||(state.environments[0]&&state.environments[0].id)||null;
   }
   el('envSelect').innerHTML=state.environments.map(e=>'<option value="'+esc(e.id)+'"'+(e.id===state.envId?' selected':'')+'>'+esc(e.name||e.key)+'</option>').join('')||'<option value="">None</option>';
+  const env=currentEnv(),dep=env&&env.deployment;
+  el('envSelect').title=env?[env.base_url,dep&&dep.commit?'deployed '+String(dep.commit).slice(0,12)+(dep.ref?' ('+dep.ref+')':''):''].filter(Boolean).join(' · '):'';
+}
+async function switchEnvironment(id){
+  if(id===state.envId)return;
+  state.envId=id||null;
+  try{localStorage.setItem(envStoreKey(),state.envId||'');}catch{}
+  // Every status on screen belongs to the previous environment.
+  Object.assign(state,{since:null,selected:new Set()});
+  state.history.clear();
+  await refreshAll();
 }
 function renderAppSelect(){
   const sel=el('appSelect');if(!sel)return;
@@ -604,8 +732,8 @@ async function switchApplication(key){
   if(!key||key===state.appKey)return;
   state.appKey=key;
   try{localStorage.setItem('te.app',key);}catch{}
-  // Full reset of app-scoped view state; environments stay global.
-  Object.assign(state,{loaded:false,cases:[],suites:[],build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null});
+  // Full reset of app-scoped view state, including the environment: each application has its own targets.
+  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null});
   state.history.clear();
   location.hash='#/overview';
   renderSideNav();renderCurrentView();
@@ -616,27 +744,11 @@ async function switchApplication(key){
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
-async function openCase(id){
-  el('detailTitle').textContent='Loading…';
-  el('detailBody').innerHTML='<div class="skel" style="height:160px"></div>';
-  if(!el('detail').open)el('detail').showModal();
-  try{
-    const [res,hist]=await Promise.all([api('/api/v1/test-cases/'+encodeURIComponent(id)),postJson('/api/v1/ui/history',{case_ids:[id],limit:10}).catch(()=>({data:{runs:[]}}))]);
-    const c=res.data,lite=state.idx&&state.idx.caseById.get(c.id);
-    const suites=((lite&&lite.suite_ids)||[]).map(s=>state.idx.suiteById.get(s)).filter(Boolean);
-    const runs=hist.data.runs||[];
-    el('detailTitle').textContent=c.name||c.key;
-    el('detailBody').innerHTML=`<dl class="kv"><dt>Key</dt><dd class="key">${esc(c.key)}</dd><dt>Status</dt><dd>${badge(lite&&lite.last_status?{status:lite.last_status}:null)}${lite&&lite.last_at?' <span class="muted small">'+esc(when(lite.last_at))+'</span>':''}</dd><dt>Type</dt><dd>${esc(c.test_type||'—')}</dd><dt>Method</dt><dd>${esc(c.execution_method||'—')}</dd><dt>Suites</dt><dd>${suites.map(s=>'<span class="tag">'+esc(s.name)+'</span>').join(' ')||'—'}</dd><dt>Tags</dt><dd>${(c.tags||[]).map(t=>'<span class="tag">'+esc(t)+'</span>').join(' ')||'—'}</dd><dt>Description</dt><dd>${esc(c.description||'—')}</dd></dl>
-      <h3 class="dlg-h">Recent runs</h3>${runs.length?`<ul class="mini-runs">${runs.map(r=>`<li><a href="#/run/${esc(r.id)}" data-close>${badge(r.failed?'failed':r.passed?'passed':'other')}<span class="key">${esc(r.key)}</span><span class="muted small">${esc(when(r.created_at))}</span></a></li>`).join('')}</ul>`:'<p class="muted small">This case has never run.</p>'}
-      <button class="btn primary" id="detailRun">Run this case</button>`;
-    el('detailRun').onclick=()=>{runCases([c.id],c.key);el('detail').close();};
-  }catch(e){el('detailTitle').textContent='Could not load case';el('detailBody').textContent=e.message;}
-}
 async function queueExecution(body,label){
   if(!state.envId){toast('No environment available.');return;}
   try{
     const res=await postJson('/api/v1/executions',{...body,environment_id:state.envId,trigger_source:'manual',...(state.headed?{metadata:{headless:false}}:{})});
-    toast('Queued '+label+' — '+res.data.key,'#/run/'+res.data.id);
+    toast('Queued '+label+' — '+(res.data.name||res.data.key),'#/run/'+res.data.id);
     pollLive();
   }catch(e){toast('Run failed: '+e.message);}
 }
@@ -694,6 +806,19 @@ function handleAction(action,node){
   else if(action==='evidence')toggleEvidence(node.dataset.rid);
   else if(action==='copy-evidence')copyEvidence(node.dataset.url,node);
   else if(action==='run-all')runEverything(node);
+  else if(action==='nav-back')history.back();
+  else if(action==='run-case')runCases([node.dataset.id],node.dataset.label);
+  else if(action==='save-retention')saveRetention(node);
+}
+async function saveRetention(btn){
+  const days=Number(el('retentionDays').value);
+  if(!Number.isInteger(days)||days<1||days>365){toast('Enter a whole number of days between 1 and 365');return;}
+  btn.disabled=true;
+  try{
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({run_retention_days:days})})).data;
+    toast('Retention updated');
+    renderCurrentView();
+  }catch(e){toast('Save failed: '+e.message);btn.disabled=false;}
 }
 async function runEverything(btn){
   if(!state.envId){toast('No environment available.');return;}
@@ -711,22 +836,27 @@ async function runEverything(btn){
 // Routing + wiring (event delegation: bound once, survives re-renders)
 // ---------------------------------------------------------------------------
 function parseHash(){
-  const parts=(location.hash||'#/overview').replace(/^#\/?/,'').split('/');
-  const v=parts[0]||'overview',arg=parts[1]?decodeURIComponent(parts[1]):null;
-  Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS});
-  if(v==='type'&&arg){state.view='type';state.typeId=arg;}
-  else if(v==='sit'){state.view=arg?'sit':'sit-all';state.sitGroupId=arg;}
+  const parts=(location.hash||'#/overview').replace(/^#\/?/,'').split('/').map(p=>p?decodeURIComponent(p):p);
+  const v=parts[0]||'overview',arg=parts[1]||null;
+  Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS,caseId:null,caseTab:'details',methodName:null,tagName:null});
+  if(v==='type'&&arg){state.view='type';state.typeId=arg;if(parts[2]==='suite'&&parts[3])state.suiteId=parts[3];}
+  else if(v==='sit'){state.view=arg?'sit':'sit-all';state.sitGroupId=arg;if(parts[2]==='suite'&&parts[3])state.suiteId=parts[3];}
   else if(v==='run'&&arg){state.view='run';state.runId=arg;}
-  else if(v==='history'||v==='builds'||v==='baseline')state.view=v;
+  else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
+  else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
+  else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
+  else if(v==='history'||v==='builds'||v==='baseline'||v==='config')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
   parseHash();renderSideNav();
-  const runId=state.runId;
+  const runId=state.runId,caseId=state.caseId;
   if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
+  if(state.view==='config'&&state.settings===null)loadSettings();
   renderCurrentView();
   window.scrollTo(0,0);
   if(runId){await loadRun(runId);if(state.runId===runId)renderCurrentView();}
+  if(caseId&&(!state.caseDetail||state.caseDetail.id!==caseId)){await loadCaseDetail(caseId);if(state.caseId===caseId)renderCurrentView();}
 }
 async function refreshAll(){
   try{await Promise.all([loadSummary(),pollLive(),loadHealth()]);banner(null);renderBanner();renderSideNav();renderCurrentView();}
@@ -734,9 +864,7 @@ async function refreshAll(){
 }
 el('menuToggle').onclick=()=>el('sidebar').classList.toggle('open');
 el('refreshBtn').onclick=()=>refreshAll();
-el('detailClose').onclick=()=>el('detail').close();
-el('detailBody').addEventListener('click',e=>{if(e.target.closest('[data-close]'))el('detail').close();else{const c=e.target.closest('[data-case]');if(c)openCase(c.dataset.case);}});
-el('envSelect').onchange=()=>{state.envId=el('envSelect').value||null;try{localStorage.setItem('te.env',state.envId||'');}catch{}};
+el('envSelect').onchange=()=>switchEnvironment(el('envSelect').value);
 el('headedCheck').onchange=()=>{state.headed=el('headedCheck').checked;try{localStorage.setItem('te.headed',state.headed?'1':'');}catch{}};
 el('appSelect').onchange=()=>switchApplication(el('appSelect').value);
 el('globalSearch').oninput=debounce(e=>{state.search=e.target.value;state.rowLimit=ROWS;renderCurrentView();},120);
@@ -750,8 +878,10 @@ const content=el('content');
 content.addEventListener('click',e=>{
   const t=e.target;
   const act=t.closest('[data-action]');if(act){if(!act.disabled)handleAction(act.dataset.action,act);return;}
+  const nav=t.closest('[data-nav]');if(nav){location.hash=nav.dataset.nav;return;}
+  const rt=t.closest('.run-tile');if(rt){location.hash='#/run/'+encodeURIComponent(rt.dataset.run);return;}
   const tile=t.closest('[data-tile]');if(tile){toggleTile(tile.dataset.tile);return;}
-  const cs=t.closest('[data-case]');if(cs){openCase(cs.dataset.case);return;}
+  const cs=t.closest('[data-case]');if(cs){location.hash='#/case/'+encodeURIComponent(cs.dataset.case);return;}
   const run=t.closest('[data-run]');if(run&&!t.closest('a,button,input'))location.hash='#/run/'+encodeURIComponent(run.dataset.run);
 });
 content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
