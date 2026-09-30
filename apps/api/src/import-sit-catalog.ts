@@ -39,6 +39,7 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '84-security-zap': { suite: 'sit-security', type: 'security', method: 'http' },
   '85-security-sast': { suite: 'sit-security', type: 'security', method: 'http' },
   '90-agents': { suite: 'sit-agents', type: 'integration', method: 'http' },
+  '95-selenium-data-feeder': { suite: 'sit-selenium-data-feeder', type: 'ui', method: 'selenium' },
 };
 
 /** Extract test() names from a .sit.ts source file */
