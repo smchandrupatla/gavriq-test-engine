@@ -339,6 +339,32 @@ CREATE INDEX IF NOT EXISTS idx_executions_env ON executions(environment_id);
 -- Runs are groups of executions sharing metadata.run_group (trigger API, run-all).
 CREATE INDEX IF NOT EXISTS idx_executions_run_group ON executions((metadata->>'run_group'));
 
+-- A deploy of `ref` to one environment, triggered from the console or the API
+-- and reported back by that environment's own deploy control plane (see
+-- apps/api/src/routes/deployments.ts). `key` is the remote deploy job id.
+-- `run_id` is a metadata.run_group value (runs have no dedicated table), set
+-- only when mode = deploy_and_run and the deploy itself succeeded.
+CREATE TABLE IF NOT EXISTS deployments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key             TEXT UNIQUE,
+  application     TEXT NOT NULL,
+  environment_id  UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  ref             TEXT NOT NULL DEFAULT 'main',
+  mode            TEXT NOT NULL DEFAULT 'deploy_only' CHECK (mode IN ('deploy_only', 'deploy_and_run')),
+  status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'deploying', 'succeeded', 'failed')),
+  commit          TEXT,
+  version         TEXT,
+  error           TEXT,
+  run_id          TEXT,
+  requested_by    TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  finished_at     TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_created ON deployments(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS execution_results (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   execution_id        UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,

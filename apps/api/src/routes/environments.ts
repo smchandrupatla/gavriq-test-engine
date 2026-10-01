@@ -2,6 +2,18 @@ import type { FastifyInstance } from 'fastify';
 import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 
+type Probe = { ok: boolean; status?: number; error?: string } | null;
+
+async function probe(url: unknown): Promise<Probe> {
+  if (typeof url !== 'string' || !url) return null;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+    return { ok: res.ok, status: res.status };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
+
 export async function environmentRoutes(app: FastifyInstance) {
   app.get('/api/v1/environments', async (_req, reply) => {
     const { rows } = await query('SELECT * FROM environments ORDER BY name');
@@ -133,4 +145,26 @@ export async function environmentRoutes(app: FastifyInstance) {
       });
     }
   );
+
+  /**
+   * Live reachability of this environment's web, API and database (viewer)
+   * endpoints — "is it actually up", not what's registered. Never throws:
+   * each leg reports ok/status/error independently, and a leg with no URL
+   * configured reports null ("not configured") rather than failing.
+   */
+  app.get<{ Params: { id: string } }>('/api/v1/environments/:id/status', async (req, reply) => {
+    const { rows } = await query(
+      'SELECT id, key, base_url, config FROM environments WHERE id::text = $1 OR key = $1',
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Environment not found' });
+    const env = rows[0];
+    const vars = (env.config || {}).vars || {};
+    const webUrl = vars.web || env.base_url;
+    const apiUrl = vars.api ? `${String(vars.api).replace(/\/$/, '')}/health` : null;
+    const dbUrl = vars.dbviewer ? `${String(vars.dbviewer).replace(/\/$/, '')}/health` : null;
+
+    const [web, api, db] = await Promise.all([probe(webUrl), probe(apiUrl), probe(dbUrl)]);
+    return reply.send({ data: { checked_at: new Date().toISOString(), web, api, db } });
+  });
 }

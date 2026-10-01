@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+**Added — deploy main to an environment, triggered from the console**
+- New non-production deploy API on the Sand Bench repo (`sand-bench-enterprise/deploy/api`): `POST /v1/deploy` builds/ups the `sand-bench-staging` stack from a `git archive` of the requested ref, verifies and seeds it, registers it with the Test Engine exactly as `deploy/staging/deploy.mjs` already did, then reports success or failure to a callback URL. Opt-in only (`DEPLOY_API_ENABLED=1` + `DEPLOY_API_KEY`), binds `127.0.0.1`, never part of a service image
+- Console: a **Deploy main…** control next to "Run everything" (environment picker implicit in the selected environment, mode **Deploy only** / **Deploy and run**). `POST /api/v1/deployments` triggers it, `deployments` table tracks queued → deploying → succeeded/failed, and the console polls to a status chip with the error inline on failure
+- A failed deploy — whether the trigger call itself fails or the callback reports `status: "failed"` — never queues a run; `deploy_and_run` only calls the same "run everything" planner the console's **Run everything** button uses (`runAllCases`, extracted from `/api/v1/executions/run-all`) after a `succeeded` callback
+- New permission `environments:deploy` (`test_admin`, `test_manager`, `automation_agent` — the latter for the Sand Bench callback's `X-Api-Key`)
+
 **Added — Quality Insights**
 - Console screen **Quality insights** (`#/insights`): a versioned review per application — verdict and headline, quality score with its six components, results and pass rate per day, one card per environment (build under test, pass rate, coverage, flaky / regressed / never-passed cases), findings, failure themes, coverage by test type, checks stated per case, cases needing attention, prioritised suggestions and the version history
 - **Refresh insights** writes a new version: by Claude when `ANTHROPIC_API_KEY` is set (`INSIGHTS_MODEL`, default `claude-opus-5`), by the built-in rules otherwise; an agent can post its own review of `GET /api/v1/insights/snapshot`. Versions are stored with the facts they were written from (`quality_insights`), so they outlive run retention

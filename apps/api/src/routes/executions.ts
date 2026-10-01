@@ -12,6 +12,124 @@ function runName(caseNames: string[], suiteName: string | null, at: Date): strin
   return `Run — ${stamp}`;
 }
 
+export interface RunAllOutcome {
+  status: number;
+  body: Record<string, any>;
+  /** Set only when executions were actually queued (not on dry_run or an empty plan): what to audit. */
+  audit?: { application_id: string; details: Record<string, unknown> };
+}
+
+/**
+ * Plan and queue "everything" for one application: one execution per
+ * non-empty suite, grouped under a shared metadata.run_group id. Shared by
+ * the console's "Run everything" button (`/api/v1/executions/run-all`) and
+ * the post-deploy "deploy and run" flow (`routes/deployments.ts`), so both
+ * mean exactly the same thing by "everything". Never throws for a caller
+ * mistake: the outcome carries the HTTP status and body to answer with.
+ */
+export async function runAllCases(b: Record<string, unknown>, actorId?: string | null): Promise<RunAllOutcome> {
+  const appKey = typeof b.application_key === 'string' ? b.application_key : null;
+  const appId = typeof b.application_id === 'string' ? b.application_id : null;
+  if (!appKey && !appId) {
+    return { status: 400, body: { error: 'Provide application_key or application_id' } };
+  }
+
+  const appRow = await query(
+    `SELECT id, key, name FROM applications WHERE ${appId ? 'id::text = $1' : 'key = $1'}`,
+    [appId || appKey]
+  );
+  if (!appRow.rows[0]) return { status: 404, body: { error: 'Application not found' } };
+  const application = appRow.rows[0];
+
+  let environmentId: string | null = null;
+  if (typeof b.environment_id === 'string' && b.environment_id) {
+    const env = await query(
+      `SELECT id FROM environments WHERE id::text = $1 OR key = $1`,
+      [b.environment_id]
+    );
+    if (!env.rows[0]) return { status: 404, body: { error: 'Environment not found' } };
+    environmentId = env.rows[0].id;
+  }
+
+  const suites = await query(
+    `SELECT s.id, s.key, s.name, s.suite_type,
+            COALESCE(array_agg(m.test_case_id ORDER BY m.sort_order) FILTER (WHERE m.test_case_id IS NOT NULL), '{}') AS case_ids
+     FROM test_suites s
+     LEFT JOIN test_case_suites m ON m.test_suite_id = s.id
+     LEFT JOIN test_cases tc ON tc.id = m.test_case_id AND tc.lifecycle NOT IN ('deprecated','archived')
+     WHERE s.application_id = $1 AND tc.id IS NOT NULL
+     GROUP BY s.id
+     ORDER BY s.key`,
+    [application.id]
+  );
+
+  const seen = new Set<string>();
+  const plan: Array<{ suite_id: string; suite_key: string; suite_name: string; case_ids: string[] }> = [];
+  for (const s of suites.rows) {
+    const ids = (s.case_ids as string[]).filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    if (ids.length) plan.push({ suite_id: s.id, suite_key: s.key, suite_name: s.name, case_ids: ids });
+  }
+
+  const totalCases = plan.reduce((n, p) => n + p.case_ids.length, 0);
+  if (b.dry_run === true) {
+    return {
+      status: 200,
+      body: {
+        data: {
+          application: application.key,
+          environment_id: environmentId,
+          total_cases: totalCases,
+          suites: plan.map((p) => ({ key: p.suite_key, name: p.suite_name, cases: p.case_ids.length })),
+        },
+      },
+    };
+  }
+  if (!totalCases) return { status: 400, body: { error: 'Application has no runnable cases' } };
+
+  const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+  const batchAt = new Date();
+  const created: any[] = [];
+  for (const p of plan) {
+    const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const name = runName([], p.suite_name, batchAt);
+    const { rows } = await query(
+      `INSERT INTO executions (
+         key, name, requested_by, test_suite_id, test_case_ids, environment_id,
+         execution_location, status, trigger_source, metadata
+       ) VALUES ($1,$2,$3,$4,$5,$6,'out_of_container','queued',$7,$8::jsonb)
+       RETURNING id, key, name, test_suite_id, test_case_ids, status, created_at`,
+      [
+        key, name, (b.requested_by as string) ?? actorId ?? null, p.suite_id, p.case_ids, environmentId,
+        (b.trigger_source as string) || 'run-all',
+        JSON.stringify({ run_group: runGroup, suite_key: p.suite_key, application_key: application.key }),
+      ]
+    );
+    created.push({ ...rows[0], suite_key: p.suite_key, suite_name: p.suite_name });
+  }
+
+  return {
+    status: 202,
+    body: {
+      data: {
+        run_group: runGroup,
+        application: application.key,
+        environment_id: environmentId,
+        total_cases: totalCases,
+        executions: created,
+      },
+      message: `Queued ${created.length} suite executions (${totalCases} cases)`,
+    },
+    audit: {
+      application_id: application.id,
+      details: { run_group: runGroup, executions: created.length, total_cases: totalCases, environment_id: environmentId },
+    },
+  };
+}
+
 export async function executionRoutes(app: FastifyInstance) {
   app.get('/api/v1/executions', async (req, reply) => {
     const q = req.query as Record<string, string>;
@@ -155,104 +273,9 @@ export async function executionRoutes(app: FastifyInstance) {
    * returns the plan.
    */
   app.post<{ Body: Record<string, unknown> }>('/api/v1/executions/run-all', async (req, reply) => {
-    const b = req.body || {};
-    const appKey = typeof b.application_key === 'string' ? b.application_key : null;
-    const appId = typeof b.application_id === 'string' ? b.application_id : null;
-    if (!appKey && !appId) {
-      return reply.status(400).send({ error: 'Provide application_key or application_id' });
-    }
-
-    const appRow = await query(
-      `SELECT id, key, name FROM applications WHERE ${appId ? 'id::text = $1' : 'key = $1'}`,
-      [appId || appKey]
-    );
-    if (!appRow.rows[0]) return reply.status(404).send({ error: 'Application not found' });
-    const application = appRow.rows[0];
-
-    let environmentId: string | null = null;
-    if (typeof b.environment_id === 'string' && b.environment_id) {
-      const env = await query(
-        `SELECT id FROM environments WHERE id::text = $1 OR key = $1`,
-        [b.environment_id]
-      );
-      if (!env.rows[0]) return reply.status(404).send({ error: 'Environment not found' });
-      environmentId = env.rows[0].id;
-    }
-
-    const suites = await query(
-      `SELECT s.id, s.key, s.name, s.suite_type,
-              COALESCE(array_agg(m.test_case_id ORDER BY m.sort_order) FILTER (WHERE m.test_case_id IS NOT NULL), '{}') AS case_ids
-       FROM test_suites s
-       LEFT JOIN test_case_suites m ON m.test_suite_id = s.id
-       LEFT JOIN test_cases tc ON tc.id = m.test_case_id AND tc.lifecycle NOT IN ('deprecated','archived')
-       WHERE s.application_id = $1 AND tc.id IS NOT NULL
-       GROUP BY s.id
-       ORDER BY s.key`,
-      [application.id]
-    );
-
-    const seen = new Set<string>();
-    const plan: Array<{ suite_id: string; suite_key: string; suite_name: string; case_ids: string[] }> = [];
-    for (const s of suites.rows) {
-      const ids = (s.case_ids as string[]).filter((id) => {
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-      if (ids.length) plan.push({ suite_id: s.id, suite_key: s.key, suite_name: s.name, case_ids: ids });
-    }
-
-    const totalCases = plan.reduce((n, p) => n + p.case_ids.length, 0);
-    if (b.dry_run === true) {
-      return reply.send({
-        data: {
-          application: application.key,
-          environment_id: environmentId,
-          total_cases: totalCases,
-          suites: plan.map((p) => ({ key: p.suite_key, name: p.suite_name, cases: p.case_ids.length })),
-        },
-      });
-    }
-    if (!totalCases) return reply.status(400).send({ error: 'Application has no runnable cases' });
-
-    const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
-    const batchAt = new Date();
-    const created: any[] = [];
-    for (const p of plan) {
-      const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-      const name = runName([], p.suite_name, batchAt);
-      const { rows } = await query(
-        `INSERT INTO executions (
-           key, name, requested_by, test_suite_id, test_case_ids, environment_id,
-           execution_location, status, trigger_source, metadata
-         ) VALUES ($1,$2,$3,$4,$5,$6,'out_of_container','queued',$7,$8::jsonb)
-         RETURNING id, key, name, test_suite_id, test_case_ids, status, created_at`,
-        [
-          key, name, (b.requested_by as string) ?? req.actor?.id ?? null, p.suite_id, p.case_ids, environmentId,
-          (b.trigger_source as string) || 'run-all',
-          JSON.stringify({ run_group: runGroup, suite_key: p.suite_key, application_key: application.key }),
-        ]
-      );
-      created.push({ ...rows[0], suite_key: p.suite_key, suite_name: p.suite_name });
-    }
-
-    await audit(req, 'execution.run_all', 'application', application.id, {
-      run_group: runGroup,
-      executions: created.length,
-      total_cases: totalCases,
-      environment_id: environmentId,
-    });
-
-    return reply.status(202).send({
-      data: {
-        run_group: runGroup,
-        application: application.key,
-        environment_id: environmentId,
-        total_cases: totalCases,
-        executions: created,
-      },
-      message: `Queued ${created.length} suite executions (${totalCases} cases)`,
-    });
+    const outcome = await runAllCases(req.body || {}, req.actor?.id);
+    if (outcome.audit) await audit(req, 'execution.run_all', 'application', outcome.audit.application_id, outcome.audit.details);
+    return reply.status(outcome.status).send(outcome.body);
   });
 
   // Status only — what a worker polls while it runs a job, to learn it was cancelled.
