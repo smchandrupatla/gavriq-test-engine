@@ -18,6 +18,14 @@
 import type { CaseDef, SuiteDef, TypeMeta } from './types.js';
 import { SANDBENCH_UPLOAD_CASES, SANDBENCH_UPLOAD_SUITE } from './sandbench-upload-cases.js';
 import { SANDBENCH_UPLOAD_SELENIUM_CASES, SANDBENCH_UPLOAD_SELENIUM_SUITE } from './sandbench-upload-selenium-cases.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH1 } from './sandbench-usecase-flow-cases-batch1.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2A } from './sandbench-usecase-flow-cases-batch2a.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2B } from './sandbench-usecase-flow-cases-batch2b.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2C } from './sandbench-usecase-flow-cases-batch2c.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2D } from './sandbench-usecase-flow-cases-batch2d.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2E } from './sandbench-usecase-flow-cases-batch2e.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2F } from './sandbench-usecase-flow-cases-batch2f.js';
+import { SANDBENCH_USECASE_FLOW_CASES_BATCH2G } from './sandbench-usecase-flow-cases-batch2g.js';
 
 export const SANDBENCH_TYPES: TypeMeta[] = [
   { key: 'smoke', label: 'Smoke tests', subtitle: 'Fast pass/fail gate: every deployed surface answers.', category: 'qa' },
@@ -2895,4 +2903,4 @@ C.push(
   }
 );
 
-export const SANDBENCH_CASES: CaseDef[] = [...C, ...SANDBENCH_UPLOAD_CASES, ...SANDBENCH_UPLOAD_SELENIUM_CASES];
+export const SANDBENCH_CASES: CaseDef[] = [...C, ...SANDBENCH_UPLOAD_CASES, ...SANDBENCH_UPLOAD_SELENIUM_CASES, ...SANDBENCH_USECASE_FLOW_CASES_BATCH1, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2A, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2B, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2C, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2D, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2E, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2F, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2G];
