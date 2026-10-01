@@ -11,7 +11,7 @@
  * same grouping /executions/run-all uses, so those groups resolve here as well;
  * a plain execution id/key is accepted too and reads as a one-execution run.
  */
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
@@ -376,7 +376,7 @@ export async function triggerRoutes(app: FastifyInstance) {
     return reply.status(outcome.status).send(outcome.body);
   });
 
-  app.get('/api/v1/runs', async (req, reply) => {
+  const listRuns = async (req: FastifyRequest, reply: FastifyReply) => {
     const q = req.query as Record<string, string>;
     const limit = Math.max(1, Math.min(Number(q.limit) || 20, 100));
     const params: unknown[] = [];
@@ -417,7 +417,9 @@ export async function triggerRoutes(app: FastifyInstance) {
         status_url: `/api/v1/runs/${encodeURIComponent(r.run_id)}`,
       })),
     });
-  });
+  };
+  app.get('/api/v1/runs', listRuns);
+  app.get('/api/v1/runs/', listRuns);
 
   app.get<{ Params: { runId: string } }>('/api/v1/runs/:runId', async (req, reply) => {
     const run = await loadRun(req.params.runId);
