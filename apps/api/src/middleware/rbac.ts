@@ -43,6 +43,7 @@ const PERMISSIONS: Record<string, Role[]> = {
   'executions:run_performance': ['test_admin', 'performance_engineer'],
   'executions:run_destructive': ['test_admin'],
   'environments:write': ['test_admin', 'test_manager'],
+  'environments:deploy': ['test_admin', 'test_manager', 'automation_agent'],
   'workers:manage': ['test_admin', 'worker'],
   'audit:read': ['test_admin', 'auditor', 'test_manager', 'release_manager'],
   'release:decide': ['test_admin', 'release_manager', 'test_manager'],

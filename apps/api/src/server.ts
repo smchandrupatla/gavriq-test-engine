@@ -27,6 +27,7 @@ import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { uiRoutes } from './routes/ui.js';
 import { triggerRoutes } from './routes/trigger.js';
+import { deploymentRoutes } from './routes/deployments.js';
 import { settingsRoutes } from './routes/settings.js';
 import { reportRoutes } from './routes/reports.js';
 import { insightRoutes } from './routes/insights.js';
@@ -159,6 +160,16 @@ async function main() {
       if (pathName.startsWith('/api/v1/runs')) {
         return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
       }
+      if (pathName.startsWith('/api/v1/deployments')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'environments:deploy')(req, reply);
+      }
+      // Create/update only — leaves sub-paths like .../run-tests, .../policy untouched.
+      if (
+        (method === 'POST' && (pathName === '/api/v1/applications' || pathName === '/api/v1/environments')) ||
+        ((method === 'PATCH' || method === 'PUT') && /^\/api\/v1\/(applications|environments)\/[^/]+$/.test(pathName))
+      ) {
+        return requirePermission('environments:write')(req, reply);
+      }
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
@@ -203,6 +214,7 @@ async function main() {
   await app.register(buildStatusRoutes);
   await app.register(uiRoutes);
   await app.register(triggerRoutes);
+  await app.register(deploymentRoutes);
   await app.register(settingsRoutes);
   await app.register(reportRoutes);
   await app.register(insightRoutes);
