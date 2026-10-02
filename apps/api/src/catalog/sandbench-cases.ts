@@ -11,9 +11,17 @@
  * Every endpoint, page title, selector and expected fragment below was probed
  * against a live deployment on 2026-09-28 before being encoded. Cases that
  * need an authenticated session use the documented demo operator persona from
- * the environment config ({{tenant}}/{{username}}/{{password}}); when a
- * deployment's demo identities are disabled those cases fail with an
- * authentication_problem classification — which is the correct verdict.
+ * the environment config ({{username}}/{{password}}); when a deployment's
+ * demo identities are disabled those cases fail with an authentication_problem
+ * classification — which is the correct verdict.
+ *
+ * 2026-10-02: Sand Bench collapsed to a single hidden tenant and removed
+ * roles/the tenant field entirely (every active session now gets full
+ * access; the admin-only Users screen is gated separately). Login is
+ * {username, password} with no tenantSlug; the env config no longer carries
+ * {{tenant}}. Cases below updated to match; the identical API_LOGIN /
+ * CONSOLE_SIGNIN helpers still duplicated in the sandbench-usecase-flow-cases
+ * batch files are a known follow-up, not yet updated.
  */
 import type { CaseDef, SuiteDef, TypeMeta } from './types.js';
 import { SANDBENCH_UPLOAD_CASES, SANDBENCH_UPLOAD_SUITE } from './sandbench-upload-cases.js';
@@ -54,6 +62,7 @@ export const SANDBENCH_SUITES: SuiteDef[] = [
   { key: 'sb-smoke', name: 'Deployed-surface smoke', description: 'Every public surface of the deployment answers with its own health contract.', typeKey: 'smoke', category: 'qa' },
   { key: 'sb-unit', name: 'Field fidelity units', description: 'Individual message fields survive the inbound gateway byte-for-byte (boundary lengths, IBAN, amounts, unicode).', typeKey: 'unit', category: 'qa' },
   { key: 'sb-integration', name: 'Channel round trips', description: 'Inbound and outbound message flows across api/mq/kafka channels, confirmed on the far side.', typeKey: 'integration', category: 'qa' },
+  { key: 'sb-identity', name: 'Identity & login', description: 'The single-tenant, admin-managed username/password login: sign-in, admin-created users with a security question, and self-service password reset (2026-10-02 rewrite).', typeKey: 'integration', category: 'qa' },
   { key: 'sb-screen', name: 'Console & static screens', description: 'Playwright-rendered checks of the operator console and its static pages.', typeKey: 'screen', category: 'qa' },
   { key: 'sb-usecase', name: 'Use-case contracts', description: 'The published use-case catalogue and operator walkthrough strips.', typeKey: 'usecase', category: 'qa' },
   { key: 'sb-regression', name: 'Behavior contracts', description: 'Response shapes and copy that must not drift between deployments.', typeKey: 'regression', category: 'qa' },
@@ -81,7 +90,7 @@ const C: CaseDef[] = [];
  */
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+  body: { username: '{{username}}', password: '{{password}}' },
   expected_status: 200, save: { token: 'token' },
   description: 'operator login',
 };
@@ -237,14 +246,14 @@ C.push(
   },
   {
     key: 'SB-SMOKE-SESSION-ROUNDTRIP',
-    name: 'Login issues a session that resolves back to the same tenant',
-    description: 'Sign in as the demo operator, then GET /api/v1/session/me with the returned token: tenantSlug must equal the {{tenant}} this environment is configured for — the minimum proof the auth round trip actually works end to end, not just that login returns 200.',
+    name: 'Login issues a session that resolves back to the same user',
+    description: 'Sign in as the demo operator, then GET /api/v1/session/me with the returned token: userId and username must be present and username must equal {{username}} — the minimum proof the auth round trip actually works end to end, not just that login returns 200. The product is single-tenant (no tenantSlug in this response any more).',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: BEARER, expected_status: 200, expect_json: [{ path: 'tenantSlug', equals: '{{tenant}}' }, { path: 'userId', exists: true }], description: 'session/me' }],
+    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: BEARER, expected_status: 200, expect_json: [{ path: 'userId', exists: true }, { path: 'username', equals: '{{username}}' }], description: 'session/me' }],
     tags: ['smoke', 'sand-bench', 'auth-required', 'session'],
-    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{tenant}} / {{username}}, no password — optional in this build).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
-    expected: 'session/me tenantSlug equals the configured {{tenant}}.',
+    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{username}} / {{password}}, no tenant field — the product is single-tenant).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
+    expected: 'session/me userId present and username equals the configured {{username}}.',
   },
   {
     key: 'SB-SMOKE-MESSAGE-TYPES-CATALOG',
@@ -254,7 +263,7 @@ C.push(
     preconditions: 'Demo operator identity enabled; at least one message type seeded.',
     steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'message-types' }],
     tags: ['smoke', 'sand-bench', 'auth-required', 'catalogue'],
-    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{tenant}} / {{username}}, no password — optional in this build).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
+    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{username}} / {{password}}, no tenant field — the product is single-tenant).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
     expected: '200 with >= 1 message type.',
   },
   {
@@ -265,7 +274,7 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/naming-conventions', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'naming conventions' }],
     tags: ['smoke', 'sand-bench', 'auth-required'],
-    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{tenant}} / {{username}}, no password — optional in this build).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
+    dataProfile: { profile: 'demo-identity', data: 'Sign-in as the documented demo operator ({{username}} / {{password}}, no tenant field — the product is single-tenant).', source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).' },
     expected: '200 with >= 1 naming-convention entry.',
   }
 );
@@ -481,13 +490,13 @@ function outboundCase(channel: string, label: string): CaseDef {
   return {
     key: `SB-INT-${channel.toUpperCase()}-OUTBOUND`,
     name: `Application dispatches over ${label} (simulated — bench design)`,
-    description: `An authenticated operator triggers a generation run over the ${label} channel (POST {{api}}/api/v1/runs) with no connectionId. Verified live against source (apps/api/src/modules/delivery.ts): this bench intentionally never marks a delivery "sent" unless a real broker/endpoint is reachable — with only the seeded dummy stubs configured (no live MQ/Kafka/HTTP target), every channel reports delivery.simulated=1, sent=0. That is the correct, honest contract for a non-production bench (its own /api/v1/resilience posture says exactly this: "Optional companions may fail. The bench stays up."), not a defect — a prior version of this case asserted sent=1, which never holds here and was fixed after live verification. Signs in as the documented demo operator (password optional in development builds).`,
+    description: `An authenticated operator triggers a generation run over the ${label} channel (POST {{api}}/api/v1/runs) with no connectionId. Verified live against source (apps/api/src/modules/delivery.ts): this bench intentionally never marks a delivery "sent" unless a real broker/endpoint is reachable — with only the seeded dummy stubs configured (no live MQ/Kafka/HTTP target), every channel reports delivery.simulated=1, sent=0. That is the correct, honest contract for a non-production bench (its own /api/v1/resilience posture says exactly this: "Optional companions may fail. The bench stays up."), not a defect — a prior version of this case asserted sent=1, which never holds here and was fixed after live verification. Signs in as the documented demo operator ({{username}}/{{password}}).`,
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
-    preconditions: `Demo operator identity enabled ({{tenant}}/{{username}}); ${label} adapter configured to reach the test hub.`,
+    preconditions: `Demo operator identity enabled ({{username}}/{{password}}); ${label} adapter configured to reach the test hub.`,
     steps: [
       {
         action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-        body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+        body: { username: '{{username}}', password: '{{password}}' },
         expected_status: 200, save: { token: 'token' },
         description: 'operator login',
       },
@@ -657,24 +666,24 @@ function staticScreen(key: string, page: string, title: string, mustText: string
 }
 
 /**
- * Real operator sign-in through the console gate ({{web}}/): the dev build's
- * gate takes tenant + username, password optional (verified live: #tenant,
- * #username, #password[(optional)], #login "Sign in"). The mount signal is
- * the #gate element gaining the "hidden" class — the console's own bootstrap
- * signal, the same one the SIT suite waits on.
+ * Real operator sign-in through the console gate ({{web}}/): the gate takes
+ * username + password, no tenant field (verified live: #username, #password,
+ * #login "Sign in"). The mount signal is the #gate element gaining the
+ * "hidden" class — the console's own bootstrap signal, the same one the SIT
+ * suite waits on.
  */
 const CONSOLE_SIGNIN = [
   { action: 'navigate', value: '{{web}}/', description: 'open console' },
   { action: 'wait_for', selector: '#gate #login', timeout_ms: 15000, description: 'sign-in gate shown' },
-  { action: 'type', selector: '#gate #tenant', value: '{{tenant}}', description: 'tenant slug' },
   { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
-  { action: 'click', selector: '#gate #login', description: 'Sign in (password optional in dev builds)' },
+  { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'demo operator password' },
+  { action: 'click', selector: '#gate #login', description: 'Sign in' },
   { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'gate hides — console mounted' },
 ];
 
 const SIGNIN_DATA: CaseDef['dataProfile'] = {
   profile: 'demo-identity',
-  data: 'Sign-in as the documented demo operator ({{tenant}} / {{username}}, no password — optional in this build).',
+  data: 'Sign-in as the documented demo operator ({{username}} / {{password}}, no tenant field — the product is single-tenant).',
   source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).',
 };
 
@@ -1014,13 +1023,13 @@ C.push(
   {
     key: 'SB-REG-SESSION-ME-SHAPE',
     name: 'Session/me identity payload keeps its shape',
-    description: 'GET /api/v1/session/me must keep userId, tenantId, tenantSlug and tenantName — the console\'s header/identity chip and this engine\'s tenancy assertions both bind to these exact field names.',
+    description: 'GET /api/v1/session/me must keep userId, username, displayName, email and admin — the console\'s header/identity chip and the Configuration > Users admin-only gate both bind to these exact field names. tenantId/tenantSlug/tenantName/isMasterTenant/portal were removed from this response when the product collapsed to one hidden tenant (2026-10-02) and are no longer asserted.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: BEARER, expected_status: 200, expect_json: [{ path: 'userId', exists: true }, { path: 'tenantId', exists: true }, { path: 'tenantSlug', exists: true }, { path: 'tenantName', exists: true }], description: 'session/me shape' }],
+    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: BEARER, expected_status: 200, expect_json: [{ path: 'userId', exists: true }, { path: 'username', exists: true }, { path: 'displayName', exists: true }, { path: 'admin', exists: true }] , description: 'session/me shape' }],
     tags: ['regression', 'sand-bench', 'contract', 'session'],
     dataProfile: SIGNIN_DATA,
-    expected: 'All four identity fields present.',
+    expected: 'userId, username, displayName and admin present; no tenant fields.',
   },
   {
     key: 'SB-REG-RUN-RESPONSE-SHAPE',
@@ -1145,14 +1154,14 @@ C.push(
   },
   {
     key: 'SB-DQ-TENANT-PRESENT',
-    name: 'Configured demo tenant exists and is active',
-    description: 'The tenants table must contain the tenant slug this environment is configured to test with ({{tenant}}), status active — otherwise every authenticated case in this catalog is testing against the wrong tenancy.',
+    name: 'The one hidden internal tenant exists and is active',
+    description: 'The product collapsed to a single hidden tenant (db/migrations/046_single_tenant_identity.sql, tenant_default / slug "default") that every login resolves to -- it is never shown in the UI, but it must exist and be active or every authenticated case in this catalog fails to sign in at all. The tenants table must contain this configured slug ({{tenant}}), status active.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Demo tenants imported.',
+    preconditions: 'Identity migration applied.',
     steps: [{ action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=tenants&page_size=20', expected_status: 200, expected_body_contains: '{{tenant}}', expect_json: [{ path: 'columns', contains: 'slug' }], description: 'tenants table' }],
     tags: ['data-quality', 'sand-bench', 'dbviewer', 'tenancy'],
-    dataProfile: { profile: 'reference (read-only)', data: 'Reads tenant rows; asserts configured slug {{tenant}} present.', source: 'Demo tenant import.' },
-    expected: 'Configured tenant slug present in tenants table.',
+    dataProfile: { profile: 'reference (read-only)', data: 'Reads tenant rows; asserts configured slug {{tenant}} present.', source: 'Identity migration seed.' },
+    expected: 'The one configured tenant slug is present in the tenants table, active.',
   },
   {
     key: 'SB-DQ-PAYLOAD-FIDELITY',
@@ -1664,7 +1673,7 @@ C.push(
   {
     key: 'SB-NF-VALIDATION-ENVELOPE',
     name: 'Missing required fields produce a 422 validation envelope',
-    description: 'POST an empty JSON object to login: the API must return 422 validation_failed naming the missing fields — verified live: {"error":{"code":"validation_failed","message":"tenantSlug and username are required",...}}.',
+    description: 'POST an empty JSON object to login: the API must return 422 validation_failed naming the missing fields — verified live: {"error":{"code":"validation_failed","message":"username and password are required",...}}.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
     steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: {}, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'empty body' }],
@@ -1771,7 +1780,7 @@ C.push(
   {
     key: 'SB-NF-ARRAY-BODY-INSTEAD-OF-OBJECT',
     name: 'JSON array body on an object-shaped route fails cleanly',
-    description: 'POST a JSON array ([1,2,3]) to login, which expects an object body: must return a clean validation envelope (verified live: 422 validation_failed, "tenantSlug and username are required") — never a 500 from destructuring an array as an object.',
+    description: 'POST a JSON array ([1,2,3]) to login, which expects an object body: must return a clean validation envelope (verified live: 422 validation_failed, "username and password are required") — never a 500 from destructuring an array as an object.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
     steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body_raw: '[1,2,3]', expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'array body' }],
@@ -1905,7 +1914,7 @@ C.push(
     description: 'POST /api/v1/session/login must not set a Set-Cookie header — verified live — the session is a bearer token the client stores itself, not an ambient cookie the browser auto-attaches to every request (which would be CSRF-exposed).',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, expect_headers: [{ name: 'set-cookie', exists: false }], description: 'no session cookie' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, expect_headers: [{ name: 'set-cookie', exists: false }], description: 'no session cookie' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'auth'],
     dataProfile: SIGNIN_DATA,
     expected: 'No Set-Cookie header on the login response.',
@@ -2073,14 +2082,14 @@ C.push(
   },
   {
     key: 'SB-PT-ADMIN-PRIVILEGE-ESCALATION-BLOCKED',
-    name: 'Non-admin operator cannot reach admin routes (fails closed)',
-    description: 'ASVS V4 (access control): a valid, authenticated session for the non-admin demo operator must still be rejected (403) from GET /api/v1/admin/users — verified live — proving authorization is checked per-role after authentication, not just "has a valid token".',
-    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
-    preconditions: 'Demo operator identity enabled (non-admin role).',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 403, description: 'operator cannot read admin users' }],
-    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v4'],
+    name: 'Any authenticated operator reaches admin routes (roles removed, not a regression)',
+    description: 'RETARGETED 2026-10-02: this case used to assert a non-admin demo operator got 403 from GET /api/v1/admin/users (ASVS V4 role check). Roles/permissions were deliberately removed from the product (apps/api/src/kernel/policy.ts): any active, authenticated session now holds every permission, so the same request correctly answers 200, not 403. The boundary this suite still enforces is authentication itself — see SB-PT-ADMIN-USERS-TOKENLESS for the unauthenticated 401 case, which is unchanged. Kept under sb-pen-auth (not moved to regression) precisely so a future reintroduction of roles is forced to notice and update this assertion rather than silently leaving stale pen-test coverage.',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Demo operator identity enabled.',
+    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 200, description: 'any signed-in operator can read admin users (roles removed)' }],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v4', 'roles-removed'],
     dataProfile: SIGNIN_DATA,
-    expected: '403 forbidden — valid session, insufficient privilege.',
+    expected: '200 — every active session holds every permission by design; no role-based 403 any more.',
   },
   {
     key: 'SB-PT-UNKNOWN-USERNAME-NO-ORACLE',
@@ -2088,7 +2097,7 @@ C.push(
     description: 'ASVS V6 (no username enumeration oracle): logging in with a syntactically valid tenant but a username that does not exist must return the identical generic envelope (401 unauthorized, "Invalid credentials") as a wrong-password attempt on a real user — verified live — so an attacker cannot distinguish "wrong password" from "no such user".',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: 'nobody-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'unknown username' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: 'nobody-{{rand}}', password: 'whatever-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'unknown username' }],
     tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6'],
     dataProfile: { profile: 'negative-auth', data: 'A per-run-unique nonexistent username under the real configured tenant.', source: 'Generated per run.' },
     expected: '401 unauthorized — same shape as a wrong-password rejection.',
@@ -2100,7 +2109,7 @@ C.push(
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, save: { logoutToken: 'token' }, description: 'login (dedicated token for this case)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, save: { logoutToken: 'token' }, description: 'login (dedicated token for this case)' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/logout', headers: { authorization: 'Bearer {{logoutToken}}' }, expected_status: 200, description: 'logout' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: { authorization: 'Bearer {{logoutToken}}' }, expected_status: 401, description: 'token rejected after logout' },
     ],
@@ -2185,6 +2194,162 @@ C.push(
     tags: ['security', 'pen-test', 'sand-bench', 'asvs-v7', 'owasp-api5'],
     dataProfile: { profile: 'negative-auth', data: 'Fabricated bearer token unique to this run.', source: 'Generated per run.' },
     expected: '401 — rejected at authentication, before authorization.',
+  }
+);
+
+/* ------------------------------------------------------------------------ */
+/* identity — single-tenant admin-managed login (2026-10-02 rewrite)         */
+/*                                                                            */
+/* Every step below was verified against a live deployment on 2026-10-02:   */
+/* admin signs in, creates a user with a password + security question via   */
+/* POST /api/v1/admin/tenants/tenant_default/users, that user signs in,     */
+/* self-resets via the security question, and the old password stops       */
+/* working. Negative cases confirm the enumeration-safety properties (a     */
+/* wrong security answer and an unknown username answer identically) and   */
+/* that the removed password-less portal route is gone (404).              */
+/* ------------------------------------------------------------------------ */
+
+const ADMIN_LOGIN = { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: 'admin', password: 'DemoOnly-Admin-2026-Change' }, expected_status: 200, save: { adminToken: 'token' }, description: 'admin login' };
+const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
+
+C.push(
+  /* positive */
+  {
+    key: 'SB-ID-LOGIN-USERNAME-PASSWORD',
+    name: 'Sign in with username and password only, no tenant field',
+    description: 'POST {{api}}/api/v1/session/login with just {username, password} (no tenantSlug anywhere in the body) must return 200 with a token and the signed-in user\'s id/username/displayName/email — the product collapsed to one hidden tenant and the login contract no longer takes or needs a tenant.',
+    suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'Demo operator identity enabled.',
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }, { path: 'user.username', equals: '{{username}}' }, { path: 'user.id', exists: true }], description: 'username+password login' }],
+    tags: ['identity', 'sand-bench', 'login', 'positive'],
+    dataProfile: SIGNIN_DATA,
+    expected: '200 with token and user.username equal to {{username}}.',
+  },
+  {
+    key: 'SB-ID-ADMIN-CREATE-USER',
+    name: 'Admin creates a user with a short password and a security question',
+    description: 'POST {{api}}/api/v1/admin/tenants/tenant_default/users as the admin, with a password under the product\'s old 14-character minimum (removed 2026-10-02) plus securityQuestion/securityAnswer, must return 201 with the created user\'s id and hasPassword=true — proving there is no minimum length any more and the security Q&A is accepted at creation.',
+    suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'Demo admin identity enabled.',
+    steps: [
+      ADMIN_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-newuser-{{rand}}', displayName: 'TE identity case {{rand}}', email: 'te-newuser-{{rand}}@example.invalid', password: 'short', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }, { path: 'hasPassword', equals: true }, { path: 'passwordSetBy', equals: 'admin' }], save: { newUserId: 'id', newUsername: 'username' }, description: 'create user with short password + security Q&A' },
+    ],
+    tags: ['identity', 'sand-bench', 'admin', 'positive'],
+    dataProfile: { profile: 'synthetic', data: 'One admin-created user per run, unique username, 5-character password, a security question/answer.', source: 'Generated per run.' },
+    expected: '201; hasPassword=true, passwordSetBy="admin".',
+  },
+  {
+    key: 'SB-ID-NEW-USER-SIGNS-IN',
+    name: 'An admin-created user signs in with the password the admin set',
+    description: 'A user created by SB-ID-ADMIN-CREATE-USER\'s pattern (password + security Q&A, no tenant) must be able to sign in immediately with that exact password — the full admin-provisioning round trip, not just a 201 response.',
+    suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'Demo admin identity enabled.',
+    steps: [
+      ADMIN_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-signin-{{rand}}', displayName: 'TE signin case {{rand}}', email: 'te-signin-{{rand}}@example.invalid', password: 'te-pw-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { createdUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{createdUsername}}', password: 'te-pw-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }], description: 'new user signs in' },
+    ],
+    tags: ['identity', 'sand-bench', 'admin', 'positive'],
+    dataProfile: { profile: 'synthetic', data: 'One admin-created user, signed in immediately with its set password.', source: 'Generated per run.' },
+    expected: '201 then 200 with a token.',
+  },
+  {
+    key: 'SB-ID-PASSWORD-RESET-HAPPY-PATH',
+    name: 'Self-service reset: load the question, answer it, sign in with the new password',
+    description: 'For an admin-created user, GET {{api}}/api/v1/session/security-question?username=<u> must return the exact question set at creation; POST {{api}}/api/v1/session/password-reset with the correct answer and a new password must return 200; and the user must then be able to sign in with that new password — the full self-service reset loop, verified live end to end on 2026-10-02.',
+    suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'Demo admin identity enabled.',
+    steps: [
+      ADMIN_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-reset-{{rand}}', displayName: 'TE reset case {{rand}}', email: 'te-reset-{{rand}}@example.invalid', password: 'te-old-{{rand}}', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, save: { resetUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/security-question?username={{resetUsername}}', expected_status: 200, expect_json: [{ path: 'question', equals: 'What is the test engine called?' }], description: 'load the exact question set at creation' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{resetUsername}}', securityAnswer: 'gavriq', newPassword: 'te-new-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'username', equals: '{{resetUsername}}' }], description: 'reset with the correct answer' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{resetUsername}}', password: 'te-new-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }], description: 'sign in with the new password' },
+    ],
+    timeoutSeconds: 30,
+    tags: ['identity', 'sand-bench', 'password-reset', 'positive'],
+    dataProfile: { profile: 'synthetic', data: 'One admin-created user, reset via its own security answer.', source: 'Generated per run.' },
+    expected: 'Exact question returned; reset 200; sign-in with the new password 200.',
+  },
+  {
+    key: 'SB-ID-OLD-PASSWORD-REJECTED-AFTER-RESET',
+    name: 'The password in effect before a reset no longer works after it',
+    description: 'Immediately after a successful self-service password reset, signing in with the password that was valid BEFORE the reset must now return 401 — a reset that leaves the old password usable is a real defect (password rotation must actually rotate).',
+    suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Demo admin identity enabled.',
+    steps: [
+      ADMIN_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-oldpw-{{rand}}', displayName: 'TE old-password case {{rand}}', email: 'te-oldpw-{{rand}}@example.invalid', password: 'te-will-be-old-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { oldPwUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{oldPwUsername}}', securityAnswer: 'a', newPassword: 'te-fresh-{{rand}}' }, expected_status: 200, description: 'reset the password' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{oldPwUsername}}', password: 'te-will-be-old-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'the pre-reset password is now refused' },
+    ],
+    timeoutSeconds: 30,
+    tags: ['identity', 'sand-bench', 'password-reset', 'positive', 'security'],
+    dataProfile: { profile: 'synthetic', data: 'One admin-created user, its original password probed after a reset.', source: 'Generated per run.' },
+    expected: '401 unauthorized for the pre-reset password.',
+  },
+  /* negative */
+  {
+    key: 'SB-PT-LOGIN-USERNAME-NO-PASSWORD',
+    name: 'Login with a real username but no password field is refused, not defaulted',
+    description: 'POST {{api}}/api/v1/session/login with a syntactically valid, real username and no password key at all must return 422 validation_failed ("username and password are required") — proving a missing password can never be silently treated as an empty/optional one. Distinct from SB-PT-LOGIN-EMPTY (which posts {}): this probes the specific case of a present username with password omitted entirely.',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'API up.',
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}' }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'username present, password omitted' }],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
+    dataProfile: { profile: 'negative-auth', data: 'A real configured username with no password field.', source: 'n/a' },
+    expected: '422 validation_failed, never an implicit sign-in.',
+  },
+  {
+    key: 'SB-PT-PASSWORD-RESET-WRONG-ANSWER',
+    name: 'A wrong security answer is refused with the generic unauthorized envelope',
+    description: 'POST {{api}}/api/v1/session/password-reset for a real, admin-created user but with the wrong security answer must return 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} — verified live on 2026-10-02 — and the password must be unchanged (sign-in with the original password still works).',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'API up; admin identity enabled.',
+    steps: [
+      ADMIN_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-wronga-{{rand}}', displayName: 'TE wrong-answer case {{rand}}', email: 'te-wronga-{{rand}}@example.invalid', password: 'te-unchanged-{{rand}}', securityQuestion: 'q', securityAnswer: 'the-real-answer' }, expected_status: 201, save: { wrongAnswerUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{wrongAnswerUsername}}', securityAnswer: 'definitely-not-it-{{rand}}', newPassword: 'te-should-not-apply-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }], description: 'wrong security answer' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{wrongAnswerUsername}}', password: 'te-unchanged-{{rand}}' }, expected_status: 200, description: 'the original password still works — nothing changed' },
+    ],
+    timeoutSeconds: 30,
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
+    dataProfile: { profile: 'negative-auth', data: 'One admin-created user; a deliberately wrong security answer.', source: 'Generated per run.' },
+    expected: '401 unauthorized; the password is unchanged.',
+  },
+  {
+    key: 'SB-PT-PASSWORD-RESET-UNKNOWN-USERNAME-NO-ORACLE',
+    name: 'An unknown username on password-reset answers identically to a wrong answer',
+    description: 'ASVS V6 (no enumeration oracle): POST {{api}}/api/v1/session/password-reset for a username that does not exist must return the IDENTICAL 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} envelope as a wrong security answer on a real user (see SB-PT-PASSWORD-RESET-WRONG-ANSWER) — verified live — so a caller can never learn whether an account exists by probing the reset endpoint.',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'API up.',
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: 'nobody-{{rand}}', securityAnswer: 'anything', newPassword: 'irrelevant-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }], description: 'unknown username on reset' }],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
+    dataProfile: { profile: 'negative-auth', data: 'A per-run-unique nonexistent username.', source: 'Generated per run.' },
+    expected: '401 unauthorized, same shape as a wrong-answer rejection on a real user.',
+  },
+  {
+    key: 'SB-PT-SECURITY-QUESTION-UNKNOWN-USERNAME-NO-ORACLE',
+    name: 'Loading the security question for an unknown username does not 404',
+    description: 'ASVS V6: GET {{api}}/api/v1/session/security-question?username=<nonexistent> must still answer 200 with a generic fallback question — never 404 or a shape that differs from a real username\'s response — otherwise the forgot-password screen itself becomes an account-existence oracle before a reset is even attempted.',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'API up.',
+    steps: [{ action: 'request', method: 'GET', url: '{{api}}/api/v1/session/security-question?username=nobody-{{rand}}', expected_status: 200, expect_json: [{ path: 'question', exists: true }], description: 'security question for an unknown username' }],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
+    dataProfile: { profile: 'negative-auth', data: 'A per-run-unique nonexistent username.', source: 'Generated per run.' },
+    expected: '200 with a generic question, never 404.',
+  },
+  {
+    key: 'SB-PT-PORTAL-SESSION-ROUTE-REMOVED',
+    name: 'The password-less portal-session route no longer exists',
+    description: 'POST {{api}}/api/v1/session/portal must now answer a plain 404 (route not found), not a session — the password-less demo/portal login shortcut was removed from the product entirely on 2026-10-02, along with the 14-character password minimum it was paired with. There is no longer any surface that issues a token without a password.',
+    suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'API up.',
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/portal', body: {}, expected_status: 404, description: 'removed portal-session route' }],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
+    dataProfile: { profile: 'none (read-only)', data: 'Empty JSON body against a route that no longer exists.', source: 'n/a' },
+    expected: '404 — the route is gone, not merely refusing the request.',
   }
 );
 
@@ -2451,7 +2616,7 @@ C.push(
     description: 'A syntactically valid but wildly oversized username (10,000 characters) must be rejected cleanly (verified live: 401 unauthorized, same generic envelope as any other unknown credential) — never a 500 from an unbounded string being pushed into a downstream query or comparison without a length guard.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: 'x'.repeat(10000) }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'oversized username' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: 'x'.repeat(10000), password: 'x' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'oversized username' }],
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'oversized', data: 'A 10,000-character username string ("x" repeated).', source: 'Hand-crafted.' },
     expected: '401 unauthorized, never a 500.',
@@ -2463,11 +2628,11 @@ C.push(
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'login 1' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'login 2' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'login 3' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'login 4' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'login 5' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'login 1' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'login 2' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'login 3' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'login 4' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'login 5' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'still healthy' },
     ],
     timeoutSeconds: 30,
@@ -2614,7 +2779,7 @@ C.push(
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, save: { auditToken: 'token' }, description: 'fresh successful login' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, save: { auditToken: 'token' }, description: 'fresh successful login' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: { authorization: 'Bearer {{auditToken}}' }, expected_status: 200, expect_json: [{ path: 'data.0.actor_user_id', exists: true }, { path: 'data.0.action', equals: 'session.login' }], description: 'newest row is attributed' },
     ],
     tags: ['compliance', 'sand-bench', 'audit'],
@@ -2824,7 +2989,7 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'audit before' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: '{{username}}' }, expected_status: 200, description: 'one more auditable action' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'one more auditable action' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], poll: { timeout_ms: 5000, interval_ms: 500 }, description: 'audit after' },
     ],
     timeoutSeconds: 30,

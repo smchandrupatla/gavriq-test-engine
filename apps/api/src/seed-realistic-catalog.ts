@@ -34,19 +34,24 @@ import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 // Demo persona defaults are the DOCUMENTED, fictional dev-only identities from
 // dev/demo-seed/sand-bench-demo-tenants-users.json (never valid in production).
 // A deployment with rotated credentials overrides via secret_env at the worker.
+//
+// 2026-10-02: Sand Bench collapsed to one hidden internal tenant and removed
+// the tenant field from login entirely (see sand-bench-enterprise's
+// db/migrations/046_single_tenant_identity.sql and apps/api/src/kernel/config.ts
+// DEFAULT_TENANT_ID/DEFAULT_TENANT_SLUG). `tenant` is kept here, set to the one
+// real (hidden) tenant's slug, only because SB-DQ-TENANT-PRESENT
+// (apps/api/src/catalog/sandbench-cases.ts) still reads it to confirm that row
+// exists; no login case uses it any more. `username`/`password` are a real demo
+// persona -- login now always requires a password.
 const HOST_VARS = {
   web: 'http://127.0.0.1:8080',
   api: 'http://127.0.0.1:8787',
   testhub: 'http://127.0.0.1:8091',
   dbviewer: 'http://127.0.0.1:8090',
   engine: 'http://127.0.0.1:8797',
-  tenant: 'acme-demo',
-  username: 'operator.acme',
-  // Passwordless demo login is the documented, verified-live working path (password
-  // optional in dev builds). Seeding a stale real-looking password here previously
-  // fought a live fix to environments.config.vars.password — keep this empty so a
-  // reseed can never regress that.
-  password: '',
+  tenant: 'default',
+  username: 'analyst',
+  password: 'SandBenchDemo1234',
 };
 
 // Duplicates of sand-bench-local from before the worker re-pointed loopback
