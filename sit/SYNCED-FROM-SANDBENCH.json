@@ -31,7 +31,7 @@
     "sit/cases/70-e2e-ux.sit.ts": "adbd1f057086274bc6ea13840622a720b53326adbd9c0d4b7e2686c2831e3eff",
     "sit/cases/70-ui-pages.sit.ts": "2ce9057aae11ca486e0351c8cfbee5b6af13628aa9928ae58ed724774fc00a79",
     "sit/cases/71-e2e-business.sit.ts": "b14e465a6a85649f3c6fd3e1c1b568ce0816261db0693f9f79fe02964592e516",
-    "sit/cases/80-security-auth.sit.ts": "b4f4a183bf977bec3169205c37ac960681eb75d49318a54e9022a3c95e02a6df",
+    "sit/cases/80-security-auth.sit.ts": "1f066d18c37aaf02d6388833320d2926348ca3defe076769891f3be6a4702348",
     "sit/cases/80-ui-workflows.sit.ts": "e7ede58c879cb462fe22502ee37e8142a92185b7493749b1d5dcbd230655be95",
     "sit/cases/81-security-api.sit.ts": "67268dae79ebe940523de1341dd4e6bc8d0b51a056ca2886b2ea182bbfec1854",
     "sit/cases/82-security-headers.sit.ts": "833874fc6c77f72548ce2ed7a472cb1dfad2c73412b628a805312f1477fe7d4e",
