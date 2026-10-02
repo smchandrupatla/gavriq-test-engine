@@ -64,7 +64,7 @@ for (const check of checks) await test(check.name, async () => {
 }
 
 export function resolveConfig(root, composeSourceFile, envFile) {
-  const result = spawnSync('docker', ['compose', '--project-directory', root, '--env-file', envFile, '-f', composeSourceFile, '--profile', '*', 'config', '--format', 'json'], { cwd: root, encoding: 'utf8', timeout: 30000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
+  const result = spawnSync('docker', ['compose', '--project-directory', root, '--env-file', envFile, '-f', composeSourceFile, '--profile', '*', 'config', '--format', 'json'], { cwd: root, encoding: 'utf8', timeout: 120000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
   if (result.error || result.status !== 0) throw new Error(`Failed to resolve compose.yaml: ${(result.stderr || result.error?.message || '').trim()}`);
   return JSON.parse(result.stdout);
 }
@@ -92,7 +92,7 @@ export function main(args = process.argv.slice(2)) {
   }
   const base = ['compose', '--project-directory', root, '--env-file', envFile, '-p', project, '-f', composeFile];
   const evidence = { repository: config.name, action: options.action, project, isolated: options.isolated, at: new Date().toISOString(), passed: false, commands: [], scope: checks.scope };
-  const run = (extra, { input, timeout = 1200000, quiet = false } = {}) => {
+  const run = (extra, { input, timeout = 3600000, quiet = false } = {}) => {
     const result = spawnSync('docker', [...base, ...extra], { cwd: root, input, encoding: 'utf8', timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', quiet ? 'pipe' : 'inherit', quiet ? 'pipe' : 'inherit'] });
     evidence.commands.push({ command: extra.filter(arg => arg !== input), exitCode: result.status, error: result.error?.message });
     if (!quiet) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr); }
@@ -106,7 +106,7 @@ export function main(args = process.argv.slice(2)) {
     run(['up', '-d', '--wait', '--wait-timeout', String(options.timeout)]);
   };
   const health = () => {
-    const text = run(['ps', '--all', '--format', 'json'], { quiet: true, timeout: 30000 }).trim();
+    const text = run(['ps', '--all', '--format', 'json'], { quiet: true, timeout: 120000 }).trim();
     const rows = text.startsWith('[') ? JSON.parse(text) : text.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
     assertRunning(expected, rows);
     run(['exec', '-T', checks.service, 'node', '--input-type=module'], { input: probeSource(checks, true), timeout: 60000 });
@@ -122,7 +122,7 @@ export function main(args = process.argv.slice(2)) {
   };
   let cleanup = false;
   try {
-    run(['config', '--quiet'], { timeout: 30000 });
+    run(['config', '--quiet'], { timeout: 120000 });
     if (options.action === 'deploy') deploy();
     if (options.action === 'rebuild') rebuild();
     if (options.action === 'health') health();

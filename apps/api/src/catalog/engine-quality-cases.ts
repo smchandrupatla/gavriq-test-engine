@@ -17,7 +17,7 @@
  */
 import type { CaseDef } from './types.js';
 import {
-  ARCHIVE, ARTEFACT, DELETE, FIX, FIXTURE_APP, FIXTURE_ENV, FIXTURES, GET, GHOST_WORKER, ISO, ISOLATED, ISOLATED_DATA, NO_DATA, PATCH, POST, PRE, PUT,
+  ARCHIVE, ARCHIVE_CLEANUP, ARTEFACT, DELETE, FIX, FIXTURE_APP, FIXTURE_ENV, FIXTURES, GET, GHOST_WORKER, ISO, ISOLATED, ISOLATED_DATA, NO_DATA, PATCH, POST, PRE, PUT,
   QUEUE_AND_CLAIM, RUN_ONE_PASS, SANDBOX_DATA, UNIQ, UPLOAD, complete, result, suiteFactory, type Step,
 } from './engine-case-kit.js';
 
@@ -90,10 +90,10 @@ C.push(
   perfCase({ key: 'TE-END-TIMED-SOAK', name: 'Health soak: 90 seconds sustained', path: '/health', requests: 0, concurrency: 2, durationSeconds: 90, p95: 1500, errPct: 1, soak: true, timeout: 180, description: 'Time-bounded soak: requests keep coming for a minute and a half, not a fixed count.' }),
   {
     key: 'TE-END-POST-SOAK-HEALTH',
-    name: 'Engine healthy after the soak window',
-    description: 'Runs after the soak cases in this suite: the control plane, its database reads, the console read model and the SIT console must all still answer correctly — the soak left no degradation behind.',
+    name: 'Engine health and read surfaces respond',
+    description: 'Independently verifies the control plane, database reads, console read model and SIT console without depending on any other case.',
     suiteKey: 'te-endurance', testType: 'performance', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Soak cases in this suite ran first (suite order).',
+    preconditions: 'Test Engine API and embedded SIT console are reachable.',
     steps: [
       GET('/health', { expect_json: [{ path: 'status', equals: 'ok' }], description: 'health' }),
       GET('/ready', { expect_json: [{ path: 'status', equals: 'ready' }], description: 'ready' }),
@@ -103,7 +103,7 @@ C.push(
     ],
     tags: ['endurance', 'test-engine', 'recovery'],
     dataProfile: { profile: 'none (read-only)', data: 'Five GETs, no payload.', source: 'n/a' },
-    expected: 'All five surfaces answer correctly after the soak.',
+    expected: 'All five health/read surfaces answer correctly when this case runs by itself.',
   }
 );
 
@@ -258,6 +258,10 @@ C.push(
       POST('/api/v1/executions/{{exec_id}}/cancel', { body: {}, expect_json: [{ path: 'data.status', equals: 'cancelled' }], description: 'cancel the queued execution' }),
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 204, description: 'delete the schedule' }),
     ],
+    cleanupSteps: [
+      POST('/api/v1/executions/{{exec_id}}/cancel', { body: {}, expected_status: [200, 404], description: 'ensure the queued execution is cancelled' }),
+      DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: [204, 404], description: 'ensure the legacy schedule is removed' }),
+    ],
     dataProfile: SANDBOX_DATA('One legacy schedule and the one execution it queues; execution cancelled, schedule deleted.'),
   })
 );
@@ -389,6 +393,7 @@ C.push(
       GET(`/api/v1/test-cases?q=${encodeURIComponent('測試')}&limit=5`, { expect_json: [{ path: 'data', contains: `TE-TMP-U-${UNIQ}` }], description: 'found by a non-ASCII search term' }),
       ARCHIVE('{{tmp_id}}'),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{tmp_id}}')],
     dataProfile: SANDBOX_DATA('One temporary case with non-ASCII name, description and tags; archived at the end.'),
     expected: 'Byte-for-byte round trip.',
   }),
@@ -732,6 +737,7 @@ C.push(
       GET('/api/v1/test-cases/00000000-0000-4000-8000-00000000beef', { expected_status: 404, description: 'no case exists under the supplied id' }),
       ARCHIVE('{{tmp_id}}'),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{tmp_id}}')],
     dataProfile: SANDBOX_DATA('One temporary case created with id, version and created_at in the body; archived at the end.'),
     expected: 'Generated id, version 1, current timestamp.',
   }),
@@ -831,9 +837,9 @@ C.push(
     expected: 'Error rate 0%; p95 <= 20000ms.',
   },
   chaos({
-    key: 'TE-CHAOS-POST-STORM-HEALTH', name: 'Engine serves workers normally after the read storm',
-    description: 'Runs after the read storm in this suite: the calls a worker depends on — case lookup, environment lookup, worker registry — and the console poll must answer without error.',
-    preconditions: 'The read-storm case in this suite ran first (suite order).',
+    key: 'TE-CHAOS-POST-STORM-HEALTH', name: 'Worker-critical read endpoints are available',
+    description: 'Independently verifies the case lookup, environment lookup, worker registry and console poll that workers rely on.',
+    preconditions: 'Test Engine API is reachable.',
     steps: [
       GET('/health', { expect_json: [{ path: 'status', equals: 'ok' }], description: 'health' }),
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { expect_json: [{ path: 'data.key', equals: 'TE-SMOKE-HEALTH' }], description: 'case lookup' }),
@@ -1005,6 +1011,7 @@ C.push(
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 204, description: 'delete it' }),
       GET('/api/v1/audit', { expect_json: [{ path: 'data', contains: `"action":"environment.update","resource_type":"environment","resource_id":"{{fix_env}}"` }, { path: 'data', contains: '"changed_fields":["safety_policy","updated_by"]' }, { path: 'data', contains: '"action":"schedule.create","resource_type":"schedule","resource_id":"{{sched_id}}"' }, { path: 'data', contains: '"action":"schedule.delete","resource_type":"schedule","resource_id":"{{sched_id}}"' }], description: 'three events in the trail' }),
     ],
+    cleanupSteps: [DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: [204, 404], description: 'ensure the audit test schedule is removed' })],
     dataProfile: SANDBOX_DATA('One no-op policy patch on the fixture environment and one disabled schedule, deleted.'),
     expected: 'environment.update, schedule.create and schedule.delete events.',
   }),
@@ -1056,6 +1063,7 @@ C.push(
       GET('/api/v1/test-cases/{{tmp_id}}', { expect_json: [{ path: 'data.versions.0.created_by', equals: 'author-two' }, { path: 'data.versions.0.change_summary', equals: 'Tighten the expected result (self-test)' }, { path: 'data.versions.1.created_by', equals: 'author-one' }, { path: 'data.versions.0.created_at', matches: ISO }], description: 'history names both authors' }),
       ARCHIVE('{{tmp_id}}'),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{tmp_id}}')],
     dataProfile: SANDBOX_DATA('One temporary case changed once; archived at the end.'),
     expected: 'Version 2 by author-two with its summary; version 1 by author-one.',
   }),
@@ -1170,6 +1178,7 @@ C.push(
       ARCHIVE('{{tmp_id}}'),
       GET(`/api/v1/test-cases/TE-TMP-D-${UNIQ}`, { expect_json: [{ path: 'data.lifecycle', equals: 'archived' }], description: 'the archive is visible too' }),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{tmp_id}}')],
     dataProfile: SANDBOX_DATA('One temporary case, archived at the end.'),
     expected: 'Visible on five paths immediately after the write.',
   }),

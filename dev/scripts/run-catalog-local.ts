@@ -24,8 +24,8 @@ const VARS: Record<string, string> = {
   dbviewer: process.env.SB_DBVIEWER || 'http://127.0.0.1:8090',
   engine: process.env.TE_BASE || 'http://127.0.0.1:8797',
   tenant: process.env.SIT_TENANT_SLUG || 'acme-demo',
-  username: process.env.SIT_USERNAME || 'operator.acme',
-  password: process.env.SB_DEMO_PASSWORD || process.env.SIT_PASSWORD || 'DemoOnly!Operator-2026#Change',
+  username: process.env.SIT_USERNAME || 'admin',
+  password: process.env.SB_DEMO_PASSWORD || process.env.SIT_PASSWORD || 'password',
 };
 
 const args = process.argv.slice(2);

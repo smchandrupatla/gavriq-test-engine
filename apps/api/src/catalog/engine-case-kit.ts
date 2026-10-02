@@ -134,6 +134,10 @@ export const RUN_ONE_PASS: Step[] = [...QUEUE_AND_CLAIM, UPLOAD, result('passed'
 export const ARCHIVE = (ref: string, description = 'archive the temporary case'): Step =>
   PUT(`/api/v1/test-cases/${ref}`, { body: { lifecycle: 'archived', change_summary: 'self-test cleanup', updated_by: 'engine-self-test' }, expected_status: 200, allow_failure: true, description });
 
+/** Unconditional cleanup variant: unlike ARCHIVE, a failed restore fails the case result. */
+export const ARCHIVE_CLEANUP = (ref: string, description = 'archive the case-owned temporary case'): Step =>
+  PUT(`/api/v1/test-cases/${ref}`, { body: { lifecycle: 'archived', change_summary: 'self-test cleanup', updated_by: 'engine-self-test' }, expected_status: 200, expect_json: [{ path: 'data.lifecycle', equals: 'archived' }], description });
+
 export const ISO = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}';
 export const UUID = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 
@@ -154,17 +158,41 @@ export const PRE = {
 
 type Overrides = Partial<CaseDef> & Pick<CaseDef, 'key' | 'name' | 'description'>;
 
+function cleanupExecutions(steps: unknown[] | undefined): Step[] {
+  const ids = new Set<string>();
+  for (const raw of steps || []) {
+    const step = raw as Step;
+    if (String(step.action) !== 'request' || String(step.method || 'GET').toUpperCase() !== 'POST') continue;
+    const url = String(step.url || '');
+    if (!/\/api\/v1\/(?:executions(?:\?|$)|runs(?:\?|$)|schedules\/[^/]+\/run(?:\?|$)|schedules\/trigger(?:\?|$))/.test(url)) continue;
+    const saved = step.save && typeof step.save === 'object' ? step.save as Record<string, unknown> : {};
+    for (const [name, path] of Object.entries(saved)) {
+      if (name === 'result_id' || typeof path !== 'string' || !/(?:^|\.)id$/.test(path)) continue;
+      ids.add(name);
+    }
+  }
+  return [...ids].map((id) => POST(`/api/v1/executions/{{${id}}}/cancel`, {
+    body: {},
+    expected_status: [200, 404],
+    skip_if_missing: [id],
+    description: `ensure case-owned execution ${id} is cancelled`,
+  }));
+}
+
 /** One factory per suite: the suite fixes test type, method and the type tag the console groups by. */
 export function suiteFactory(defaults: Pick<CaseDef, 'suiteKey' | 'testType'> & Partial<CaseDef>, typeTag: string) {
-  return (c: Overrides): CaseDef => ({
-    method: 'http',
-    severity: 'high',
-    priority: 'p1',
-    preconditions: PRE.readOnly,
-    dataProfile: NO_DATA,
-    expected: 'Documented contract holds.',
-    ...defaults,
-    ...c,
-    tags: [typeTag, 'test-engine', ...(c.tags || [])],
-  });
+  return (c: Overrides): CaseDef => {
+    const merged = { ...defaults, ...c };
+    return {
+      method: 'http',
+      severity: 'high',
+      priority: 'p1',
+      preconditions: PRE.readOnly,
+      dataProfile: NO_DATA,
+      expected: 'Documented contract holds.',
+      ...merged,
+      cleanupSteps: [...cleanupExecutions(merged.steps), ...(merged.cleanupSteps || [])],
+      tags: [typeTag, 'test-engine', ...(c.tags || [])],
+    };
+  };
 }

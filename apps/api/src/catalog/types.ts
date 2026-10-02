@@ -31,6 +31,10 @@ export interface CaseDef {
   preconditions: string;
   /** Executable steps for http/playwright/selenium runners. */
   steps?: unknown[];
+  /** HTTP case-owned cleanup attempted after the main steps, including failures. */
+  cleanupSteps?: unknown[];
+  /** Maximum seconds reserved for HTTP cleanup after the main case. */
+  cleanupTimeoutSeconds?: number;
   /** Runner options (perf profile, browser, viewport, data_profile copy). */
   validationRules?: Record<string, unknown>;
   timeoutSeconds?: number;

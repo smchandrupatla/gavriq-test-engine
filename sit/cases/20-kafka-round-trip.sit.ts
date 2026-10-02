@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson } from "../lib/client.ts";
+import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson, withTestRunCleanup } from "../lib/client.ts";
 
 type InboundEvent = { id: string; channel: string; systemId: string; payload: Record<string, unknown> };
 type TesthubInboxRow = { at: string; channel: string; topic: string | null; payload: Record<string, unknown> };
@@ -32,11 +32,13 @@ test("application publishes a message to Kafka and delivery is confirmed on the 
   const before = await testhubJson<{ total: number }>("/hub/inbox?channel=kafka");
 
   const run = await apiJson<{
+    runId: string;
     delivery: { sent: number; simulated: number; blocked: number; failed: number; results: Array<{ status: string }> };
   }>("/api/v1/runs", {
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "kafka", seed: correlationId("seed") }),
   });
+  await withTestRunCleanup(run.body.runId, async () => {
   assert.equal(run.status, 202, "run request was rejected");
   assert.equal(run.body.delivery.blocked, 0, "generated message failed schema validation and was never dispatched");
   assert.equal(run.body.delivery.failed, 0, "Kafka adapter reported a failed send");
@@ -53,4 +55,5 @@ test("application publishes a message to Kafka and delivery is confirmed on the 
   const latest = after.body.data[after.body.data.length - 1];
   assert.equal(latest?.channel, "kafka");
   assert.ok(latest?.payload && Object.keys(latest.payload).length > 0, "captured Kafka message had no payload");
+  });
 });

@@ -19,6 +19,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mergeEnvironmentConfig } from '../apps/api/src/routes/environments.ts';
 
 const API = process.env.DEPLOY_TEST_API || '';
 const DEPLOY_KEY = process.env.SANDBENCH_DEPLOY_KEY || '';
@@ -95,6 +96,22 @@ async function pollDeployment(id: string, tries = 40): Promise<any> {
 }
 
 describe('deploy-to-env trigger and gating', () => {
+  it('removes case-owned environment markers when a config patch value is null', () => {
+    const baseline = {
+      vars: { engine: 'http://engine.test', keep: 'baseline' },
+      secret_env: { token: 'ENGINE_TOKEN' },
+      unrelated: true,
+    };
+    assert.deepEqual(
+      mergeEnvironmentConfig(baseline, { vars: { case_marker: 'test-value' } }),
+      { ...baseline, vars: { ...baseline.vars, case_marker: 'test-value' } },
+    );
+    assert.deepEqual(
+      mergeEnvironmentConfig({ ...baseline, vars: { ...baseline.vars, case_marker: 'test-value' } }, { vars: { case_marker: null } }),
+      baseline,
+    );
+  });
+
   let ready = false;
   const mocks: Array<() => Promise<void>> = [];
 

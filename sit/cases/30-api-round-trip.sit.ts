@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson } from "../lib/client.ts";
+import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson, withTestRunCleanup } from "../lib/client.ts";
 
 type InboundEvent = { id: string; channel: string; systemId: string; payload: Record<string, unknown> };
 type TesthubInboxRow = { at: string; channel: string; payload: Record<string, unknown> };
@@ -32,11 +32,13 @@ test("application posts a message to an external API and delivery is confirmed t
   const before = await testhubJson<{ total: number }>("/hub/inbox?channel=api");
 
   const run = await apiJson<{
+    runId: string;
     delivery: { sent: number; simulated: number; blocked: number; failed: number };
   }>("/api/v1/runs", {
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "api", seed: correlationId("seed") }),
   });
+  await withTestRunCleanup(run.body.runId, async () => {
   assert.equal(run.status, 202, "run request was rejected");
   assert.equal(run.body.delivery.blocked, 0, "generated message failed schema validation and was never dispatched");
   assert.equal(run.body.delivery.failed, 0, "API adapter reported a failed send");
@@ -52,4 +54,5 @@ test("application posts a message to an external API and delivery is confirmed t
   const latest = after.body.data[after.body.data.length - 1];
   assert.equal(latest?.channel, "api");
   assert.ok(latest?.payload && Object.keys(latest.payload).length > 0, "captured API request had no payload");
+  });
 });

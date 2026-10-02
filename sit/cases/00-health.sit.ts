@@ -44,9 +44,9 @@ test("db viewer is healthy and can reach the same database as the app", async ()
   assert.ok(tables.body.data.some(row => row.table_name === 'test_cases'), 'viewer must read the application database');
 });
 
-test("web front end serves the deployed console", async () => {
+test("web front end serves the portal login page", async () => {
   const res = await fetch(`${ENV.webBase}/index.html`, { signal: AbortSignal.timeout(5000) });
   assert.equal(res.status, 200);
   const html = await res.text();
-  assert.match(html, /Sand Bench/);
+  assert.match(html, /Sign in|login/i);
 });

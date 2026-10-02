@@ -4,6 +4,21 @@ import { audit } from '../middleware/rbac.js';
 
 type Probe = { ok: boolean; status?: number; error?: string } | null;
 
+export function mergeEnvironmentConfig(current: Record<string, unknown>, patch: Record<string, unknown>) {
+  const merged = { ...current, ...patch };
+  for (const key of ['vars', 'secret_env']) {
+    const nestedPatch = patch[key];
+    if (!nestedPatch || typeof nestedPatch !== 'object' || Array.isArray(nestedPatch)) continue;
+    const nested = { ...((current[key] && typeof current[key] === 'object' && !Array.isArray(current[key])) ? current[key] as Record<string, unknown> : {}) };
+    for (const [name, value] of Object.entries(nestedPatch as Record<string, unknown>)) {
+      if (value === null) delete nested[name];
+      else nested[name] = value;
+    }
+    merged[key] = nested;
+  }
+  return merged;
+}
+
 async function probe(url: unknown): Promise<Probe> {
   if (typeof url !== 'string' || !url) return null;
   try {
@@ -64,13 +79,7 @@ export async function environmentRoutes(app: FastifyInstance) {
 
       let config = existing[0].config || {};
       if (b.config && typeof b.config === 'object') {
-        const patch = b.config as Record<string, unknown>;
-        config = { ...config, ...patch };
-        for (const key of ['vars', 'secret_env']) {
-          if (patch[key] && typeof patch[key] === 'object') {
-            config[key] = { ...(config[key] || {}), ...(patch[key] as Record<string, unknown>) };
-          }
-        }
+        config = mergeEnvironmentConfig(config, b.config as Record<string, unknown>);
       }
 
       let safetyPolicy = existing[0].safety_policy || {};

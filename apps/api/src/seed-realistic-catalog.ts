@@ -139,6 +139,8 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
     if (!suite || (WITH_SUITES && !suiteId)) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
     const validationRules = {
       ...(c.validationRules || {}),
+      ...(c.cleanupSteps?.length ? { cleanup_steps: c.cleanupSteps } : {}),
+      ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
       data_profile: c.dataProfile,
     };
     const { rows } = await query(

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, dbviewerJson, pollUntil } from "../lib/client.ts";
+import { apiJson, correlationId, dbviewerJson, pollUntil, withTestRunCleanup } from "../lib/client.ts";
 
 type DbRows<T> = { total: number; columns: string[]; data: T[] };
 
@@ -15,6 +15,7 @@ test("a completed run is independently visible through the db viewer", async () 
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "file", seed }),
   });
+  await withTestRunCleanup(run.body.runId, async () => {
   assert.equal(run.status, 202);
   assert.equal(run.body.status, "completed");
 
@@ -36,6 +37,7 @@ test("a completed run is independently visible through the db viewer", async () 
   const persisted = rows.body.data?.find((row) => row.id === run.body.runId);
   assert.ok(persisted, `run ${run.body.runId} was reported completed but never appears in test_runs`);
   assert.equal(persisted?.status, "completed");
+  });
 });
 
 test("audit events for the SIT session are independently visible through the db viewer", async () => {
