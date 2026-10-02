@@ -100,6 +100,34 @@ async function fetchEnvironment(id: string | null | undefined) {
   }
 }
 
+type EngineSettings = {
+  test_type_timeout_minutes?: Record<string, number>;
+  consecutive_failure_limit?: number;
+};
+const DEFAULT_CASE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_FAILURE_LIMIT = 20;
+
+async function fetchSettings(): Promise<EngineSettings> {
+  try {
+    const res = await api('/api/v1/settings');
+    return res?.data || {};
+  } catch (err) {
+    console.warn('[worker] could not load settings, using defaults (24h timeout, 20 consecutive failures):', (err as Error).message);
+    return {};
+  }
+}
+
+/** The configured per-test-type timeout, in ms — 24h for any type without an override. */
+function caseTimeoutMs(settings: EngineSettings, testType: string | undefined): number {
+  const minutes = settings.test_type_timeout_minutes?.[String(testType || 'other')];
+  return Number.isFinite(minutes) && (minutes as number) > 0 ? (minutes as number) * 60_000 : DEFAULT_CASE_TIMEOUT_MS;
+}
+
+function failureLimitOf(settings: EngineSettings): number {
+  const n = settings.consecutive_failure_limit;
+  return Number.isInteger(n) && (n as number) > 0 ? (n as number) : DEFAULT_FAILURE_LIMIT;
+}
+
 type RunnerResult = {
   status: string;
   verdict?: string;
@@ -191,7 +219,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
   }
 
   if (method === 'http' || method === 'rest' || method === 'api') {
-    const r = await runHttp(common);
+    const r = await runHttp({ ...common, signal });
     return {
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
@@ -216,6 +244,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
       timeoutSeconds: tc?.timeout_seconds || 15,
       sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
+      signal,
     });
     return {
       status: r.status,
@@ -246,6 +275,10 @@ async function runJob(execution: any) {
   const baseUrl = reachable(env?.base_url || DEFAULT_BASE_URL);
   const headlessOverride = typeof execution?.metadata?.headless === 'boolean' ? execution.metadata.headless : undefined;
   let anyFailed = false;
+  const settings = await fetchSettings();
+  const failureLimit = failureLimitOf(settings);
+  let consecutiveFailures = 0;
+  let circuitBroken = false;
 
   // No evidence, no run: a case whose proof cannot be stored is not executed.
   const store = await evidencePreflight(API, headers());
@@ -294,10 +327,26 @@ async function runJob(execution: any) {
     if (cancel.signal.aborted) return stopped();
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
-    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, cancel.signal);
-    // The result of a case that was cut short is not a verdict: it is not reported.
+    const testType = tc?.test_type || 'other';
+    const caseLimitMs = caseTimeoutMs(settings, testType);
+    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(caseLimitMs)]);
+    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal);
+    // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
     if (cancel.signal.aborted) return stopped();
+    // The per-test-type timeout fired instead: the case is killed and recorded as timed out,
+    // regardless of what status the runner itself returned on abort, and the run continues.
+    if (caseSignal.aborted && result.status !== 'passed' && result.status !== 'skipped') {
+      result = {
+        ...result,
+        status: 'timed_out',
+        verdict: 'fail',
+        classification: 'timeout',
+        message: `Timed out after ${Math.round(caseLimitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
+      };
+    }
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
+    if (result.status === 'passed') consecutiveFailures = 0;
+    else if (result.status !== 'skipped') consecutiveFailures++;
 
     const evidence = await publishEvidence(
       ensureEvidence(result, {
@@ -332,6 +381,14 @@ async function runJob(execution: any) {
       if (String((err as Error).message).includes('execution_cancelled')) return stopped();
       throw err;
     }
+
+    // N test cases in a row failed — whether at the start of the run or partway through it —
+    // so the rest of this execution is stopped rather than burning through a broken build.
+    if (consecutiveFailures >= failureLimit) {
+      circuitBroken = true;
+      console.log(`[worker] ${execution.key} circuit breaker: ${consecutiveFailures} consecutive failures (limit ${failureLimit}) — stopping`);
+      break;
+    }
   }
   } finally {
     clearInterval(watch);
@@ -339,9 +396,14 @@ async function runJob(execution: any) {
 
   await api(`/api/v1/executions/${execution.id}/complete`, {
     method: 'POST',
-    body: JSON.stringify({ status: anyFailed ? 'failed' : 'passed' }),
+    body: JSON.stringify({
+      status: anyFailed ? 'failed' : 'passed',
+      ...(circuitBroken
+        ? { metadata: { circuit_breaker: { triggered: true, consecutive_failures: consecutiveFailures, limit: failureLimit } } }
+        : {}),
+    }),
   });
-  console.log(`[worker] completed ${execution.key} → ${anyFailed ? 'failed' : 'passed'}`);
+  console.log(`[worker] completed ${execution.key} → ${anyFailed ? 'failed' : 'passed'}${circuitBroken ? ' (circuit breaker stopped the run early)' : ''}`);
 }
 
 async function pollLoop() {

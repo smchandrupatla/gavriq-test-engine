@@ -513,6 +513,11 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
 
+-- test_type -> minutes; a type absent here uses the 24h application default (see routes/settings.ts).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS test_type_timeout_minutes JSONB NOT NULL DEFAULT '{}';
+-- Stop a run after this many test cases in a row fail (anywhere in the run, including its start).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS consecutive_failure_limit INT NOT NULL DEFAULT 20;
+
 -- ---------------------------------------------------------------------------
 -- Quality Insights: versioned reviews of an application's test quality.
 -- snapshot holds the facts the engine computed, analysis the review written

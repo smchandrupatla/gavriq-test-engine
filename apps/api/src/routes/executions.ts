@@ -420,18 +420,23 @@ export async function executionRoutes(app: FastifyInstance) {
     }
   );
 
-  app.post<{ Params: { id: string }; Body: { status?: string } }>(
+  app.post<{ Params: { id: string }; Body: { status?: string; metadata?: Record<string, unknown> } }>(
     '/api/v1/executions/:id/complete',
     async (req, reply) => {
       const status = req.body?.status || 'passed';
+      const metadataPatch =
+        req.body?.metadata && typeof req.body.metadata === 'object' && !Array.isArray(req.body.metadata)
+          ? req.body.metadata
+          : null;
       // "Cancelled" is final: a worker finishing up (or an older worker that never
       // noticed the cancel) must not turn the run back into passed/failed.
       const { rows } = await query(
         `UPDATE executions SET
            status = CASE WHEN status = 'cancelled' THEN status ELSE $2::execution_status END,
-           finished_at = CASE WHEN status = 'cancelled' THEN COALESCE(finished_at, now()) ELSE now() END
+           finished_at = CASE WHEN status = 'cancelled' THEN COALESCE(finished_at, now()) ELSE now() END,
+           metadata = metadata || COALESCE($3::jsonb, '{}'::jsonb)
          WHERE id::text = $1 OR key = $1 RETURNING *`,
-        [req.params.id, status]
+        [req.params.id, status, metadataPatch ? JSON.stringify(metadataPatch) : null]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
       if (rows[0].worker_id) {

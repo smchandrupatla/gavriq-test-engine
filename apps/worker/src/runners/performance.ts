@@ -27,6 +27,8 @@ export interface PerfRunInput {
     error_rate_pct?: number;
     min_rps?: number;
   };
+  /** Stops issuing new requests once aborted (e.g. the engine's per-test-type timeout, or a run cancel). */
+  signal?: AbortSignal;
 }
 
 export interface PerfRunResult {
@@ -78,15 +80,16 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
 
   let next = 0;
   async function worker() {
-    while (next < limit && (!deadline || Date.now() < deadline)) {
+    while (next < limit && (!deadline || Date.now() < deadline) && !input.signal?.aborted) {
       next++;
       const t0 = Date.now();
       try {
+        const signal = input.signal ? AbortSignal.any([AbortSignal.timeout(timeout), input.signal]) : AbortSignal.timeout(timeout);
         const res = await fetch(url, {
           method,
           headers: { 'content-type': 'application/json', ...(input.headers || {}) },
           body: input.body !== undefined ? JSON.stringify(input.body) : undefined,
-          signal: AbortSignal.timeout(timeout),
+          signal,
         });
         // Drain the body so the connection returns to the pool.
         await res.arrayBuffer().catch(() => undefined);
