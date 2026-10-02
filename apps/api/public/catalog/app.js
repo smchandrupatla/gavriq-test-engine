@@ -770,6 +770,12 @@ function renderConfigView(){
   const s=state.settings;
   if(!s){el('content').innerHTML=skeletonHtml();return;}
   if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
+  const timeouts=s.test_type_timeout_minutes||{};
+  const typeRows=Object.keys(timeouts).map(t=>{
+    const hours=timeouts[t]/60;
+    const label=t.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());
+    return `<tr><td>${esc(label)}</td><td><input type="number" class="timeoutHours" data-type="${esc(t)}" min="0.01" max="168" step="0.25" value="${hours%1===0?hours:hours.toFixed(2)}" style="width:90px"> hours</td></tr>`;
+  }).join('');
   el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Run retention</h2></div>
     <div class="hp-body">
       <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted. Minimum 5 days.</p>
@@ -779,6 +785,22 @@ function renderConfigView(){
         ${s.updated_at?`<span class="muted small">last changed ${esc(when(s.updated_at))}</span>`:''}
       </div>
       <div id="retentionError" class="field-error" hidden></div>
+    </div></div>
+    <div class="card" style="margin-top:12px"><div class="card-head"><h2>Test case run timeout</h2></div>
+      <div class="hp-body">
+        <p class="muted small">A running test case is killed and recorded as "Timed out" once it runs longer than its test type's limit below. Every type defaults to 24 hours.</p>
+        <div class="table-wrap"><table><thead><tr><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table></div>
+      </div></div>
+    <div class="card" style="margin-top:12px"><div class="card-head"><h2>Failure circuit breaker</h2></div>
+      <div class="hp-body">
+        <p class="muted small">If this many test cases in a row fail — at the start of a run or partway through it — the rest of that run is stopped instead of continuing to burn through a broken build.</p>
+        <div class="toolbar" style="border:none;padding:0">
+          <input type="number" id="failureLimit" min="1" max="1000" value="${esc(s.consecutive_failure_limit)}" style="width:90px"> consecutive failures
+        </div>
+      </div></div>
+    <div class="card" style="margin-top:12px"><div class="hp-body">
+      <button class="btn primary" data-action="save-timeouts">Save timeout &amp; circuit breaker settings</button>
+      <div id="timeoutsError" class="field-error" hidden></div>
     </div></div>`;
 }
 // ---------------------------------------------------------------------------
@@ -1333,6 +1355,7 @@ function handleAction(action,node){
   else if(action==='nav-back')history.back();
   else if(action==='run-case'){const envSel=el('runCaseEnv');runCases([node.dataset.id],node.dataset.label,envSel&&envSel.value||null);}
   else if(action==='save-retention')saveRetention(node);
+  else if(action==='save-timeouts')saveTimeouts(node);
   else if(action==='save-suite')saveAsSuite();
   else if(action==='apply-run-filters')applyRunFilters();
   else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',from:'',to:''};loadRunsList(true);}
@@ -1427,6 +1450,32 @@ async function saveRetention(btn){
     toast('Retention updated to '+days+' days');
     renderCurrentView();
   }catch(e){showRetentionError('Save failed: '+e.message);btn.disabled=false;}
+}
+function showTimeoutsError(msg){
+  const err=el('timeoutsError');
+  if(!err)return;
+  if(!msg){err.hidden=true;err.textContent='';return;}
+  err.hidden=false;err.textContent=msg;
+}
+async function saveTimeouts(btn){
+  showTimeoutsError(null);
+  const test_type_timeout_minutes={};
+  for(const inp of document.querySelectorAll('.timeoutHours')){
+    const hours=Number(inp.value);
+    if(!(hours>0)||!Number.isFinite(hours)){showTimeoutsError('Enter a timeout greater than 0 for every test type.');return;}
+    test_type_timeout_minutes[inp.dataset.type]=Math.round(hours*60);
+  }
+  const limit=Number(el('failureLimit').value);
+  if(!Number.isInteger(limit)||limit<1||limit>1000){
+    showTimeoutsError('Enter a whole number of consecutive failures, 1-1000.');
+    return;
+  }
+  btn.disabled=true;
+  try{
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_timeout_minutes,consecutive_failure_limit:limit})})).data;
+    toast('Timeout and circuit breaker settings saved');
+    renderCurrentView();
+  }catch(e){showTimeoutsError('Save failed: '+e.message);btn.disabled=false;}
 }
 async function runEverything(btn){
   if(!state.envId){toast('No environment available.');return;}

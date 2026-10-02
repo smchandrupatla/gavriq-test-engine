@@ -72,6 +72,8 @@ export interface HttpRunInput {
   steps?: HttpStep[];
   timeoutSeconds?: number;
   vars?: Record<string, string>;
+  /** Aborts the in-flight request and stops before the next step (e.g. the engine's per-test-type timeout, or a run cancel). */
+  signal?: AbortSignal;
 }
 
 export interface HttpRunResult {
@@ -265,7 +267,8 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
   ) => {
     trace.current = { step, description, request: { method, url, headers, body } };
     const t0 = Date.now();
-    const res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(timeout) });
+    const signal = input.signal ? AbortSignal.any([AbortSignal.timeout(timeout), input.signal]) : AbortSignal.timeout(timeout);
+    const res = await fetch(url, { method, headers, body, signal });
     const latency = Date.now() - t0;
     const text = await res.text();
     const recorded: Exchange = {
@@ -305,6 +308,7 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
       let lastStatus = 0;
 
       for (const [idx, step] of input.steps.entries()) {
+        if (input.signal?.aborted) throw new Error('aborted: run timed out or was cancelled');
         if (step.action !== 'request') throw new Error(`Unknown http action: ${step.action}`);
         const method = (step.method || 'GET').toUpperCase();
 
@@ -335,7 +339,7 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
         if (failure && step.poll) {
           const deadline = Date.now() + (step.poll.timeout_ms ?? 8000);
           const interval = step.poll.interval_ms ?? 500;
-          while (failure && Date.now() < deadline) {
+          while (failure && Date.now() < deadline && !input.signal?.aborted) {
             await new Promise((r) => setTimeout(r, interval));
             attempts++;
             outcome = await doRequest();

@@ -319,15 +319,31 @@ C.push(
   }),
   api({
     key: 'TE-API-SETTINGS', name: 'Engine settings are readable and validated',
-    description: 'GET /api/v1/settings returns the run retention window; PUT refuses a value outside the allowed range without changing it.',
+    description: 'GET /api/v1/settings returns the run retention window, per-test-type case timeouts (24h default) and the consecutive-failure circuit breaker (default 20); PUT refuses an out-of-range value on any of the three without changing it.',
     severity: 'medium',
     steps: [
-      GET('/api/v1/settings', { expect_json: [{ path: 'data.run_retention_days', min: 1 }, { path: 'data.run_retention_days', max: 365 }], description: 'settings' }),
+      GET('/api/v1/settings', {
+        expect_json: [
+          { path: 'data.run_retention_days', min: 1 }, { path: 'data.run_retention_days', max: 365 },
+          { path: 'data.test_type_timeout_minutes.smoke', exists: true },
+          { path: 'data.consecutive_failure_limit', min: 1 },
+        ],
+        description: 'settings',
+      }),
       PUT('/api/v1/settings', { body: { run_retention_days: 0 }, expected_status: 400, description: 'zero days' }),
       PUT('/api/v1/settings', { body: { run_retention_days: 366 }, expected_status: 400, description: 'over a year' }),
       PUT('/api/v1/settings', { body: { run_retention_days: 'soon' }, expected_status: 400, description: 'not a number' }),
+      PUT('/api/v1/settings', { body: { test_type_timeout_minutes: { smoke: 0 } }, expected_status: 400, description: 'zero-minute timeout' }),
+      PUT('/api/v1/settings', { body: { test_type_timeout_minutes: { 'not-a-real-type': 60 } }, expected_status: 400, description: 'unknown test_type' }),
+      PUT('/api/v1/settings', { body: { consecutive_failure_limit: 0 }, expected_status: 400, description: 'zero-case circuit breaker' }),
+      PUT('/api/v1/settings', {
+        body: { test_type_timeout_minutes: { smoke: 90 }, consecutive_failure_limit: 15 },
+        expect_json: [{ path: 'data.test_type_timeout_minutes.smoke', equals: 90 }, { path: 'data.consecutive_failure_limit', equals: 15 }],
+        description: 'valid timeout + circuit breaker saved',
+      }),
+      PUT('/api/v1/settings', { body: { test_type_timeout_minutes: { smoke: 1440 }, consecutive_failure_limit: 20 }, description: 'restore defaults' }),
     ],
-    dataProfile: { profile: 'boundary', data: 'run_retention_days 0, 366 and "soon" — all rejected, nothing stored.', source: 'Hand-crafted.' },
+    dataProfile: { profile: 'boundary', data: 'run_retention_days 0/366/"soon", a zero-minute timeout, an unknown test_type, a zero-case circuit breaker, then a valid save of both — defaults restored at the end.', source: 'Hand-crafted.' },
   }),
   api({
     key: 'TE-API-BUILD-STATUS', name: 'In-container build status answers',
