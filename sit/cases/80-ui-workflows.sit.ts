@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { apiFetch, correlationId, dbviewerJson, pollUntil } from "../lib/client.ts";
+import { apiFetch, correlationId, dbviewerJson, pollUntil, withCaseCleanup } from "../lib/client.ts";
 import { openConsole, openNav, selectFirstNamedOption, selectNamedOption, setNamedField, submitScreen, withDriver } from "../lib/selenium.ts";
 
 // Selenium-driven workflow + data-integrity coverage: for each real, database-writing
@@ -93,6 +93,7 @@ test("Test Runs: starting a run from the console UI persists it with the fields 
 test("Schedules: creating a schedule from the console UI persists it, and the database row reflects what the console actually submitted", async () => {
   const scheduleName = correlationId("sit-ui-schedule");
 
+  await withCaseCleanup(async () => {
   const outcome = await withDriver(async (driver) => {
     await openConsole(driver);
     await openNav(driver, "Schedules", "New schedule");
@@ -112,18 +113,14 @@ test("Schedules: creating a schedule from the console UI persists it, and the da
   const persisted = rows.body.data?.find((row) => row.name === scheduleName);
   assert.ok(persisted, `schedule "${scheduleName}" was created in the console UI but never appears in run_schedules`);
   assert.equal(persisted?.cadence, "weekly", "the saved schedule does not carry the cadence chosen on screen");
-
-  // A schedule is live the moment it is saved: left behind, every run of this case would
-  // add one more weekly job to the bench. Best effort — the case has already proved its
-  // point, so a cleanup that fails does not fail it.
-  try {
-    const current = await apiFetch(`/api/v1/schedules/${encodeURIComponent(persisted!.id)}`);
-    const etag = current.headers.get("etag") || ((await current.json().catch(() => ({}))) as { etag?: string }).etag;
-    await apiFetch(`/api/v1/schedules/${encodeURIComponent(persisted!.id)}`, {
+  }, async () => {
+    const rows = await newestRows<{ id: string; name: string; etag: string }>("run_schedules");
+    const owned = rows.body.data?.find((row) => row.name === scheduleName);
+    if (!owned) return;
+    const response = await apiFetch(`/api/v1/schedules/${encodeURIComponent(owned.id)}`, {
       method: "DELETE",
-      headers: etag ? { "if-match": etag } : {},
+      headers: owned.etag ? { "if-match": owned.etag } : {},
     });
-  } catch {
-    /* leave it for the bench's own "Clear test data" */
-  }
+    if (response.status !== 204 && response.status !== 404) throw new Error(`schedule cleanup returned ${response.status}: ${await response.text()}`);
+  });
 });

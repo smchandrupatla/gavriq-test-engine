@@ -170,6 +170,27 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
   const headless =
     typeof headlessOverride === 'boolean' ? headlessOverride : typeof rules.headless === 'boolean' ? rules.headless : undefined;
 
+  const cleanupSteps = Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : [];
+  const withCleanup = async (result: RunnerResult): Promise<RunnerResult> => {
+    if (!cleanupSteps.length) return result;
+    const cleanup = await runHttp({
+      baseUrl,
+      vars,
+      cleanupSteps,
+      cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
+    });
+    if (cleanup.status === 'passed') return { ...result, evidence: [...(result.evidence || []), ...(cleanup.evidence || [])] };
+    const status = result.status === 'passed' || result.status === 'skipped' ? 'failed' : result.status;
+    return {
+      ...result,
+      status,
+      verdict: status === 'skipped' ? undefined : 'fail',
+      classification: cleanup.classification || 'cleanup_failure',
+      message: `${result.message}; cleanup failed: ${cleanup.message}`.slice(0, 900),
+      evidence: [...(result.evidence || []), ...(cleanup.evidence || [])],
+    };
+  };
+
   // Imported SIT catalog entries
   if (isSitScript(script) || method === 'sit') {
     const r = await runSit({
@@ -179,7 +200,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       timeoutSeconds: tc?.timeout_seconds || 120,
       signal,
     });
-    return {
+    return withCleanup({
       status: r.status === 'skipped' ? 'skipped' : r.status,
       verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
       duration_ms: r.duration_ms,
@@ -188,7 +209,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       metrics: r.metrics || {},
       evidence: [],
       output: r.output,
-    };
+    });
   }
 
   const common = {
@@ -207,7 +228,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       headless,
       signal,
     });
-    return {
+    return withCleanup({
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
@@ -215,11 +236,16 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       classification: r.classification || null,
       metrics: r.metrics || {},
       evidence: r.evidence || [],
-    };
+    });
   }
 
   if (method === 'http' || method === 'rest' || method === 'api') {
-    const r = await runHttp({ ...common, signal });
+    const r = await runHttp({
+      ...common,
+      signal,
+      cleanupSteps: Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : undefined,
+      cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
+    });
     return {
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
@@ -246,7 +272,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
       signal,
     });
-    return {
+    return withCleanup({
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
@@ -254,18 +280,18 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       classification: r.classification || null,
       metrics: r.metrics,
       evidence: [],
-    };
+    });
   }
 
   const r = await runSelenium({ ...common, viewport, headless, signal });
-  return {
+  return withCleanup({
     status: r.status,
     verdict: r.status === 'passed' ? 'pass' : 'fail',
     duration_ms: r.duration_ms,
     message: r.message,
     classification: r.classification || null,
     evidence: r.evidence || [],
-  };
+  });
 }
 
 async function runJob(execution: any) {

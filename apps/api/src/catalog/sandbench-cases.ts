@@ -147,14 +147,14 @@ C.push(
   },
   {
     key: 'SB-SMOKE-WEB-INDEX',
-    name: 'Web front end serves the console shell',
-    description: 'GET {{web}}/index.html must return the real console shell (HTML document titled "Sand Bench · GARVIQ Labs"), proving the web container serves the deployed bundle.',
+    name: 'Web front end serves the portal login page',
+    description: 'GET {{web}}/index.html must return the portal login page with its sign-in prompt, proving the deployed web bundle presents authentication before the console.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web container deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, expected_body_contains: 'Sand Bench · GARVIQ Labs', description: 'web index.html' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, expected_body_contains: 'Sign in', description: 'web login page' }],
     tags: ['smoke', 'sand-bench', 'web'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: '200 HTML containing the verified page title.',
+    expected: '200 HTML containing the portal sign-in prompt.',
   },
   {
     key: 'SB-SMOKE-CHANNEL-TARGETS',
@@ -224,14 +224,14 @@ C.push(
   },
   {
     key: 'SB-SMOKE-WEB-ROOT',
-    name: 'Web root path serves the console shell',
-    description: 'GET {{web}}/ (root, not /index.html) must resolve to 200 with the same verified shell content — proving nginx\'s root document works, not just the explicit filename.',
+    name: 'Web root path serves the portal login page',
+    description: 'GET {{web}}/ (root, not /index.html) must resolve to the portal login page with its sign-in prompt — proving nginx\'s root document sends visitors to authentication.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web container deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/', expected_status: 200, expected_body_contains: 'Sand Bench', description: 'web root' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/', expected_status: 200, expected_body_contains: 'Sign in', description: 'web root login page' }],
     tags: ['smoke', 'sand-bench', 'web'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: '200 HTML containing "Sand Bench".',
+    expected: '200 HTML containing the portal sign-in prompt.',
   },
   {
     key: 'SB-SMOKE-DBVIEWER-TABLES',
@@ -647,16 +647,25 @@ C.push(
 
 function staticScreen(key: string, page: string, title: string, mustText: string): CaseDef {
   const titleFragment = title.split(/ — | · /)[0] ?? title;
+  const loginLanding = page === '/index.html';
   return {
     key,
-    name: `Static page ${page} renders its real content`,
-    description: `Open {{web}}${page} in a real browser and assert the page's own title ("${title}") and a verified content fragment render — not just an HTTP 200.`,
+    name: loginLanding ? 'Portal landing page displays the login form' : `Static page ${page} renders its real content`,
+    description: loginLanding
+      ? 'Open {{web}}/index.html and verify the landing page presents the sign-in form before the console.'
+      : `Open {{web}}${page} in a real browser and assert the page's own title ("${title}") and a verified content fragment render — not just an HTTP 200.`,
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Web container deployed; worker has a Playwright chromium.',
     steps: [
       { action: 'navigate', value: `{{web}}${page}`, description: `open ${page}` },
+      ...(loginLanding ? [
+        { action: 'assert_text', expected: 'Sign in', description: 'login prompt' },
+        { action: 'wait_for', selector: '#gate #username', timeout_ms: 10000, description: 'username field visible' },
+        { action: 'wait_for', selector: '#gate #password', timeout_ms: 10000, description: 'password field visible' },
+        { action: 'wait_for', selector: '#gate #login', timeout_ms: 10000, description: 'login button visible' },
+      ] : []),
       { action: 'assert_title', expected: titleFragment, description: 'browser title' },
-      { action: 'assert_text', expected: mustText, description: 'verified content fragment' },
+      ...(!loginLanding ? [{ action: 'assert_text', expected: mustText, description: 'verified content fragment' }] : []),
     ],
     timeoutSeconds: 45,
     tags: ['screen', 'sand-bench', 'playwright', 'static-page'],
@@ -688,7 +697,7 @@ const SIGNIN_DATA: CaseDef['dataProfile'] = {
 };
 
 C.push(
-  staticScreen('SB-SCR-STATIC-INDEX', '/index.html', 'Sand Bench · GARVIQ Labs', 'Sand Bench'),
+  staticScreen('SB-SCR-STATIC-INDEX', '/index.html', 'Sand Bench · GARVIQ Labs', 'Sign in'),
   staticScreen('SB-SCR-STATIC-HELP', '/help.html', 'Help — GARVIQ Labs Sand Bench', 'Help'),
   staticScreen('SB-SCR-STATIC-DEMO', '/demo.html', '90-second demo — Sand Bench', 'demo'),
   staticScreen('SB-SCR-STATIC-NOTPROD', '/not-production.html', 'Not production — Sand Bench', 'Sand Bench'),
@@ -712,7 +721,7 @@ C.push(
     name: 'Overview page shows its real hero heading',
     description: 'After signing in and mounting, the Overview hero must read exactly "Good rules survive bad data." — copied verbatim from the deployed page module. Catches a console that mounts but renders the wrong landing content.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
-    preconditions: 'Console mounts after demo sign-in (see SB-SCR-CONSOLE-MOUNT).',
+    preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'assert_selector_text', selector: '.opsc-hero-title, .opsc-pagehead-title', expected: 'Good rules survive bad data.', timeout_ms: 10000, description: 'hero heading' },
@@ -727,7 +736,7 @@ C.push(
     name: 'Sidebar exposes the core modules',
     description: 'The mounted console\'s sidebar must contain the Rule Bench, Message Designer and Test Runs modules — the three modules every operator workflow starts from.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
-    preconditions: 'Console mounts after demo sign-in.',
+    preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'assert_text', expected: 'Rule Bench', description: 'Rule Bench module' },
@@ -1305,15 +1314,23 @@ C.push(
 /* ------------------------------------------------------------------------ */
 
 function seleniumStatic(key: string, page: string, mustText: string, name: string): CaseDef {
+  const loginLanding = page === '/index.html';
   return {
     key,
-    name,
-    description: `Selenium WebDriver (real Chrome) opens {{web}}${page} and asserts the verified content fragment "${mustText}" renders. Baseline coverage proving the Selenium runner + deployed web tier work together.`,
+    name: loginLanding && key === 'TC-SB-SMOKE-HOME' ? 'Portal login page loads in Selenium' : name,
+    description: loginLanding
+      ? `Selenium opens {{web}}${page} and verifies the portal sign-in prompt and visible login controls.`
+      : `Selenium WebDriver (real Chrome) opens {{web}}${page} and asserts the verified content fragment "${mustText}" renders. Baseline coverage proving the Selenium runner + deployed web tier work together.`,
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'selenium', severity: 'high', priority: 'p1',
     preconditions: 'Worker has Chrome/Chromium + matching chromedriver.',
     steps: [
       { action: 'navigate', value: `{{web}}${page}`, description: `open ${page}` },
       { action: 'wait_for', selector: 'body', timeout_ms: 10000, description: 'page body present' },
+      ...(loginLanding ? [
+        { action: 'wait_for', selector: '#gate #username', timeout_ms: 10000, description: 'username field visible' },
+        { action: 'wait_for', selector: '#gate #password', timeout_ms: 10000, description: 'password field visible' },
+        { action: 'wait_for', selector: '#gate #login', timeout_ms: 10000, description: 'login button visible' },
+      ] : []),
       { action: 'assert_text', expected: mustText, description: 'verified fragment' },
     ],
     timeoutSeconds: 60,
@@ -1324,11 +1341,11 @@ function seleniumStatic(key: string, page: string, mustText: string, name: strin
 }
 
 C.push(
-  seleniumStatic('TC-SB-SMOKE-HOME', '/index.html', 'Sand Bench', 'Smoke: console shell loads in Selenium'),
+  seleniumStatic('TC-SB-SMOKE-HOME', '/index.html', 'Sign in', 'Smoke: portal login page loads in Selenium'),
   seleniumStatic('TC-SB-HELP-PAGE', '/help.html', 'Help', 'Baseline: Help page renders'),
   seleniumStatic('TC-SB-DEMO-PAGE', '/demo.html', 'demo', 'Baseline: 90-second demo page renders'),
   seleniumStatic('TC-SB-NOTPROD-BANNER', '/not-production.html', 'Sand Bench', 'Baseline: not-production disclosure renders'),
-  seleniumStatic('TC-SB-HEADER', '/index.html', 'GARVIQ', 'Baseline: GARVIQ branding present'),
+  seleniumStatic('TC-SB-HEADER', '/index.html', 'GARVIQ', 'Baseline: portal login page carries GARVIQ branding'),
   {
     key: 'TC-SB-CONSOLE-MOUNT',
     name: 'Baseline: operator signs in and console mounts under Selenium',
@@ -1349,7 +1366,7 @@ C.push(
     name: 'Baseline: core modules visible in Selenium',
     description: 'After signing in and mounting, the sidebar must show the Rule Bench and Test Runs modules (Selenium-read DOM text).',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'selenium', severity: 'high', priority: 'p1',
-    preconditions: 'Console mounts after demo sign-in.',
+    preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'assert_text', expected: 'Rule Bench', description: 'Rule Bench' },
@@ -1433,26 +1450,26 @@ function perfCase(opts: {
 C.push(
   perfCase({ key: 'SB-PERF-API-HEALTH', name: 'API /health latency benchmark', urlVar: '{{api}}/health', requests: 40, concurrency: 5, p95: 800, errPct: 2, description: 'Short benchmark of the API health endpoint.' }),
   perfCase({ key: 'SB-PERF-API-READY', name: 'API /ready under concurrent load', urlVar: '{{api}}/ready', requests: 60, concurrency: 10, p95: 1500, errPct: 5, description: 'Readiness probe under a 10-way concurrent burst (touches the DB path).' }),
-  perfCase({ key: 'SB-PERF-WEB-INDEX', name: 'Web shell delivery benchmark', urlVar: '{{web}}/index.html', requests: 30, concurrency: 5, p95: 1500, errPct: 2, description: 'Static shell delivery from the web tier.' }),
+  perfCase({ key: 'SB-PERF-WEB-INDEX', name: 'Portal login page delivery benchmark', urlVar: '{{web}}/index.html', requests: 30, concurrency: 5, p95: 1500, errPct: 2, description: 'Delivery benchmark for the portal login page document.' }),
   perfCase({ key: 'SB-PERF-TESTHUB', name: 'Testhub health latency benchmark', urlVar: '{{testhub}}/health', requests: 30, concurrency: 5, p95: 800, errPct: 2, severity: 'medium', description: 'The simulator must not be the bottleneck in round-trip tests.' }),
   perfCase({ key: 'SB-PERF-DBVIEWER', name: 'DB viewer health latency benchmark', urlVar: '{{dbviewer}}/health', requests: 30, concurrency: 5, p95: 1000, errPct: 2, severity: 'medium', description: 'The independent read path must answer promptly.' }),
   perfCase({ key: 'SB-END-API-SOAK', name: 'API soak: 300 requests sustained', urlVar: '{{api}}/ready', requests: 300, concurrency: 3, p95: 2000, errPct: 2, suite: 'sb-endurance', timeout: 300, description: 'Bounded soak: a sustained low-concurrency stream the deployment must absorb without error-rate drift.' }),
-  perfCase({ key: 'SB-END-WEB-SOAK', name: 'Web tier soak: 200 shell fetches', urlVar: '{{web}}/index.html', requests: 200, concurrency: 2, p95: 2500, errPct: 2, suite: 'sb-endurance', timeout: 300, severity: 'medium', description: 'Bounded soak of the static tier.' }),
+  perfCase({ key: 'SB-END-WEB-SOAK', name: 'Web tier soak: 200 login page fetches', urlVar: '{{web}}/index.html', requests: 200, concurrency: 2, p95: 2500, errPct: 2, suite: 'sb-endurance', timeout: 300, severity: 'medium', description: 'Bounded soak of the portal login page document.' }),
   {
     key: 'SB-END-POST-SOAK-HEALTH',
-    name: 'Deployment healthy after soak window',
-    description: 'Runs after the soak cases in this suite: every surface must still answer its health contract, proving the soak left no degradation behind.',
+    name: 'Deployment health and portal availability',
+    description: 'Independently verifies health endpoints and portal availability without depending on other cases in the endurance suite.',
     suiteKey: 'sb-endurance', testType: 'performance', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Soak cases in this suite ran first (suite order).',
+    preconditions: 'API, testhub, DB viewer and web portal targets are reachable.',
     steps: [
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'api healthy' },
       { action: 'request', method: 'GET', url: '{{testhub}}/health', expected_status: 200, description: 'testhub healthy' },
       { action: 'request', method: 'GET', url: '{{dbviewer}}/health', expected_status: 200, description: 'dbviewer healthy' },
-      { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, description: 'web healthy' },
+      { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, description: 'portal login page available' },
     ],
     tags: ['endurance', 'sand-bench', 'recovery'],
     dataProfile: { profile: 'none (read-only)', data: 'Four health GETs.', source: 'n/a' },
-    expected: 'All four surfaces 200 after the soak.',
+    expected: 'All four configured health/portal endpoints return 200 when run alone.',
   },
   perfCase({ key: 'SB-PERF-CAPABILITIES', name: 'API capabilities latency benchmark', urlVar: '{{api}}/api/v1/capabilities', requests: 40, concurrency: 5, p95: 800, errPct: 2, description: 'Benchmark of the public capabilities contract endpoint clients probe first.' }),
   perfCase({ key: 'SB-PERF-RESILIENCE', name: 'Resilience posture latency benchmark', urlVar: '{{api}}/api/v1/resilience', requests: 30, concurrency: 5, p95: 800, errPct: 2, severity: 'medium', description: 'Benchmark of the resilience-posture endpoint.' }),
@@ -1475,10 +1492,10 @@ C.push(
   perfCase({ key: 'SB-END-WEB-SECURITY-SOAK', name: 'Security page soak: 150 fetches sustained', urlVar: '{{web}}/security.html', requests: 150, concurrency: 2, p95: 2500, errPct: 2, suite: 'sb-endurance', timeout: 240, severity: 'medium', description: 'Bounded soak of the security/cryptography static page.' }),
   {
     key: 'SB-END-EXTENDED-SURFACES-HEALTHY',
-    name: 'Extended surface set healthy after soak window',
-    description: 'A second post-soak check, broader than SB-END-POST-SOAK-HEALTH: capabilities, resilience posture and security health must all still answer correctly after the soak cases in this suite ran — not just the four basic /health endpoints.',
+    name: 'Extended API surfaces are healthy',
+    description: 'Independently verifies the API capabilities, resilience posture and security health contracts; no soak or other case must run first.',
     suiteKey: 'sb-endurance', testType: 'performance', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'Soak cases in this suite ran first (suite order).',
+    preconditions: 'Sand Bench API is reachable and its security subsystem is configured.',
     steps: [
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/capabilities', expected_status: 200, expect_json: [{ path: 'modules', min_length: 5 }], description: 'capabilities intact' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/resilience', expected_status: 200, expect_json: [{ path: 'posture', exists: true }], description: 'resilience posture intact' },
@@ -1486,7 +1503,7 @@ C.push(
     ],
     tags: ['endurance', 'sand-bench', 'recovery'],
     dataProfile: { profile: 'none (read-only)', data: 'Three GETs, no payload.', source: 'n/a' },
-    expected: 'All three extended surfaces answer correctly after the soak.',
+    expected: 'All three extended API surfaces answer correctly when this case runs by itself.',
   }
 );
 
@@ -1531,12 +1548,12 @@ C.push(
   {
     key: 'SB-RU-TIERS-CONSISTENT',
     name: 'API and web tiers deployed consistently',
-    description: 'Both halves of the deployment must answer at once (API health + web shell) — a torn rolling upgrade leaves one tier down or serving a stale shell.',
+    description: 'Both halves of the deployment must answer at once (API health + web login page) — a torn rolling upgrade leaves one tier down or serving a stale page.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Both containers deployed.',
     steps: [
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, expect_json: [{ path: 'role', equals: 'api' }], description: 'api tier' },
-      { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, expected_body_contains: 'Sand Bench', description: 'web tier' },
+      { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, expected_body_contains: 'Sign in', description: 'web login page' },
     ],
     tags: ['rolling-upgrade', 'sand-bench', 'consistency'],
     dataProfile: { profile: 'none (read-only)', data: 'Two GETs, no payload.', source: 'n/a' },
@@ -2083,7 +2100,7 @@ C.push(
   {
     key: 'SB-PT-ADMIN-PRIVILEGE-ESCALATION-BLOCKED',
     name: 'Any authenticated operator reaches admin routes (roles removed, not a regression)',
-    description: 'RETARGETED 2026-10-02: this case used to assert a non-admin demo operator got 403 from GET /api/v1/admin/users (ASVS V4 role check). Roles/permissions were deliberately removed from the product (apps/api/src/kernel/policy.ts): any active, authenticated session now holds every permission, so the same request correctly answers 200, not 403. The boundary this suite still enforces is authentication itself — see SB-PT-ADMIN-USERS-TOKENLESS for the unauthenticated 401 case, which is unchanged. Kept under sb-pen-auth (not moved to regression) precisely so a future reintroduction of roles is forced to notice and update this assertion rather than silently leaving stale pen-test coverage.',
+    description: 'RETARGETED 2026-10-02: this case used to assert a non-admin demo operator got 403 from GET /api/v1/admin/users (ASVS V4 role check). Roles/permissions were deliberately removed from the product (apps/api/src/kernel/policy.ts): any active, authenticated session now holds every permission, so the same request correctly answers 200, not 403. The boundary this suite still enforces is authentication itself: unauthenticated admin reads must answer 401. Kept under sb-pen-auth (not moved to regression) so a future reintroduction of roles is forced to notice and update this assertion rather than silently leaving stale pen-test coverage.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
     steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 200, description: 'any signed-in operator can read admin users (roles removed)' }],
@@ -2242,7 +2259,7 @@ C.push(
   {
     key: 'SB-ID-NEW-USER-SIGNS-IN',
     name: 'An admin-created user signs in with the password the admin set',
-    description: 'A user created by SB-ID-ADMIN-CREATE-USER\'s pattern (password + security Q&A, no tenant) must be able to sign in immediately with that exact password — the full admin-provisioning round trip, not just a 201 response.',
+    description: 'This case creates an admin-provisioned user with a password and security question, then verifies that user can sign in immediately with the exact password.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo admin identity enabled.',
     steps: [
@@ -2321,7 +2338,7 @@ C.push(
   {
     key: 'SB-PT-PASSWORD-RESET-UNKNOWN-USERNAME-NO-ORACLE',
     name: 'An unknown username on password-reset answers identically to a wrong answer',
-    description: 'ASVS V6 (no enumeration oracle): POST {{api}}/api/v1/session/password-reset for a username that does not exist must return the IDENTICAL 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} envelope as a wrong security answer on a real user (see SB-PT-PASSWORD-RESET-WRONG-ANSWER) — verified live — so a caller can never learn whether an account exists by probing the reset endpoint.',
+    description: 'ASVS V6 (no enumeration oracle): POST {{api}}/api/v1/session/password-reset for a username that does not exist must return the generic 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} envelope, so callers cannot learn whether an account exists by probing the reset endpoint.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
     steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: 'nobody-{{rand}}', securityAnswer: 'anything', newPassword: 'irrelevant-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }], description: 'unknown username on reset' }],
@@ -2366,15 +2383,23 @@ const VIEWPORTS: Record<string, { width: number; height: number; label: string }
 
 function browserCase(browser: 'chromium' | 'firefox' | 'webkit', vp: keyof typeof VIEWPORTS, page: string, mustText: string): CaseDef {
   const v = VIEWPORTS[vp]!;
-  const pageName = page === '/' ? 'console shell' : page;
+  const loginLanding = page === '/index.html';
+  const pageName = loginLanding ? 'portal login' : page === '/' ? 'console shell' : page;
   return {
     key: `SB-CB-${browser.toUpperCase()}-${vp.toUpperCase()}${page === '/help.html' ? '-HELP' : page === '/demo.html' ? '-DEMO' : ''}`,
     name: `${browser} @ ${v.label}: ${pageName} renders without overflow`,
-    description: `Launch real ${browser}, set a ${v.width}×${v.height} viewport, open {{web}}${page}, assert the verified content renders AND the layout does not force horizontal scrolling at this width. One cell of the cross-browser/responsive matrix.`,
+    description: loginLanding
+      ? `Open the portal login page in ${browser} at ${v.width}×${v.height}; verify the sign-in form renders without horizontal overflow.`
+      : `Launch real ${browser}, set a ${v.width}×${v.height} viewport, open {{web}}${page}, assert the verified content renders AND the layout does not force horizontal scrolling at this width. One cell of the cross-browser/responsive matrix.`,
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'playwright', severity: vp === 'mobile' ? 'high' : 'medium', priority: 'p1',
     preconditions: `Worker has the Playwright ${browser} engine installed.`,
     steps: [
       { action: 'navigate', value: `{{web}}${page}`, description: `open ${page}` },
+      ...(loginLanding ? [
+        { action: 'wait_for', selector: '#gate #username', timeout_ms: 10000, description: 'username field visible' },
+        { action: 'wait_for', selector: '#gate #password', timeout_ms: 10000, description: 'password field visible' },
+        { action: 'wait_for', selector: '#gate #login', timeout_ms: 10000, description: 'login button visible' },
+      ] : []),
       { action: 'assert_text', expected: mustText, description: 'content renders' },
       { action: 'assert_no_horizontal_overflow', description: `no sideways scroll at ${v.width}px` },
     ],
@@ -2389,14 +2414,14 @@ function browserCase(browser: 'chromium' | 'firefox' | 'webkit', vp: keyof typeo
 }
 
 C.push(
-  browserCase('chromium', 'desktop', '/index.html', 'Sand Bench'),
-  browserCase('chromium', 'laptop', '/index.html', 'Sand Bench'),
-  browserCase('chromium', 'tablet', '/index.html', 'Sand Bench'),
-  browserCase('chromium', 'mobile', '/index.html', 'Sand Bench'),
-  browserCase('firefox', 'desktop', '/index.html', 'Sand Bench'),
-  browserCase('firefox', 'mobile', '/index.html', 'Sand Bench'),
-  browserCase('webkit', 'desktop', '/index.html', 'Sand Bench'),
-  browserCase('webkit', 'mobile', '/index.html', 'Sand Bench'),
+  browserCase('chromium', 'desktop', '/index.html', 'Sign in'),
+  browserCase('chromium', 'laptop', '/index.html', 'Sign in'),
+  browserCase('chromium', 'tablet', '/index.html', 'Sign in'),
+  browserCase('chromium', 'mobile', '/index.html', 'Sign in'),
+  browserCase('firefox', 'desktop', '/index.html', 'Sign in'),
+  browserCase('firefox', 'mobile', '/index.html', 'Sign in'),
+  browserCase('webkit', 'desktop', '/index.html', 'Sign in'),
+  browserCase('webkit', 'mobile', '/index.html', 'Sign in'),
   browserCase('chromium', 'mobile', '/help.html', 'Help'),
   browserCase('firefox', 'tablet', '/demo.html', 'demo'),
   {
@@ -2434,13 +2459,16 @@ C.push(
   },
   {
     key: 'SB-CB-SELENIUM-WIDE',
-    name: 'Selenium Chrome @ 1920: shell renders',
-    description: 'The Selenium/Chrome half of the matrix: console shell at a 1920×1080 window renders the verified branding. Confirms viewport control works in the Selenium runner too.',
+    name: 'Selenium Chrome @ 1920: portal login renders',
+    description: 'The Selenium/Chrome half of the matrix: the portal login page and its fields render at 1920×1080. Confirms viewport control works in the Selenium runner too.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'selenium', severity: 'medium', priority: 'p2',
     preconditions: 'Chrome + chromedriver on worker.',
     steps: [
-      { action: 'navigate', value: '{{web}}/index.html', description: 'open shell' },
-      { action: 'assert_text', expected: 'Sand Bench', description: 'branding' },
+      { action: 'navigate', value: '{{web}}/index.html', description: 'open portal login page' },
+      { action: 'wait_for', selector: '#gate #username', timeout_ms: 10000, description: 'username field visible' },
+      { action: 'wait_for', selector: '#gate #password', timeout_ms: 10000, description: 'password field visible' },
+      { action: 'wait_for', selector: '#gate #login', timeout_ms: 10000, description: 'login button visible' },
+      { action: 'assert_text', expected: 'Sign in', description: 'login prompt' },
     ],
     validationRules: { viewport: { width: 1920, height: 1080 } },
     timeoutSeconds: 60,
@@ -2450,13 +2478,16 @@ C.push(
   },
   {
     key: 'SB-CB-SELENIUM-NARROW',
-    name: 'Selenium Chrome @ 768: shell renders',
-    description: 'Selenium/Chrome at a narrow 768×1024 window must still render the shell content — the non-Playwright confirmation of narrow-viewport behavior.',
+    name: 'Selenium Chrome @ 768: portal login renders',
+    description: 'Selenium/Chrome at a narrow 768×1024 window must still render the portal login page and its fields — the non-Playwright confirmation of narrow-viewport behavior.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'selenium', severity: 'medium', priority: 'p2',
     preconditions: 'Chrome + chromedriver on worker.',
     steps: [
-      { action: 'navigate', value: '{{web}}/index.html', description: 'open shell' },
-      { action: 'assert_text', expected: 'Sand Bench', description: 'branding' },
+      { action: 'navigate', value: '{{web}}/index.html', description: 'open portal login page' },
+      { action: 'wait_for', selector: '#gate #username', timeout_ms: 10000, description: 'username field visible' },
+      { action: 'wait_for', selector: '#gate #password', timeout_ms: 10000, description: 'password field visible' },
+      { action: 'wait_for', selector: '#gate #login', timeout_ms: 10000, description: 'login button visible' },
+      { action: 'assert_text', expected: 'Sign in', description: 'login prompt' },
     ],
     validationRules: { viewport: { width: 768, height: 1024 } },
     timeoutSeconds: 60,
@@ -2466,10 +2497,10 @@ C.push(
   },
   browserCase('chromium', 'laptop', '/help.html', 'Help'),
   browserCase('chromium', 'tablet', '/demo.html', 'demo'),
-  browserCase('firefox', 'laptop', '/index.html', 'Sand Bench'),
-  browserCase('firefox', 'tablet', '/index.html', 'Sand Bench'),
+  browserCase('firefox', 'laptop', '/index.html', 'Sign in'),
+  browserCase('firefox', 'tablet', '/index.html', 'Sign in'),
   browserCase('firefox', 'mobile', '/help.html', 'Help'),
-  browserCase('webkit', 'tablet', '/index.html', 'Sand Bench'),
+  browserCase('webkit', 'tablet', '/index.html', 'Sign in'),
   browserCase('webkit', 'laptop', '/demo.html', 'demo'),
   browserCase('webkit', 'mobile', '/help.html', 'Help'),
   browserCase('firefox', 'desktop', '/demo.html', 'demo'),

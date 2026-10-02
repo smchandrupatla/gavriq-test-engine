@@ -85,6 +85,39 @@ export async function apiJson<T = unknown>(path: string, init: RequestInit = {})
   return { status: res.status, body };
 }
 
+/** Run case teardown after any outcome and preserve both assertion and teardown failures. */
+export async function withCaseCleanup<T>(action: () => Promise<T>, cleanup: () => Promise<void>): Promise<T> {
+  let value: T | undefined;
+  let actionError: unknown;
+  try {
+    value = await action();
+  } catch (error) {
+    actionError = error;
+  }
+
+  let cleanupError: unknown;
+  try {
+    await cleanup();
+  } catch (error) {
+    cleanupError = error;
+  }
+
+  if (actionError && cleanupError) {
+    throw new AggregateError([actionError, cleanupError], 'Test action failed and its cleanup also failed');
+  }
+  if (actionError) throw actionError;
+  if (cleanupError) throw cleanupError;
+  return value as T;
+}
+
+/** Keep a test-owned completed run out of the shared baseline. */
+export async function withTestRunCleanup<T>(runId: string, action: () => Promise<T>): Promise<T> {
+  return withCaseCleanup(action, async () => {
+    const deleted = await apiJson<{ error?: string }>(`/api/v1/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
+    if (deleted.status !== 200 && deleted.status !== 404) throw new Error(`DELETE test run ${runId} returned ${deleted.status}: ${JSON.stringify(deleted.body)}`);
+  });
+}
+
 export async function testhubJson<T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   const res = await fetch(`${ENV.testhubBase}${path}`, {
     ...init,

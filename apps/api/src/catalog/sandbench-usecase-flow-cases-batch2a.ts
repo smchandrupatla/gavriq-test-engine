@@ -23,6 +23,34 @@ const API_LOGIN = {
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 
+const createScheduleTargetSuite = {
+  action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER,
+  body: { name: 'TE-UC-SCH-TARGET-{{ts}}' }, expected_status: 200,
+  expect_json: [{ path: 'id', exists: true }], save: { schedule_suite_id: 'id', schedule_suite_etag: 'etag' },
+  description: 'create this case\'s temporary schedule target suite',
+};
+
+function cleanupSchedule(id: string) {
+  return [
+    { action: 'request', method: 'GET', url: `{{api}}/api/v1/schedules/{{${id}}}`, headers: BEARER, expected_status: 200, save: { [`${id}_etag`]: 'etag' }, description: `get current ETag for ${id}` },
+    { action: 'request', method: 'DELETE', url: `{{api}}/api/v1/schedules/{{${id}}}`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${id}_etag}}` }, expected_status: 200, description: `delete case-owned schedule ${id}` },
+  ];
+}
+
+const cleanupScheduleTargetSuite = {
+  action: 'request', method: 'DELETE', url: '{{api}}/api/v1/test-suites/{{schedule_suite_id}}',
+  headers: { authorization: 'Bearer {{token}}', 'if-match': '{{schedule_suite_etag}}' },
+  expected_status: 200, description: 'delete this case\'s temporary schedule target suite',
+};
+
+function cleanupRule(id: string) {
+  const etag = `${id}_cleanup_etag`;
+  return [
+    { action: 'request', method: 'GET', url: `{{api}}/api/v1/rules/{{${id}}}`, headers: BEARER, expected_status: 200, save: { [etag]: 'data.etag' }, description: `get current ETag for ${id}` },
+    { action: 'request', method: 'POST', url: `{{api}}/api/v1/rules/{{${id}}}/transitions`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, body: { transition: 'deprecate', reason: 'test case cleanup' }, expected_status: 200, expect_json: [{ path: 'status', equals: 'deprecated' }], description: `deprecate case-owned rule ${id}` },
+  ];
+}
+
 const C: CaseDef[] = [];
 
 /* ------------------------------------------------------------------------ */
@@ -35,15 +63,16 @@ C.push(
     name: 'UC-schNew main flow: New schedule',
     description: 'Main flow of UC-schNew (New schedule): operator names a schedule, picks cadence "daily" against a real test-suite target, creates it, and the API returns an identity with a calculated next_run_at. Touches POST /api/v1/schedules.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one test suite exists as a schedule target.',
+    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/schedules-new.html', expected_status: 200, expected_body_contains: 'data-sbe-page="schNew"', description: 'load screen' },
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { target_suite_id: 'data.0.id' }, description: 'pick a real target suite' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }, { path: 'next_run_at', exists: true }, { path: 'cadence', equals: 'daily' }], description: 'create schedule' },
+      createScheduleTargetSuite,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }, { path: 'next_run_at', exists: true }, { path: 'cadence', equals: 'daily' }], save: { schedule_id: 'id' }, description: 'create schedule' },
     ],
+    cleanupSteps: [...cleanupSchedule('schedule_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'main-flow', 'schNew'],
-    dataProfile: { profile: 'synthetic-named', data: 'One schedule named TE-UC-SCH-{{ts}} targeting a real existing test suite, cadence daily.', source: 'Generated per run; never deleted (schedules have no delete endpoint in this API), so names are kept unique to avoid collisions.' },
+    dataProfile: { profile: 'synthetic-named', data: 'One case-owned temporary suite and one schedule targeting it; both are deleted after the case.' , source: 'Created by this case with unique per-run names and removed in cleanup.' },
     expected: '201 with id, cadence="daily" and a calculated next_run_at.',
   },
   {
@@ -51,14 +80,15 @@ C.push(
     name: 'UC-schNew alt flow 1: Different supported cadence values produce their defined next occurrence.',
     description: 'Alternate flow 1 of UC-schNew (New schedule): "Different supported cadence values produce their defined next occurrence." Creates one schedule per supported cadence (once/hourly/weekly) and confirms each gets its own next_run_at.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one test suite exists.',
+    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites', headers: BEARER, expected_status: 200, save: { target_suite_id: 'data.0.id' }, description: 'pick a real target suite' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-ONCE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], description: 'cadence=once' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-HOURLY-{{ts}}', cadence: 'hourly', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], description: 'cadence=hourly' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-WEEKLY-{{ts}}', cadence: 'weekly', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], description: 'cadence=weekly' },
+      createScheduleTargetSuite,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-ONCE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], save: { schedule_once_id: 'id' }, description: 'cadence=once' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-HOURLY-{{ts}}', cadence: 'hourly', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], save: { schedule_hourly_id: 'id' }, description: 'cadence=hourly' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-WEEKLY-{{ts}}', cadence: 'weekly', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'next_run_at', exists: true }], save: { schedule_weekly_id: 'id' }, description: 'cadence=weekly' },
     ],
+    cleanupSteps: [...cleanupSchedule('schedule_once_id'), ...cleanupSchedule('schedule_hourly_id'), ...cleanupSchedule('schedule_weekly_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'Three schedules, one per cadence, all uniquely named TE-UC-SCH-*-{{ts}}.', source: 'Generated per run.' },
     expected: 'All three cadences are accepted, each with its own next_run_at.',
@@ -68,12 +98,13 @@ C.push(
     name: 'UC-schNew alt flow 2: The proposed run-template linkage requires a separately confirmed payload.',
     description: 'Alternate flow 2 of UC-schNew (New schedule): "The proposed run-template linkage requires a separately confirmed payload." Closest executable proxy: a schedule created WITHOUT a channel/connectionId still succeeds (those are genuinely optional, not silently defaulted into an unconfirmed run template).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one test suite exists.',
+    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites', headers: BEARER, expected_status: 200, save: { target_suite_id: 'data.0.id' }, description: 'pick a real target suite' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-NOCHAN-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'channel', exists: false }, { path: 'id', exists: true }], description: 'create without channel' },
+      createScheduleTargetSuite,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-NOCHAN-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'channel', exists: false }, { path: 'id', exists: true }], save: { schedule_no_channel_id: 'id' }, description: 'create without channel' },
     ],
+    cleanupSteps: [...cleanupSchedule('schedule_no_channel_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'One schedule with no channel/connectionId supplied.', source: 'Generated per run.' },
     expected: 'Schedule is created; channel stays null/absent rather than being silently invented.',
@@ -97,13 +128,14 @@ C.push(
     name: 'UC-schNew exc flow 2: A sch_local fallback is not evidence that a scheduler will execute a durable record.',
     description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id — proving it is a real persisted row, not a client-side-only fallback id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one test suite exists.',
+    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites', headers: BEARER, expected_status: 200, save: { target_suite_id: 'data.0.id' }, description: 'pick a real target suite' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-DURABLE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{target_suite_id}}' }, expected_status: 201, save: { new_sch_id: 'id' }, description: 'create schedule' },
+      createScheduleTargetSuite,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-DURABLE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, save: { new_sch_id: 'id' }, description: 'create schedule' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/schedules/{{new_sch_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{new_sch_id}}' }], description: 'read it back by id' },
     ],
+    cleanupSteps: [...cleanupSchedule('new_sch_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'One uniquely named schedule, read back by its returned id.', source: 'Generated per run.' },
     expected: 'The created id is independently readable — a real persisted row, not a local-only id.',
@@ -124,8 +156,9 @@ C.push(
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-create.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchCreate"', description: 'load screen' },
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }, { path: 'status', equals: 'in_review' }, { path: 'name', equals: 'TE-UC-RULE-{{ts}}' }], description: 'create rule' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }, { path: 'status', equals: 'in_review' }, { path: 'name', equals: 'TE-UC-RULE-{{ts}}' }], save: { rule_id: 'id' }, description: 'create rule' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'ruleBenchCreate'],
     dataProfile: { profile: 'synthetic-named', data: 'One rule named TE-UC-RULE-{{ts}}, category fraud, condition amount_gte(instdAmt, 10000).', source: 'Generated per run; left in place (no delete endpoint for rules in this API).' },
     expected: '201 with id, status "in_review" and the exact name supplied.',
@@ -139,8 +172,9 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-RETRY-{{ts}}', category: 'not-a-real-category', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'rejected: bad category' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-RETRY-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], description: 'resubmit with corrected category' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-RETRY-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { rule_id: 'id' }, description: 'resubmit with corrected category' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchCreate'],
     dataProfile: { profile: 'synthetic-named', data: 'One rejected attempt, one corrected resubmission, same name.', source: 'Generated per run.' },
     expected: 'First call 422; corrected resubmission 201 with a real id.',
@@ -183,6 +217,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-A-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 5000 } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { rule_a_id: 'id' }, description: 'first independent create' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-B-{{ts}}', category: 'aml', severity: 'high', condition: { kind: 'country_in', field: 'cdtrCtry', values: ['KP'] } }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { rule_b_id: 'id' }, description: 'second independent create' },
     ],
+    cleanupSteps: [...cleanupRule('rule_a_id'), ...cleanupRule('rule_b_id')],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchCreate'],
     dataProfile: { profile: 'synthetic-named', data: 'Two independently-named rules, each expected to carry its own distinct id.', source: 'Generated per run.' },
     expected: 'Both creates succeed with distinct ids; neither is treated as a retry of the other.',
@@ -206,6 +241,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-STAGE-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, save: { rule_id: 'id', rule_etag: 'etag' }, description: 'create a rule to stage' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/stage', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{rule_etag}}' }, expected_status: 200, expect_json: [{ path: 'status', equals: 'staged' }], description: 'stage it' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'ruleBenchStage'],
     dataProfile: { profile: 'synthetic-named', data: 'One rule we create, then stage.', source: 'Generated per run.' },
     expected: '200 with status "staged".',
@@ -234,6 +270,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-TRANS-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, save: { rule_id: 'id', rule_etag: 'etag' }, description: 'create a rule' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/transitions', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{rule_etag}}' }, body: { transition: 'stage', environment: 'lab' }, expected_status: 200, expect_json: [{ path: 'status', equals: 'staged' }], description: 'transition via the general endpoint' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchStage'],
     dataProfile: { profile: 'synthetic-named', data: 'One rule we create, then transition via the general endpoint.', source: 'Generated per run.' },
     expected: '200 with status "staged", called via /transitions with an explicit If-Match.',
@@ -249,6 +286,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-STALE-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/stage', headers: { authorization: 'Bearer {{token}}', 'if-match': '"deliberately-stale-etag"' }, expected_status: 412, description: 'stale If-Match is rejected' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchStage'],
     dataProfile: { profile: 'negative', data: 'A real rule, staged with a fabricated If-Match value.', source: 'Generated per run.' },
     expected: '412 precondition failure; the rule is not staged.',
@@ -264,6 +302,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-UNKTR-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, save: { rule_id: 'id', rule_etag: 'etag' }, description: 'create a rule' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/transitions', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{rule_etag}}' }, body: { transition: 'bogus-transition' }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'unknown transition rejected' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchStage'],
     dataProfile: { profile: 'negative', data: 'A real rule, transitioned with a nonexistent transition name.', source: 'Generated per run.' },
     expected: '422 validation_failed; the rule remains in_review, never claimed staged.',
@@ -287,6 +326,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-VAL-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule that matches almost everything' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20, seed: 'TE-UC-VAL-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'result', exists: true }, { path: 'passRate', exists: true }], description: 'validate against generated data' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'ruleBenchValidate'],
     dataProfile: { profile: 'synthetic-generated', data: '20 generated pain.001.001.09 messages evaluated against a near-always-true amount_gte(instdAmt, 1) rule.', source: 'Generated per run via the same generator the API uses internally.' },
     expected: '200 with a validation result and coverage percentage.',
@@ -303,6 +343,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 10, seed: 'TE-UC-REPEATABLE-SEED' }, expected_status: 200, expect_json: [{ path: 'passRate', exists: true }], save: { coverage_1: 'passRate' }, description: 'first run' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 10, seed: 'TE-UC-REPEATABLE-SEED' }, expected_status: 200, expect_json: [{ path: 'passRate', equals: '{{coverage_1}}' }], description: 'second run, same seed' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchValidate'],
     dataProfile: { profile: 'synthetic-generated', data: 'Two validate calls with the identical seed against the same unchanged rule.', source: 'Generated per run.' },
     expected: 'Both runs report the same coverage.',
@@ -319,6 +360,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-NORUN-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 5 }, expected_status: 200, description: 'validate (not a run)' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchValidate'],
     dataProfile: { profile: 'synthetic-generated', data: 'One rule validation; no run is expected to be created by it.', source: 'Generated per run.' },
     expected: 'Validate succeeds via the rule endpoint, distinct from the runs collection.',
@@ -334,6 +376,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-NOHIT-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 999999999 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule that can never match' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20 }, expected_status: 200, expect_json: [{ path: 'result', matches: '^(warning|failed)$' }], description: 'validate a never-matching rule' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchValidate'],
     dataProfile: { profile: 'synthetic-generated', data: '20 generated messages against a rule designed to never trigger.', source: 'Generated per run.' },
     expected: 'Result is reported honestly (warning/zero-hit), never fabricated as "passed".',
@@ -349,6 +392,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-BADTYPE-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'not.a.real.type', count: 5 }, expected_status: [404, 400, 422], description: 'validate against an unknown message type' },
     ],
+    cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchValidate'],
     dataProfile: { profile: 'negative', data: 'An unknown messageTypeCode.', source: 'n/a' },
     expected: 'A clean error status; never a 200 claiming a validation result.',

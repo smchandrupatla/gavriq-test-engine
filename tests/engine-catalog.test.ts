@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from '../apps/api/src/catalog/engine-cases.ts';
+import { SANDBENCH_CASES } from '../apps/api/src/catalog/sandbench-cases.ts';
 import { ARTEFACT, FIXTURES, ISOLATED } from '../apps/api/src/catalog/engine-case-kit.ts';
 import { TYPE_TO_ENUM } from '../apps/api/src/catalog/types.ts';
 
@@ -11,6 +12,37 @@ const suiteOf = new Map(ENGINE_SUITES.map((s) => [s.key, s]));
 const typeKeys = ENGINE_TYPES.map((t) => t.key.toLowerCase());
 
 describe('Test Engine self-test catalogue', () => {
+  it('keeps catalog cases independent of suite order and other cases', () => {
+    for (const testCase of [...ENGINE_CASES, ...SANDBENCH_CASES]) {
+      const contract = `${testCase.description}\n${testCase.preconditions}`;
+      assert.doesNotMatch(
+        contract,
+        /suite order|ran first|must run before|depends on (?:another|a preceding|the previous) case|runs after .*cases? in this suite/i,
+        `${testCase.key}: declares a cross-case or suite-order dependency`
+      );
+    }
+  });
+
+  it('cancels every execution a case can queue', () => {
+    const queueUrl = /\/api\/v1\/(?:executions(?:\?|$)|runs(?:\?|$)|schedules\/[^/]+\/run(?:\?|$)|schedules\/trigger(?:\?|$))/;
+    for (const testCase of ENGINE_CASES) {
+      const steps = stepsOf(testCase);
+      const executionIds = new Set<string>();
+      for (const step of steps) {
+        if (step.action !== 'request' || String(step.method || 'GET').toUpperCase() !== 'POST' || !queueUrl.test(String(step.url || ''))) continue;
+        for (const [name, path] of Object.entries(step.save || {})) {
+          if (name !== 'result_id' && typeof path === 'string' && /(?:^|\.)id$/.test(path)) executionIds.add(name);
+        }
+      }
+      for (const id of executionIds) {
+        assert.ok(
+          (testCase.cleanupSteps || []).some((step: Step) => step.url === `{{engine}}/api/v1/executions/{{${id}}}/cancel`),
+          `${testCase.key}: execution ${id} has no cleanup step`,
+        );
+      }
+    }
+  });
+
   it('gives every test type a suite and at least one case', () => {
     for (const type of ENGINE_TYPES) {
       const suites = ENGINE_SUITES.filter((s) => s.typeKey === type.key);

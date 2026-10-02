@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
 
 const pages = [
-  { path: "/index.html", must: /Sand Bench|ops-console|preview-loader/ },
+  { path: "/index.html", must: /Sign in|login/i },
   { path: "/help.html", must: /Help|GARVIQ|Sand Bench/ },
   { path: "/demo.html", must: /N-2|demo|sben/i },
   { path: "/not-production.html", must: /not production|Testhub|simulator/i },

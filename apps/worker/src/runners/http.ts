@@ -60,6 +60,8 @@ export interface HttpStep {
     not_contains?: string;
   }>;
   save?: Record<string, string>;
+  /** Cleanup-only: skip this operation when one of these case variables was never captured. */
+  skip_if_missing?: string[];
   poll?: { timeout_ms?: number; interval_ms?: number };
   allow_failure?: boolean;
   precondition?: boolean;
@@ -70,6 +72,9 @@ export interface HttpRunInput {
   baseUrl: string;
   script?: string;
   steps?: HttpStep[];
+  /** Case-owned HTTP cleanup, always attempted after the main steps. */
+  cleanupSteps?: HttpStep[];
+  cleanupTimeoutSeconds?: number;
   timeoutSeconds?: number;
   vars?: Record<string, string>;
   /** Aborts the in-flight request and stops before the next step (e.g. the engine's per-test-type timeout, or a run cancel). */
@@ -215,7 +220,17 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
   const trace: Trace = { exchanges: [], vars: {} };
   const result = await execute(input, trace);
   // A request that never got its response (refused, timed out) is evidence too.
-  if (trace.current) trace.exchanges.push({ ...trace.current, outcome: 'failed', error: result.message });
+  if (trace.current) {
+    trace.exchanges.push({ ...trace.current, outcome: 'failed', error: result.message });
+    trace.current = undefined;
+  }
+
+  const cleanupFailures = await executeCleanup(input, trace);
+  if (cleanupFailures.length) {
+    if (result.status === 'passed' || result.status === 'skipped') result.status = 'failed';
+    result.classification ||= 'cleanup_failure';
+    result.message = `${result.message}; cleanup failed: ${cleanupFailures.join('; ')}`.slice(0, 900);
+  }
 
   const secrets = secretValues(trace.vars);
   const item = writeJsonEvidence('http_transcript', 'http', {
@@ -240,6 +255,101 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
     })),
   });
   return { ...result, evidence: item ? [item] : [] };
+}
+
+async function executeCleanup(input: HttpRunInput, trace: Trace): Promise<string[]> {
+  const steps = input.cleanupSteps || [];
+  if (!steps.length) return [];
+
+  const errors: string[] = [];
+  const timeoutMs = Math.max(1000, (input.cleanupTimeoutSeconds || 30) * 1000);
+  const deadline = Date.now() + timeoutMs;
+  const base = input.baseUrl.replace(/\/$/, '');
+
+  for (const [idx, step] of steps.entries()) {
+    const method = (step.method || 'GET').toUpperCase();
+    const rawUrl = step.url
+      ? substitute(step.url, trace.vars)
+      : `${base}${substitute(step.path || '/', trace.vars)}`;
+    const description = step.description || `cleanup ${method} ${rawUrl}`;
+    if (step.action !== 'request') {
+      errors.push(`step ${idx + 1}: unknown cleanup action ${step.action}`);
+      continue;
+    }
+    const missing = (step.skip_if_missing || []).filter((name) => trace.vars[name] === undefined);
+    if (missing.length) {
+      trace.exchanges.push({
+        step: (input.steps?.length || 0) + idx + 1,
+        description,
+        request: { method, url: rawUrl },
+        outcome: 'tolerated',
+        failure: `cleanup skipped; variables not captured: ${missing.join(', ')}`,
+      });
+      continue;
+    }
+    if (/\{\{\s*[\w.-]+\s*\}\}/.test(rawUrl)) {
+      trace.exchanges.push({
+        step: (input.steps?.length || 0) + idx + 1,
+        description,
+        request: { method, url: rawUrl },
+        outcome: 'tolerated',
+        failure: 'cleanup skipped because a case-owned resource was not created',
+      });
+      continue;
+    }
+
+    const body = step.body_raw !== undefined
+      ? step.body_raw
+      : step.body !== undefined
+        ? JSON.stringify(substituteDeep(step.body, trace.vars))
+        : undefined;
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    for (const [key, value] of Object.entries(step.headers || {})) headers[key.toLowerCase()] = substitute(value, trace.vars);
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      errors.push(`step ${idx + 1} (${description}): cleanup time budget exhausted`);
+      continue;
+    }
+
+    const request = { method, url: rawUrl, headers, body };
+    trace.current = { step: (input.steps?.length || 0) + idx + 1, description, request };
+    const started = Date.now();
+    try {
+      const response = await fetch(rawUrl, {
+        method,
+        headers,
+        body,
+        signal: AbortSignal.timeout(Math.min(10000, remainingMs)),
+      });
+      const text = await response.text();
+      let json: unknown;
+      try { json = JSON.parse(text); } catch { /* non-JSON body */ }
+      const failure = checkExpectations(step, response.status, text, json, response.headers, trace.vars);
+      trace.exchanges.push({
+        ...trace.current,
+        response: { status: response.status, headers: Object.fromEntries(response.headers.entries()), body: text, latency_ms: Date.now() - started },
+        attempts: 1,
+        outcome: failure ? 'failed' : 'passed',
+        failure: failure || undefined,
+      });
+      if (failure) errors.push(`step ${idx + 1} (${description}): ${failure}`);
+      else {
+        for (const [name, jsonPath] of Object.entries(step.save || {})) {
+          const captured = getPath(json, jsonPath);
+          if (captured !== undefined) trace.vars[name] = String(captured);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      trace.exchanges.push({ ...trace.current, outcome: 'failed', error: message });
+      errors.push(`step ${idx + 1} (${description}): ${message}`);
+    } finally {
+      trace.current = undefined;
+    }
+  }
+
+  return errors;
 }
 
 async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult> {
@@ -389,6 +499,14 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
         message: results.join('; ').slice(0, 900),
         duration_ms: Date.now() - start,
         metrics: { latency_ms: lastLatency, status_code: lastStatus, steps: input.steps.length },
+      };
+    }
+
+    if (input.cleanupSteps?.length) {
+      return {
+        status: 'passed',
+        message: 'cleanup-only run',
+        duration_ms: Date.now() - start,
       };
     }
 

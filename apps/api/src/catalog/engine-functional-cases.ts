@@ -10,7 +10,7 @@
  */
 import type { CaseDef } from './types.js';
 import {
-  ARCHIVE, ARTEFACT, DELETE, FIX, FIXTURE_APP, FIXTURE_ENV, FIXTURES, GET, GHOST_WORKER, ISO, ISOLATED, ISOLATED_DATA, PATCH, POST, PRE, PUT,
+  ARCHIVE, ARCHIVE_CLEANUP, ARTEFACT, DELETE, FIX, FIXTURE_APP, FIXTURE_ENV, FIXTURES, GET, GHOST_WORKER, ISO, ISOLATED, ISOLATED_DATA, PATCH, POST, PRE, PUT,
   QUEUE_AND_CLAIM, RUN_ONE_PASS, SANDBOX_DATA, UNIQ, UPLOAD, UUID, complete, result, suiteFactory, type Step,
 } from './engine-case-kit.js';
 
@@ -418,6 +418,7 @@ C.push(
       GET(`/api/v1/test-cases/${TMP_CASE}`, { expect_json: [{ path: 'data.versions', min_length: 2 }, { path: 'data.versions.0.version', equals: 2 }, { path: 'data.versions.0.change_summary', equals: 'self-test update' }], description: 'second version snapshot, read by key' }),
       PUT('/api/v1/test-cases/{{tmp_id}}', { body: { lifecycle: 'archived', change_summary: 'self-test cleanup', updated_by: 'engine-self-test' }, expect_json: [{ path: 'data.lifecycle', equals: 'archived' }, { path: 'data.version', equals: 3 }], description: 'archive' }),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{tmp_id}}')],
     dataProfile: SANDBOX_DATA('One temporary case (key TE-TMP-<run>), archived at the end.'),
     expected: 'Version 1 → 2 → 3 with a snapshot per change; final lifecycle archived.',
   }),
@@ -431,6 +432,7 @@ C.push(
       POST('/api/v1/test-cases/TE-NO-SUCH-CASE/clone', { body: {}, expected_status: 404, description: 'cloning an unknown case' }),
       ARCHIVE('{{clone_id}}', 'archive the clone'),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{clone_id}}', 'archive the clone even after an earlier failure')],
     dataProfile: SANDBOX_DATA('One clone of TE-FIX-MANUAL (key TE-TMP-CLONE-<run>), archived at the end.'),
     expected: '201 draft clone; source stays active.',
   }),
@@ -444,6 +446,7 @@ C.push(
       POST('/api/v1/test-cases', { body: { key: `TE-TMP-N2-${UNIQ}`, name: `Self-test duplicate name ${UNIQ}`, application_id: '{{fix_app}}' }, expected_status: 201, expect_json: [{ path: 'data.name', matches: ' \\(\\d{8}-\\d{6}\\)$' }], save: { n2: 'data.id' }, description: 'second case gets a suffix' }),
       ARCHIVE('{{n1}}'), ARCHIVE('{{n2}}'),
     ],
+    cleanupSteps: [ARCHIVE_CLEANUP('{{n1}}'), ARCHIVE_CLEANUP('{{n2}}')],
     dataProfile: SANDBOX_DATA('Two temporary cases sharing one name, archived at the end.'),
     expected: 'Second name ends with " (YYYYMMDD-HHMMSS)".',
   }),
@@ -472,6 +475,7 @@ C.push(
       POST('/api/v1/suites', { body: { name: 'no key' }, expected_status: 400, description: 'suite without key is refused' }),
       DELETE('/api/v1/suites/{{suite_id}}', { body: {}, expected_status: 200, allow_failure: true, description: 'remove the temporary suite' }),
     ],
+    cleanupSteps: [DELETE('/api/v1/suites/{{suite_id}}', { body: {}, expected_status: [200, 404], description: 'ensure the temporary suite is removed' })],
     dataProfile: SANDBOX_DATA('One temporary suite (key te-tmp-suite-<run>) holding two fixture cases; deleted at the end.'),
     expected: 'Suite created, two members added and visible, suite removed.',
   }),
@@ -612,6 +616,7 @@ C.push(
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 204, description: 'delete' }),
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 404, expect_json: [{ path: 'error', equals: 'Schedule not found' }], description: 'delete again' }),
     ],
+    cleanupSteps: [DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: [204, 404], description: 'ensure the temporary schedule is removed' })],
     dataProfile: SANDBOX_DATA('One disabled schedule (name selftest-schedule-<run>), deleted at the end. It never fires.'),
     expected: '201 → listed → edited → 204 → 404.',
   }),
@@ -628,6 +633,10 @@ C.push(
       GET('/api/v1/runs/{{run_id}}', { expect_json: [{ path: 'data.state', equals: 'cancelled' }, { path: 'data.verdict', exists: false }], description: 'a cancelled run has no verdict' }),
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 204, description: 'delete the schedule' }),
     ],
+    cleanupSteps: [
+      DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: [204, 404], description: 'ensure the event schedule is removed' }),
+      POST('/api/v1/executions/{{exec_id}}/cancel', { body: {}, expected_status: [200, 404], description: 'ensure the event execution is cancelled' }),
+    ],
     dataProfile: SANDBOX_DATA('One event-bound schedule and the one execution its event queues; execution cancelled, schedule deleted.'),
     expected: 'One run started by the event, then cancelled with no verdict.',
   }),
@@ -642,6 +651,10 @@ C.push(
       GET('/api/v1/executions?status=queued', { expect_json: [{ path: 'data', contains: `"schedule_name":"selftest-daemon-${UNIQ}"` }, { path: 'data.0.trigger_source', equals: 'schedule' }], poll: { timeout_ms: 100000, interval_ms: 3000 }, save: { exec_id: 'data.0.id' }, description: 'the daemon queues it within its poll interval' }),
       DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: 204, description: 'delete the schedule' }),
       POST('/api/v1/executions/{{exec_id}}/cancel', { body: {}, expect_json: [{ path: 'data.status', equals: 'cancelled' }], description: 'cancel the queued execution' }),
+    ],
+    cleanupSteps: [
+      POST('/api/v1/executions/{{exec_id}}/cancel', { body: {}, expected_status: [200, 404], description: 'ensure the daemon execution is cancelled' }),
+      DELETE('/api/v1/schedules/{{sched_id}}', { body: {}, expected_status: [204, 404], description: 'ensure the daemon schedule is removed' }),
     ],
     dataProfile: SANDBOX_DATA('One interval schedule and the one execution the daemon queues from it; both removed.'),
     expected: 'A queued execution named after the schedule appears within 100 seconds.',
@@ -665,10 +678,13 @@ C.push(
     description: 'Patch one variable of the fixture environment, then a second one: the first must still be there, along with the application scope and every safety-policy entry. A caller can change one value without resending the whole configuration. Probed 2026-09-30: a patch of config.vars replaces the whole variable set (the second patch drops the first marker) — this case stays red until the merge is fixed. It resends the engine variable on every patch so the fixture environment is not damaged meanwhile.',
     steps: [
       ...FIXTURES,
-      GET(`/api/v1/environments/${FIXTURE_ENV}`, { precondition: true, expect_json: [{ path: 'data.config.vars.engine', matches: '^https?://' }], save: { orig_engine: 'data.config.vars.engine' }, description: 'fixture environment still has its engine variable' }),
+      GET(`/api/v1/environments/${FIXTURE_ENV}`, { precondition: true, expect_json: [{ path: 'data.config.vars.engine', matches: '^https?://' }, { path: 'data.safety_policy.stress', equals: 'approval_required' }], save: { orig_engine: 'data.config.vars.engine' }, description: 'fixture environment has its baseline engine URL and stress policy' }),
       PATCH(`/api/v1/environments/${FIXTURE_ENV}`, { body: { config: { vars: { engine: '{{orig_engine}}', selftest_first: UNIQ } }, safety_policy: { stress: 'approval_required' }, updated_by: 'engine-self-test' }, expect_json: [{ path: 'data.config.vars.selftest_first', equals: UNIQ }, { path: 'data.config.applications', contains: FIXTURE_APP }, { path: 'data.safety_policy.chaos', equals: 'prohibited' }, { path: 'data.safety_policy.functional_smoke', equals: 'allowed' }, { path: 'data.updated_by', equals: 'engine-self-test' }], description: 'patch a first variable; scope and policy survive' }),
       PATCH(`/api/v1/environments/${FIXTURE_ENV}`, { body: { config: { vars: { engine: '{{orig_engine}}', selftest_second: UNIQ } } }, expect_json: [{ path: 'data.config.vars.selftest_second', equals: UNIQ }, { path: 'data.config.vars.selftest_first', equals: UNIQ }], description: 'patch a second variable; the first survives' }),
       PATCH('/api/v1/environments/no-such-environment', { body: { name: 'x' }, expected_status: 404, description: 'patching an unknown environment' }),
+    ],
+    cleanupSteps: [
+      PATCH(`/api/v1/environments/${FIXTURE_ENV}`, { body: { config: { vars: { selftest_first: null, selftest_second: null } }, safety_policy: { stress: 'approval_required' }, updated_by: 'engine-self-test-cleanup' }, expected_status: 200, expect_json: [{ path: 'data.config.vars.engine', equals: '{{orig_engine}}' }, { path: 'data.config.vars.selftest_first', exists: false }, { path: 'data.config.vars.selftest_second', exists: false }, { path: 'data.safety_policy.stress', equals: 'approval_required' }], description: 'restore fixture environment baseline' }),
     ],
     tags: ['known-defect'],
     dataProfile: SANDBOX_DATA('Two marker variables on the fixture environment, overwritten each run.'),
@@ -687,7 +703,12 @@ C.push(
       POST('/api/v1/ai-proposals/{{p2}}/review', { body: { action: 'reject', reviewer: 'engine-self-test' }, expect_json: [{ path: 'data.status', equals: 'rejected' }], description: 'reject 3' }),
       GET('/api/v1/ai-proposals?status=rejected', { expect_json: [{ path: 'data', contains: '"id":"{{p0}}"' }], description: 'listed as rejected' }),
     ],
-    dataProfile: SANDBOX_DATA('Three generated proposals, all rejected in the same case.'),
+    cleanupSteps: [
+      POST('/api/v1/ai-proposals/{{p0}}/review', { body: { action: 'reject', reviewer: 'engine-self-test-cleanup' }, expect_json: [{ path: 'data.status', equals: 'rejected' }], description: 'ensure proposal 1 is rejected' }),
+      POST('/api/v1/ai-proposals/{{p1}}/review', { body: { action: 'reject', reviewer: 'engine-self-test-cleanup' }, expect_json: [{ path: 'data.status', equals: 'rejected' }], description: 'ensure proposal 2 is rejected' }),
+      POST('/api/v1/ai-proposals/{{p2}}/review', { body: { action: 'reject', reviewer: 'engine-self-test-cleanup' }, expect_json: [{ path: 'data.status', equals: 'rejected' }], description: 'ensure proposal 3 is rejected' }),
+    ],
+    dataProfile: SANDBOX_DATA('Three generated proposals, all rejected in the same case; the API has no proposal-delete route, so rejected audit rows remain stored.'),
     expected: 'Three proposals created and rejected.',
   })
 );

@@ -92,6 +92,13 @@ function caseSection(c) {
     lines.push(`**Execution.** Performance runner: ${rules.requests ?? 20} requests at concurrency ${rules.concurrency ?? 5} against \`${rules.url || rules.path || '/'}\`, SLA ${JSON.stringify(rules.sla || {})}.`);
     lines.push('');
   }
+  const cleanupSteps = Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : [];
+  if (cleanupSteps.length) {
+    lines.push('**Cleanup (always attempted).**');
+    lines.push('');
+    cleanupSteps.forEach((s, i) => lines.push(`   ${stepLine(s, i + 1)}`));
+    lines.push('');
+  }
   if (dp) {
     lines.push(`**Data used.** ${dp.data}`);
     lines.push('');

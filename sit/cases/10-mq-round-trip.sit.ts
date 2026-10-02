@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson } from "../lib/client.ts";
+import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson, withTestRunCleanup } from "../lib/client.ts";
 
 type InboundEvent = { id: string; channel: string; systemId: string; payload: Record<string, unknown> };
 type TesthubInboxRow = { at: string; channel: string; queue: string | null; payload: Record<string, unknown> };
@@ -42,12 +42,14 @@ test("application sends a message to the MQ manager and delivery is confirmed th
   const before = await testhubJson<{ total: number }>("/hub/inbox?channel=mq");
 
   const run = await apiJson<{
+    runId: string;
     accepted: boolean;
     delivery: { sent: number; simulated: number; blocked: number; failed: number; results: Array<{ channel: string; status: string }> };
   }>("/api/v1/runs", {
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "mq", seed: correlationId("seed") }),
   });
+  await withTestRunCleanup(run.body.runId, async () => {
   assert.equal(run.status, 202, "run request was rejected");
   assert.equal(run.body.delivery.blocked, 0, "generated message failed schema validation and was never dispatched");
   assert.equal(run.body.delivery.failed, 0, "MQ adapter reported a failed send");
@@ -69,4 +71,5 @@ test("application sends a message to the MQ manager and delivery is confirmed th
   const latest = after.body.data[after.body.data.length - 1];
   assert.equal(latest?.channel, "mq");
   assert.ok(latest?.payload && Object.keys(latest.payload).length > 0, "captured MQ message had no payload");
+  });
 });
