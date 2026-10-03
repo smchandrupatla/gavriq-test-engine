@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] — 2026-09-26
+
+**Added**
+- Test run detail (`#/run/:id`): status, pass/fail/blocked counts, suite and environment, duration per case chart, and every result with its evidence.
+- Test case detail (`#/case/:id`): details, the script behind the case (`GET /api/v1/test-cases/:id/definition`), and run history with evidence (`GET /api/v1/test-cases/:id/results`).
+- Evidence on every run: SIT runs keep the full TAP output plus the screenshots the case writes; Selenium and Playwright save a screenshot of every step or final screen and a step log; HTTP saves the request/response transcript; performance saves raw samples.
+- Performance and endurance graphs: the runner records a per-second (or per-5s for long runs) series of latency p50/p95, throughput and errors. `validation_rules.duration_seconds` runs a time-bound endurance test.
+- Test suites (`#/suites`): create a suite from cases of any category, edit its name, add and remove cases, copy a built-in suite, delete, run it, and see every run linked to the suite with a pass-rate chart. API: `GET/PATCH/DELETE /api/v1/suites/:id`, `PUT /api/v1/suites/:id/cases`, `DELETE /api/v1/suites/:id/cases/:caseId`, `GET /api/v1/suites/:id/executions`.
+- Catalog audit (`#/audit`, `GET /api/v1/catalog-audit`): lists cases with no script behind them and SIT imports whose file or test is gone.
+
+**Fixed**
+- Cases with no script, steps or load profile ran as "load the base URL" and reported a pass. They now report `blocked` with the reason. The 102 seeded Sand Bench catalog cases are such placeholders.
+- The seed stored design mock-up values (`status:Passed`, `tone:teal`, "Duration ref … last tested Today") and marked those cases automated. The seed and a startup cleanup now store them as drafts to be automated.
+- The worker resolved `sit/cases` under `apps/` and its image did not contain `sit/`, so every SIT case run from the engine failed with "SIT file not found".
+- Playwright results pointed at a log file that was never written.
+- The console's HTML escape helper did not escape anything; names, messages and logs are now escaped.
+
 ## [0.3.3] — 2026-09-18
 
 **Added**

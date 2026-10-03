@@ -73,7 +73,11 @@ export async function evidenceRoutes(app: FastifyInstance) {
       ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
       ext === '.webp' ? 'image/webp' :
       ext === '.json' ? 'application/json' :
+      ext === '.log' || ext === '.txt' || ext === '.tap' ? 'text/plain; charset=utf-8' :
       'application/octet-stream';
+    // Evidence is untrusted output of the system under test: never let it render as a page.
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('content-security-policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
     return reply.type(type).send(createReadStream(full));
   });
 }

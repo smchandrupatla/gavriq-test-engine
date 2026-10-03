@@ -548,6 +548,25 @@ CREATE TABLE IF NOT EXISTS test_packs (
 );
 
 -- ---------------------------------------------------------------------------
+-- Data hygiene: earlier Sand Bench catalog seeds stored design mock-up values
+-- (tone:/status: tags, "Duration ref: … last tested: …") and marked script-less
+-- rows as automated/active. Strip the mock values and mark those rows as drafts
+-- to be automated. Idempotent; only touches seeded rows with no script or steps.
+-- ---------------------------------------------------------------------------
+UPDATE test_cases
+SET tags = ARRAY(SELECT t FROM unnest(tags) AS t WHERE t NOT LIKE 'tone:%' AND t NOT LIKE 'status:%'),
+    expected_results = CASE WHEN expected_results LIKE 'Duration ref:%' THEN NULL ELSE expected_results END,
+    automation_status = 'to_be_automated',
+    lifecycle = CASE WHEN lifecycle = 'active' THEN 'draft'::test_lifecycle ELSE lifecycle END,
+    updated_at = now()
+WHERE created_by = 'sandbench-seed'
+  AND (script IS NULL OR script = '')
+  AND steps = '[]'::jsonb
+  AND (automation_status = 'automated'
+       OR expected_results LIKE 'Duration ref:%'
+       OR EXISTS (SELECT 1 FROM unnest(tags) AS t WHERE t LIKE 'tone:%' OR t LIKE 'status:%'));
+
+-- ---------------------------------------------------------------------------
 -- Seed baseline application (Sand Bench)
 -- ---------------------------------------------------------------------------
 INSERT INTO applications (key, name, description, status)

@@ -10,6 +10,7 @@ import { migrate } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
+import { caseEvidenceRoutes } from './routes/case-evidence.js';
 import { environmentRoutes } from './routes/environments.js';
 import { executionRoutes } from './routes/executions.js';
 import { workerRoutes } from './routes/workers.js';
@@ -173,6 +174,7 @@ async function main() {
   await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
+  await app.register(caseEvidenceRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
   await app.register(evidenceRoutes);

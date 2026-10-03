@@ -8,7 +8,9 @@ import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
 import { runPerformance } from './runners/performance.js';
-import { runSit, isSitScript } from './runners/sit.js';
+import { runSit } from './runners/sit.js';
+import { classifyCase } from '../../api/src/case-definition.js';
+import { compact, saveJson, saveLog } from './evidence.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
@@ -87,16 +89,37 @@ type RunnerResult = {
   evidence?: any[];
 };
 
-async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
-  const method = (tc?.execution_method || 'selenium').toLowerCase();
+async function executeCase(tc: any, baseUrl: string, prefix: string): Promise<RunnerResult> {
   const script = tc?.script || '';
+  const plan = classifyCase(tc || {});
+
+  // A case with nothing behind it must not pass: it used to fall through to
+  // "load the base URL" and report green, which proved nothing.
+  if (!plan.executable) {
+    const log = saveLog(`${prefix}-blocked`, [
+      `# ${tc?.key || 'unknown case'} was not run`,
+      `reason: ${plan.reason}`,
+      `execution_method: ${tc?.execution_method || '(none)'}`,
+      `script: ${script || '(none)'}`,
+      `steps: ${Array.isArray(tc?.steps) ? tc.steps.length : 0}`,
+    ]);
+    return {
+      status: 'blocked',
+      duration_ms: 0,
+      message: `Not executable: ${plan.reason}`,
+      classification: 'script_problem',
+      metrics: { definition: plan.kind },
+      evidence: compact([log]),
+    };
+  }
 
   // Imported SIT catalog entries
-  if (isSitScript(script) || method === 'sit') {
+  if (plan.kind === 'sit-file') {
     const r = await runSit({
       script,
       baseUrl,
       timeoutSeconds: tc?.timeout_seconds || 120,
+      evidencePrefix: prefix,
     });
     return {
       status: r.status === 'skipped' ? 'skipped' : r.status,
@@ -105,7 +128,7 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
       message: r.message,
       classification: r.classification || null,
       metrics: r.metrics || {},
-      evidence: [],
+      evidence: r.evidence || [],
     };
   }
 
@@ -114,9 +137,10 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
     baseUrl,
     timeoutSeconds: tc?.timeout_seconds || 30,
     steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
+    evidencePrefix: prefix,
   };
 
-  if (method === 'playwright') {
+  if (plan.runner === 'playwright') {
     const r = await runPlaywright(common);
     return {
       status: r.status,
@@ -124,11 +148,11 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
       duration_ms: r.duration_ms,
       message: r.message,
       classification: r.classification || null,
-      evidence: [{ type: 'log', storage_key: `evidence/pw-${Date.now()}.log`, content_type: 'text/plain' }],
+      evidence: r.evidence,
     };
   }
 
-  if (method === 'http' || method === 'rest' || method === 'api') {
+  if (plan.runner === 'http') {
     const r = await runHttp(common);
     return {
       status: r.status,
@@ -137,21 +161,25 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
       message: r.message,
       classification: r.classification || null,
       metrics: r.metrics || {},
-      evidence: [],
+      evidence: compact([saveLog(`${prefix}-http`, r.transcript)]),
     };
   }
 
-  if (method === 'performance' || method === 'load' || method === 'k6') {
+  if (plan.runner === 'performance') {
     const rules = tc?.validation_rules || {};
-    const r = await runPerformance({
-      baseUrl,
-      script: tc?.script,
+    const profile = {
       path: rules.path || '/health',
       method: rules.method || 'GET',
       concurrency: rules.concurrency || 5,
       requests: rules.requests || 20,
-      timeoutSeconds: tc?.timeout_seconds || 15,
+      durationSeconds: rules.duration_seconds || 0,
       sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
+    };
+    const r = await runPerformance({
+      baseUrl,
+      script: tc?.script,
+      ...profile,
+      timeoutSeconds: tc?.timeout_seconds || 15,
     });
     return {
       status: r.status,
@@ -159,8 +187,11 @@ async function executeCase(tc: any, baseUrl: string): Promise<RunnerResult> {
       duration_ms: r.duration_ms,
       message: r.message,
       classification: r.classification || null,
-      metrics: r.metrics,
-      evidence: [],
+      // The per-window series is small enough to live on the result so the console can graph it.
+      metrics: { ...r.metrics, profile, timeseries: r.timeseries },
+      evidence: compact([
+        saveJson(`${prefix}-perf-samples`, 'metric', { target: `${baseUrl}${profile.path}`, profile, metrics: r.metrics, samples: r.samples }),
+      ]),
     };
   }
 
@@ -185,7 +216,8 @@ async function runJob(execution: any) {
   for (const caseId of caseIds) {
     const tc = await fetchTestCase(caseId);
     const started = new Date().toISOString();
-    const result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl);
+    const prefix = `${execution.key}-${tc?.key || caseId}`;
+    const result = await executeCase(tc || { key: caseId }, baseUrl, prefix);
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
 
     await api(`/api/v1/executions/${execution.id}/results`, {
