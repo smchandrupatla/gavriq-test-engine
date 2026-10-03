@@ -146,6 +146,9 @@ dialog::backdrop{background:#000a}
 .defect-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
 .defect-msg{white-space:pre-wrap;word-break:break-word;background:var(--panel2);border-radius:6px;padding:8px;margin:8px 0 0;font-size:12px;max-height:160px;overflow:auto}
 .history{margin:0;padding-left:18px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+/* Security scans + Vulnerabilities (security.js) */
+.badge.sev-critical{background:var(--red);color:#fff}.badge.sev-info{background:var(--panel2);color:var(--muted)}
+.badge.st-accepted{background:var(--amber-soft);color:var(--amber)}
 </style>
 </head>
 <body>
@@ -206,5 +209,6 @@ dialog::backdrop{background:#000a}
 <script src="/catalog/views.js"></script>
 <script src="/catalog/app.js"></script>
 <script src="/catalog/scheduler.js"></script>
+<script src="/catalog/security.js"></script>
 </body>
 </html>

@@ -25,6 +25,7 @@ import { sitCatalogRoutes } from './routes/sit-catalog.js';
 import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
 import { defectRoutes } from './routes/defects.js';
+import { securityScanRoutes } from './routes/security-scans.js';
 import { startScheduler } from './schedule/service.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
@@ -160,6 +161,10 @@ async function main() {
       if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
         return requirePermission('executions:run')(req, reply);
       }
+      // Security scans: the scanner posts with an executions:run token; reading needs tests:read.
+      if (pathName.startsWith('/api/v1/security')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
         return requirePermission('tests:write')(req, reply);
       }
@@ -186,6 +191,7 @@ async function main() {
   await app.register(buildStatusRoutes);
   await app.register(opsRoutes);
   await app.register(defectRoutes);
+  await app.register(securityScanRoutes);
 
   await app.listen({ port, host });
   startScheduler();
