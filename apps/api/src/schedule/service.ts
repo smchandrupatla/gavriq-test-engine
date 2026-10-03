@@ -10,6 +10,7 @@ import { pool, query, withTransaction } from '../db/client.js';
 import { defectOverview } from '../defects/service.js';
 import { CronError, describeCron, isValidTimezone, nextRun, parseCron, upcoming } from './cron.js';
 import { describeTarget, legacyTarget, normalizeTarget, TargetError, type RunTarget } from './target.js';
+import { DEFAULT_APPLICATION_KEY } from '../app-config.js';
 
 export { CronError, TargetError };
 
@@ -395,9 +396,9 @@ export async function executionPlan(hours = 168, perSchedule = 48) {
 }
 
 /** Choices for the Run now / schedule forms. */
-export async function schedulerOptions() {
+export async function schedulerOptions(appKey: string = DEFAULT_APPLICATION_KEY) {
   const [apps, suites, typeCounts] = await Promise.all([
-    query(`SELECT metadata FROM applications WHERE key = 'sand-bench' LIMIT 1`),
+    query(`SELECT name, metadata FROM applications WHERE key = $1 LIMIT 1`, [appKey]),
     query(
       `SELECT s.id, s.key, s.name, s.suite_type, COUNT(m.test_case_id)::int AS cases
          FROM test_suites s LEFT JOIN test_case_suites m ON m.test_suite_id = s.id
@@ -405,9 +406,11 @@ export async function schedulerOptions() {
     ),
     query(`SELECT test_type::text AS id, COUNT(*)::int AS cases FROM test_cases GROUP BY test_type`),
   ]);
-  const meta = (apps.rows[0]?.metadata?.sandbench_types ?? []) as { key: string; label?: string; category?: string }[];
+  const appMeta = apps.rows[0]?.metadata;
+  // `types` is the app-neutral key; `sandbench_types` is what the Sand Bench seed wrote.
+  const meta = ((appMeta?.types ?? appMeta?.sandbench_types) ?? []) as { key: string; label?: string; category?: string }[];
   const types = new Map<string, { id: string; title: string; category: string }>();
-  types.set('sit', { id: 'sit', title: 'SIT (Sand Bench integration)', category: 'sit' });
+  types.set('sit', { id: 'sit', title: `SIT (${apps.rows[0]?.name ?? appKey} integration)`, category: 'sit' });
   for (const t of meta) types.set(t.key, { id: t.key, title: t.label || t.key, category: t.category === 'qc' ? 'qc' : 'qa' });
   for (const t of typeCounts.rows) if (!types.has(t.id) && t.id !== 'other') types.set(t.id, { id: t.id, title: t.id, category: 'qa' });
 

@@ -14,6 +14,9 @@
 set -euo pipefail
 
 ENGINE="${TEST_ENGINE_URL:-https://gavriq-test-engine.onrender.com}"
+if [ -z "${APPLICATION_KEY:-}" ]; then
+  echo "post-build-results: APPLICATION_KEY not set, defaulting to sand-bench (set it explicitly: one engine serves many apps)" >&2
+fi
 APP_KEY="${APPLICATION_KEY:-sand-bench}"
 BUILD_ID="${BUILD_ID:-${RENDER_GIT_COMMIT:-${GITHUB_RUN_ID:-local-$(date +%s)}}}"
 COMMIT="${COMMIT_SHA:-${RENDER_GIT_COMMIT:-${GITHUB_SHA:-unknown}}}"
