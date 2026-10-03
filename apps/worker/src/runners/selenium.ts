@@ -12,7 +12,7 @@ export interface SeleniumRunInput {
   script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
-  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string; timeout_ms?: number; description?: string; markdown_file?: string }>;
+  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string; timeout_ms?: number; description?: string; text?: string; markdown_file?: string }>;
   viewport?: { width: number; height: number };
   vars?: Record<string, string>;
   /** Run with a visible browser window instead of headless. Defaults to headless, overridable via SELENIUM_HEADLESS=false. */
@@ -27,12 +27,15 @@ export interface SeleniumRunResult {
   duration_ms: number;
   classification?: string;
   evidence?: EvidenceItem[];
+  /** What happened, in plain words: one line per step, then the outcome (the run's remarks). */
+  remarks?: string[];
 }
 
 interface StepRecord {
   step: number;
   action: string;
   description?: string;
+  text?: string;
   selector?: string;
   value?: string;
   expected?: string;
@@ -206,7 +209,14 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
       secretValues(log.vars)
     )
   );
-  return { ...result, evidence: [...(result.evidence || []), ...(steps ? [steps] : [])] };
+  return { ...result, remarks: remarksOf(log, result), evidence: [...(result.evidence || []), ...(steps ? [steps] : [])] };
+}
+
+/** One plain line per step from the step log, then the outcome (the run's remarks). */
+function remarksOf(log: RunLog, result: { status: string; message: string; duration_ms: number }): string[] {
+  const lines = log.steps.map((s) => `Step ${s.step} — ${(s.text || s.description || s.action).replace(/\.$/, '')}: ${s.outcome === 'passed' ? 'done' : `FAILED — ${s.error || 'no detail'}`} (${s.duration_ms} ms).`);
+  lines.push(result.status === 'passed' ? `Result: passed in ${result.duration_ms} ms.` : `Result: ${result.status} — ${result.message}.`);
+  return lines;
 }
 
 async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRunResult> {
@@ -260,6 +270,7 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
           step: idx + 1,
           action: step.action,
           description: step.description,
+          text: (raw as { text?: string }).text,
           selector: step.selector,
           // Typed input is not logged verbatim — it is where credentials go.
           value: step.action === 'type' ? `(${(step.value || '').length} chars)` : step.value,

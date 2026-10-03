@@ -9,6 +9,7 @@ Enterprise Test Engineering & Validation platform — central repository, on-dem
 | Capability | Description |
 |------------|-------------|
 | **Test Repository** | Application → Suite → Case hierarchy with versioning, tags, lifecycle |
+| **Test bench screens** | Test cases, Test case form, Test suites and run Remarks in Sand Bench's representation — objective, plain-language steps (what is done / what should happen / data used), owner, component, environment, duration, triage, notes, watchers (`#/test-cases`, `#/test-suites`; rule: `.github/skills/plain-language-test-cases/SKILL.md`) |
 | **Realistic catalog** | Every registered case is executable — verified endpoints/selectors, steps, data + data profile (`apps/api/src/catalog/`, docs in `docs/TEST-CASE-CATALOG.md`) |
 | **Multi-application** | Application + environment selectors in the console; the engine itself is registered as application #2 with an API self-test suite |
 | **On-demand runs** | Selenium, Playwright (chromium/firefox/webkit × viewports), HTTP/API with capture/poll/JSON-path assertions, and concurrent performance runners |

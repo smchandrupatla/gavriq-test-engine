@@ -38,6 +38,7 @@ export interface SitRunResult {
   metrics?: Record<string, unknown>;
   /** Raw TAP output of the run (truncated), kept as the case's evidence. */
   output?: string;
+  remarks?: string[];
 }
 
 const MAX_OUTPUT = 200_000;

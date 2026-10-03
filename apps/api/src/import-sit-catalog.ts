@@ -62,9 +62,10 @@ function screenFieldsFor(fileKey: string, file: string, name: string | null, met
   const perf = fileKey.includes('performance');
   const browser = meta.method !== 'http';
   const plainName = (name || file).replace(/\s+/g, ' ').trim();
+  const lowered = plainName.charAt(0).toLowerCase() + plainName.slice(1);
   return {
     objective: name
-      ? `Run the application team's own SIT check that ${plainName[0]!.toLowerCase()}${plainName.slice(1)}${/[.!?]$/.test(plainName) ? '' : '.'}`
+      ? `Run the application team's own SIT check that ${lowered}${/[.!?]$/.test(plainName) ? '' : '.'}`
       : `Run every check in the application team's SIT file ${file} against the deployed Sand Bench.`,
     owner: security || perf ? 'Quality control team' : 'Quality assurance team',
     component: COMPONENT[fileKey] || 'Sand Bench',
