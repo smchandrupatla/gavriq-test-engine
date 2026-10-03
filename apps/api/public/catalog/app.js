@@ -250,7 +250,7 @@ async function applyLive(d){
   // Form screens show no live data; re-rendering them on a poll would wipe what is being typed.
   if(dirty){renderSideNav();if(!FORM_VIEWS.has(state.view))renderCurrentView();}
 }
-const FORM_VIEWS=new Set(['config-retention','config-apps','config-envs','schedules','reports','case']);
+const FORM_VIEWS=new Set(['config-retention','config-apps','config-envs','schedules','reports','case','test-cases','test-case-form','test-suites','test-suite-form']);
 async function loadRun(id){
   try{
     const [run,ev]=await Promise.all([
@@ -514,6 +514,13 @@ function renderSideNav(){
   let h='<div class="nav-section">Workspace</div>';
   h+=navItem('overview',null,'Overview');
   h+=navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null);
+  // Test bench: the Test cases / Test suites screens in the Sand Bench representation (testbench.js)
+  h+='<div class="nav-section">Test bench</div>';
+  h+=navItem('test-cases',null,'Test cases',state.cases.length||null);
+  h+=navItem('test-case-form',null,'New test case');
+  h+=navItem('test-suites',null,'Test suites',state.suites.length||null);
+  h+=navItem('test-suite-form',null,'New test suite');
+  h+='<div class="nav-section">Builds &amp; planning</div>';
   h+=navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot);
   h+=navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null);
   h+=navItem('reports',null,'Reports');
@@ -711,6 +718,7 @@ function renderRun(){
         <dl class="kv run-kv"><dt>Suite</dt><dd>${esc(r.suite_name||'—')}</dd><dt>Environment</dt><dd>${esc(r.environment_name||'—')}</dd><dt>Trigger</dt><dd>${esc(r.trigger_source||'—')}</dd><dt>Worker</dt><dd class="key">${esc(r.worker_id||(active?'waiting for a worker':'—'))}</dd><dt>Queued</dt><dd>${esc(when(r.created_at))}</dd><dt>Started</dt><dd>${esc(when(r.started_at))}</dd><dt>Finished</dt><dd>${r.finished_at?esc(when(r.finished_at)):'—'}</dd><dt>${active?'Elapsed':'Duration'}</dt><dd>${elapsed}</dd></dl>
         ${failMsgs}
       </div></div>
+    ${TB.remarksHtml(r)}
     <div class="card"><div class="card-head"><h2>Evidence</h2><span class="muted small">${plural(evidenceList.length,'item')} · ${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><div class="hp-body">${gallery}</div></div>`;
 }
 function renderBuilds(){
@@ -751,15 +759,17 @@ function renderCaseView(){
       ?`<div class="run-tiles">${d.runs.map(r=>`<button type="button" class="run-tile" data-run="${esc(r.id)}"><span class="run-tile-name">${esc(r.name||r.key)}</span>${badge(r.failed?'failed':r.passed?'passed':'other')}<span class="muted small">${esc(when(r.created_at))}</span></button>`).join('')}</div>`
       :'<div class="empty">This case has never run.</div>';
   }else{
+    // Details in the Test cases screen representation (testbench.js): summary, plain-language
+    // steps, triage, run history with remarks, notes, watchers, suites, activity.
+    const extras=TB.loadCaseExtras(c.id);
     body=`<div class="hp-body"><dl class="kv">
       <dt>Key</dt><dd class="key">${esc(c.key)}</dd>
       <dt>Status</dt><dd>${latestRun?`<a href="#/run/${esc(latestRun.id)}">${badge(lite&&lite.last_status?{status:lite.last_status}:null)}</a>`:badge(null)}${lite&&lite.last_at?' <span class="muted small">'+esc(when(lite.last_at))+'</span>':''}</dd>
       <dt>Type</dt><dd>${caseTypeLinkHtml(c)}</dd>
       <dt>Method</dt><dd>${c.execution_method?`<a href="#/method/${encodeURIComponent(c.execution_method)}">${esc(c.execution_method)}</a>`:'—'}</dd>
       <dt>Suites</dt><dd>${suites.map(s=>`<a class="tag" href="${esc(suiteHref(s))}">${esc(s.name)}</a>`).join(' ')||'—'}</dd>
-      <dt>Tags</dt><dd>${(c.tags||[]).map(t=>`<a class="tag" href="#/tag/${encodeURIComponent(t)}">${esc(t)}</a>`).join(' ')||'—'}</dd>
-      <dt>Description</dt><dd>${esc(c.description||'—')}</dd>
-    </dl><div class="run-case-bar"><select id="runCaseEnv" aria-label="Environment to run in">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===state.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}">Run this case</button><button class="btn" data-action="schedule" data-what="case" data-key="${esc(c.key)}">Schedule…</button><button class="btn" data-action="report-case" data-key="${esc(c.key)}">Report…</button></div></div>`;
+    </dl><div class="run-case-bar"><select id="runCaseEnv" aria-label="Environment to run in">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===state.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}"${c.execution_method==='manual'?' disabled title="A manual case is run by hand: record the outcome as a note"':''}>Run this case</button><button class="btn" data-action="schedule" data-what="case" data-key="${esc(c.key)}">Schedule…</button><button class="btn" data-action="report-case" data-key="${esc(c.key)}">Report…</button></div></div>
+    ${TB.caseBodyHtml({...c,suites:c.suites||suites},{runs:(extras&&extras.runs)||null})}`;
   }
   el('content').innerHTML=`<div class="card">${head}${tabs}${body}</div>`;
 }
@@ -1249,6 +1259,7 @@ function renderCurrentView(){
   else if(v==='config-apps')renderConfigAppsView();
   else if(v==='config-envs')renderConfigEnvsView();
   else if(v==='config-infra')renderInfraView();
+  else if(v==='test-cases'||v==='test-case-form'||v==='test-suites'||v==='test-suite-form')TB.render(v);   // testbench.js
   else if(v==='schedules')renderSchedulesView();
   else if(v==='reports')renderReportsView();
   else if(v==='insights')renderInsightsView();   // insights.js
@@ -1763,8 +1774,12 @@ function renderInfraView(){
 function parseHash(){
   const parts=(location.hash||'#/overview').replace(/^#\/?/,'').split('/').map(p=>p?decodeURIComponent(p):p);
   const v=parts[0]||'overview',arg=parts[1]||null;
-  Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS,caseId:null,caseTab:'details',methodName:null,tagName:null});
+  Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS,caseId:null,caseTab:'details',methodName:null,tagName:null,tbMode:null,tbArg:null});
   if(v==='type'&&arg){state.view='type';state.typeId=arg;if(parts[2]==='suite'&&parts[3])state.suiteId=parts[3];}
+  // Test bench (testbench.js): #/test-cases[/<id>], #/test-case-form[/new|edit/<id>|clone/<id>], #/test-suites[/<id>], #/test-suite-form
+  else if(v==='test-cases'||v==='test-suites'){state.view=v;state.tbMode=arg;}
+  else if(v==='test-case-form'){state.view=v;state.tbMode=arg||'new';state.tbArg=parts[2]||null;}
+  else if(v==='test-suite-form')state.view=v;
   else if(v==='sit'){state.view=arg?'sit':'sit-all';state.sitGroupId=arg;if(parts[2]==='suite'&&parts[3])state.suiteId=parts[3];}
   else if(v==='run'&&arg){state.view='run';state.runId=arg;}
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
@@ -1783,6 +1798,7 @@ async function onRoute(){
   if(state.view==='history'&&!state.runsList.loaded){if(!state.runsFilter.environment_id)state.runsFilter.environment_id=state.envId||'';loadRunsList(true);}
   renderCurrentView();
   window.scrollTo(0,0);
+  if(state.view==='test-cases'||state.view==='test-case-form'||state.view==='test-suites'||state.view==='test-suite-form'){TB.route(state.view,state.tbMode,state.tbArg);return;}
   if(runId){await loadRun(runId);if(state.runId===runId)renderCurrentView();}
   if(caseId&&(!state.caseDetail||state.caseDetail.id!==caseId)){await loadCaseDetail(caseId);if(state.caseId===caseId)renderCurrentView();}
 }

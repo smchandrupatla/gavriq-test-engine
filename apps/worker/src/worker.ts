@@ -138,6 +138,8 @@ type RunnerResult = {
   evidence?: any[];
   /** Raw runner output (SIT TAP), turned into log evidence when the runner wrote no file of its own. */
   output?: string;
+  /** What happened, in plain words — one line per step, then the outcome; stored on the result as its remarks. */
+  remarks?: string[];
 };
 
 /**
@@ -187,6 +189,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       verdict: status === 'skipped' ? undefined : 'fail',
       classification: cleanup.classification || 'cleanup_failure',
       message: `${result.message}; cleanup failed: ${cleanup.message}`.slice(0, 900),
+      remarks: [...(result.remarks || [result.message]), `Cleanup failed: ${cleanup.message}.`],
       evidence: [...(result.evidence || []), ...(cleanup.evidence || [])],
     };
   };
@@ -205,6 +208,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
+      remarks: r.remarks,
       classification: r.classification || null,
       metrics: r.metrics || {},
       evidence: [],
@@ -233,6 +237,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
+      remarks: r.remarks,
       classification: r.classification || null,
       metrics: r.metrics || {},
       evidence: r.evidence || [],
@@ -251,6 +256,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
+      remarks: r.remarks,
       classification: r.classification || null,
       metrics: r.metrics || {},
       evidence: (r as { evidence?: any[] }).evidence || [],
@@ -277,6 +283,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
+      remarks: r.remarks,
       classification: r.classification || null,
       metrics: r.metrics,
       evidence: [],
@@ -318,6 +325,7 @@ async function runJob(execution: any) {
           status: 'blocked',
           duration_ms: 0,
           message: `Not run: ${store.reason}`,
+          remarks: [`Not run: ${store.reason}.`],
           classification: 'infrastructure_failure',
         }),
       });
@@ -368,6 +376,7 @@ async function runJob(execution: any) {
         verdict: 'fail',
         classification: 'timeout',
         message: `Timed out after ${Math.round(caseLimitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
+        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(caseLimitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
       };
     }
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
@@ -397,6 +406,7 @@ async function runJob(execution: any) {
           started_at: started,
           finished_at: new Date().toISOString(),
           message: result.message,
+          remarks: result.remarks && result.remarks.length ? result.remarks : [result.message],
           classification: result.classification,
           metrics: result.metrics || {},
           evidence,

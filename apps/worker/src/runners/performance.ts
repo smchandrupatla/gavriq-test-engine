@@ -36,6 +36,8 @@ export interface PerfRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
+  /** What happened, in plain words (the run's remarks). */
+  remarks?: string[];
   metrics: {
     total_requests: number;
     success: number;
@@ -132,6 +134,11 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
 
   // Nothing answered at all: the target is unreachable or rejects the probe.
   // That is an environment verdict, not a latency/SLA measurement.
+  const told = [
+    `Sent ${total} requests, ${concurrency} at a time, to ${method} ${url}${soakMs ? ` over ${Math.round(duration / 1000)} seconds` : ''}.`,
+    `${success} succeeded, ${failed} failed (${metrics.error_rate_pct}% failure rate), ${metrics.rps} requests per second.`,
+    `Half of the answers arrived within ${metrics.latency_p50_ms} ms; 95 out of 100 within ${metrics.latency_p95_ms} ms; the slowest took ${metrics.latency_max_ms} ms.`,
+  ];
   if (total > 0 && failed === total) {
     const unreachable = !/^HTTP \d+/.test(firstError);
     return {
@@ -140,6 +147,7 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
       duration_ms: duration,
       classification: unreachable ? 'network_failure' : 'environment_problem',
       metrics,
+      remarks: [told[0]!, `No request succeeded (${firstError || 'no response'}) — the target is ${unreachable ? 'unreachable' : 'rejecting the probe'}, so no timing could be measured.`],
     };
   }
 
@@ -162,6 +170,7 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
       duration_ms: duration,
       classification: 'assertion_failure',
       metrics,
+      remarks: [...told, `Result: outside the agreed limits — ${violations.join('; ')}.`],
     };
   }
 
@@ -170,5 +179,6 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
     message: `perf ${method} ${input.url ? url : path}: ${success}/${total} ok${soakMs ? ` over ${Math.round(duration / 1000)}s` : ''}, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
     duration_ms: duration,
     metrics,
+    remarks: [...told, 'Result: within the agreed limits.'],
   };
 }

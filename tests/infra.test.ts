@@ -22,10 +22,11 @@ import {
   nextTeardown,
   normalizePolicy,
   type EnvActivity,
-} from '../apps/api/src/infra.ts';
+} from '../apps/api/src/infra.js';
 
 const API = process.env.INFRA_TEST_API || '';
-const APP = 'gavriq-test-engine';
+// A fixture application of its own, so the test needs no seeded catalogue and queues nothing real.
+const APP = 'infra-test-app';
 const HEADERS = { 'content-type': 'application/json' };
 
 async function api(route: string, opts: RequestInit = {}) {
@@ -151,7 +152,37 @@ describe('lifecycle round trip (disposable engine)', () => {
     }
   }
 
+  /** One application with one automated case: enough for the planner to queue a run. */
+  async function ensureFixtures() {
+    const apps = await api('/api/v1/applications');
+    let app = (apps.body.data || []).find((a: any) => a.key === APP);
+    if (!app) {
+      const made = await post('/api/v1/applications', { key: APP, name: 'Infra lifecycle test app', description: 'Fixture for tests/infra.test.ts; safe to delete.', created_by: 'tests/infra' });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+      app = made.body.data;
+    }
+    const caseKey = 'INFRA-TEST-PROBE';
+    if ((await api(`/api/v1/test-cases/${caseKey}`)).status !== 200) {
+      const made = await post('/api/v1/test-cases', {
+        key: caseKey,
+        name: 'Infra lifecycle fixture · health probe',
+        description: 'Fixture for tests/infra.test.ts. Not a test of any product.',
+        application_id: app.id,
+        test_type: 'smoke',
+        execution_method: 'http',
+        steps: [{ action: 'request', method: 'GET', url: '{{engine}}/health', expected_status: 200, description: 'probe' }],
+        automation_status: 'automated',
+        lifecycle: 'active',
+        tags: ['infra-test-fixture'],
+        expected_results: 'n/a',
+        created_by: 'tests/infra',
+      });
+      assert.equal(made.status, 201, JSON.stringify(made.body));
+    }
+  }
+
   async function ensureEnvironment() {
+    await ensureFixtures();
     const body = {
       key: ENV_KEY,
       name: 'Infra lifecycle test stack',

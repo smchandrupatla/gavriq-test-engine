@@ -132,6 +132,17 @@ through `POST /api/v1/schedules/:id/run`; a poller that was down catches up on a
 
 A failed result needs any one stored evidence item. `skipped` and `blocked` results need none: nothing ran.
 
+### Remarks — what happened, in plain words
+
+Next to its evidence, every result carries `remarks`: one line per step in the wording of the Test cases
+screen ("Step 2 — Sign in to the API as the demo operator: answered OK (200) in 41 ms."), then the outcome
+("Result: all 3 steps passed in 320 ms." / "Step 3 — …: FAILED — status 500, wanted 200." / "Cleanup failed: …").
+The runners build them from each step's `text` (or description); the worker posts them with the result and
+the API stores them in `execution_results.remarks` (an older worker's `message` is split into lines instead).
+People reviewing a run add their own on the run screen — `POST /api/v1/executions/:id/remarks {text}` →
+`executions.remarks` — and both kinds are listed under **Remarks** on the run screen, per case in
+`GET /api/v1/test-cases/:id/runs` and in `GET /api/v1/test-runs`.
+
 Secrets are masked before a file is written: values of keys named like `authorization`, `cookie`, `password`,
 `token`, `secret` or `api_key`, bearer tokens, and the values of the environment's secret variables wherever
 they appear. Typed input in browser steps is logged by length only. Bodies are capped at 4 000 characters.

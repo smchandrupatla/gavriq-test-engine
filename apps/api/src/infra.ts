@@ -478,7 +478,7 @@ export async function createDeployment(r: DeployRequest, actorId?: string | null
       environment_id: environment.id,
       deployment_id: row.id,
       reason: r.reason || 'requested',
-      params: { script: infra.script, ref, compose_project: infra.compose_project },
+      params: { script: infra.script, ref, compose_project: infra.compose_project, previous_state: environmentState(environment) },
       requested_by: requestedBy,
     });
     if (job.deployment_id !== row.id) {
@@ -487,7 +487,7 @@ export async function createDeployment(r: DeployRequest, actorId?: string | null
         row.id, `A deploy of ${environment.key} is already in progress (job ${job.id})`,
       ]);
       const { rows: again } = await query('SELECT * FROM deployments WHERE id = $1', [row.id]);
-      return { status: 409, body: { error: again[0].error, data: again[0], job_id: job.id } };
+      return { status: 409, body: { error: again[0]?.error, data: again[0], job_id: job.id } };
     }
     await setEnvironmentState(environment.id, 'deploying');
     const online = await agentOnline();
@@ -707,7 +707,13 @@ export async function infraTick(): Promise<TickResult> {
     await applyJobOutcome(job);
   }
 
-  // 2. Deploy-and-run deploys whose run has finished: tear the stack down.
+  // 2. Deploy-and-run deploys whose run has finished: tear the stack down. A deploy that a newer
+  //    deploy of the same stack has superseded no longer speaks for it — the newer one's flag governs.
+  await query(
+    `UPDATE deployments d SET teardown_after_run = false
+     WHERE d.teardown_after_run AND d.teardown_job_id IS NULL
+       AND EXISTS (SELECT 1 FROM deployments n WHERE n.environment_id = d.environment_id AND n.created_at > d.created_at)`
+  );
   const { rows: finished } = await query(
     `SELECT d.* FROM deployments d
      WHERE d.teardown_after_run AND d.status = 'succeeded' AND d.teardown_job_id IS NULL

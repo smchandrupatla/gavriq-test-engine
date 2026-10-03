@@ -250,6 +250,71 @@ const PATH_GLOSSARY: Array<[RegExp, string]> = [
   [/^\/sit\/health$/, 'the health of the embedded SIT console'],
 ];
 
+/** The test engine's own routes where the shared glossary (written for Sand Bench) would mislead. */
+const ENGINE_PATH_GLOSSARY: Array<[RegExp, string]> = [
+  [/^\/api\/v1\/runs\/{id}$/, 'the details of the selected test run'],
+  [/^\/api\/v1\/runs$/, 'test runs'],
+  [/^\/api\/v1\/reports\/summary\/{id}$/, 'the summary report of the selected execution'],
+  [/^\/api\/v1\/settings$/, 'the engine settings'],
+];
+
+/** What is being sent when a route is POSTed to: "Send <this> to <surface>". */
+const POST_GLOSSARY: Array<[RegExp, string]> = [
+  [/^\/hub\/to-app$/, 'a message for the application'],
+  [/^\/api\/v1\/runs$/, 'a request to start a run'],
+  [/^\/api\/v1\/executions$/, 'a request to queue an execution'],
+  [/^\/api\/v1\/executions\/claim$/, 'a claim for the next queued execution (as a worker would)'],
+  [/^\/api\/v1\/executions\/run-all$/, 'a request to run everything for an application'],
+  [/^\/api\/v1\/executions\/cancel-all$/, 'a request to cancel every run in progress'],
+  [/^\/api\/v1\/executions\/{id}\/results$/, 'the result of a case for the selected execution'],
+  [/^\/api\/v1\/executions\/{id}\/complete$/, 'the completion of the selected execution'],
+  [/^\/api\/v1\/executions\/{id}\/cancel$/, 'a cancellation of the selected execution'],
+  [/^\/api\/v1\/executions\/{id}\/remarks$/, 'a remark on the selected execution'],
+  [/^\/api\/v1\/evidence\/upload$/, 'an evidence file'],
+  [/^\/api\/v1\/workers\/register$/, 'a worker registration'],
+  [/^\/api\/v1\/workers\/heartbeat$/, 'a worker heartbeat'],
+  [/^\/api\/v1\/build-results$/, 'a build result report'],
+  [/^\/api\/v1\/schedules\/trigger$/, 'an event that may fire schedules'],
+  [/^\/api\/v1\/schedules\/{id}\/run$/, 'a request to run the selected schedule now'],
+  [/^\/api\/v1\/schedules$/, 'a new schedule'],
+  [/^\/api\/v1\/test-cases\/{id}\/clone$/, 'a request to clone the selected test case'],
+  [/^\/api\/v1\/test-cases$/, 'a new test case'],
+  [/^\/api\/v1\/test-suites$/, 'a new test suite'],
+  [/^\/api\/v1\/test-suites\/{id}\/run$/, 'a request to run the selected suite'],
+  [/^\/api\/v1\/test-suites\/{id}\/cases$/, 'member cases for the selected suite'],
+  [/^\/api\/v1\/suites$/, 'a new suite'],
+  [/^\/api\/v1\/suites\/{id}\/cases$/, 'member cases for the selected suite'],
+  [/^\/api\/v1\/rules\/{id}\/validate$/, 'a request to validate the selected rule'],
+  [/^\/api\/v1\/rules\/{id}\/transitions$/, 'a state change for the selected rule'],
+  [/^\/api\/v1\/rules\/{id}\/stage$/, 'a request to stage the selected rule'],
+  [/^\/api\/v1\/rules$/, 'a new validation rule'],
+  [/^\/api\/v1\/datasets\/{id}\/assemble$/, 'a request to assemble the selected dataset'],
+  [/^\/api\/v1\/datasets$/, 'a new dataset'],
+  [/^\/api\/v1\/definitions\/preview$/, 'a message definition to preview'],
+  [/^\/api\/v1\/definitions$/, 'a new message definition'],
+  [/^\/api\/v1\/session\/password-reset$/, 'a password reset request'],
+  [/^\/api\/v1\/session\/logout$/, 'a sign-out'],
+  [/^\/api\/v1\/inbound\/events$/, 'an inbound event'],
+  [/^\/api\/v1\/events\/emit$/, 'a test event'],
+  [/^\/api\/v1\/external-systems\/kafka\/connectivity-check$/, 'a Kafka connectivity check'],
+  [/^\/api\/v1\/external-systems\/[^/]+\/dummy$/, 'a test ping for the selected external system'],
+  [/^\/api\/v1\/catalog\/schemas\/drafts\/{id}\/publish$/, 'a request to publish the selected schema draft'],
+  [/^\/api\/v1\/catalog\/schemas\/drafts\/{id}\/tests$/, 'a test message for the selected schema draft'],
+  [/^\/api\/v1\/catalog\/schemas\/drafts\/{id}\/rules$/, 'a rule for the selected schema draft'],
+  [/^\/api\/v1\/catalog\/schemas\/drafts$/, 'a new schema draft'],
+  [/^\/api\/v1\/catalog\/schemas\/build$/, 'a request to build a schema'],
+  [/^\/api\/v1\/catalog\/iso\/parse$/, 'an ISO 20022 document to parse'],
+  [/^\/api\/v1\/catalog\/iso\/validate-markdown$/, 'an ISO 20022 markdown document to validate'],
+  [/^\/api\/v1\/catalog\/iso\/uploads$/, 'an ISO 20022 schema file to upload'],
+  [/^\/api\/v1\/naming\/preview$/, 'a name to preview'],
+  [/^\/api\/v1\/admin\/tenants\/[^/]+\/users$/, 'a new user account'],
+  [/^\/api\/v1\/admin\/users$/, 'a new user account'],
+  [/^\/api\/v1\/ai-proposals\/{id}\/review$/, 'a review decision for the selected AI proposal'],
+  [/^\/api\/v1\/environments\/{id}\/policy\/check$/, 'a safety-policy question for the selected environment'],
+  [/^\/api\/v1\/deployments$/, 'a deployment request'],
+  [/^\/api\/v1\/ops\/preflight$/, 'a request to preflight a target'],
+];
+
 const SELECTOR_GLOSSARY: Array<[RegExp, string]> = [
   [/^#screen-action$/, 'the main action button'],
   [/^#screen-status$/, 'the outcome line under the form'],
@@ -421,10 +486,23 @@ function humanSegments(path: string): string {
 }
 
 /** Route → what is asked for ("the list of delivery channels"). */
-export function describePath(path: string): string {
+export function describePath(path: string, surface?: string | null): string {
   const norm = normalizePath(path);
+  if (surface === 'engine') for (const [re, phrase] of ENGINE_PATH_GLOSSARY) if (re.test(norm)) return phrase;
   for (const [re, phrase] of PATH_GLOSSARY) if (re.test(norm)) return phrase;
   return humanSegments(norm);
+}
+
+/** Route → what a POST to it sends ("a message for the application"). */
+function describePost(path: string, surface: string | null): string {
+  const norm = normalizePath(path);
+  for (const [re, phrase] of POST_GLOSSARY) if (re.test(norm)) return phrase;
+  return `a request about ${describePath(path, surface).replace(/^its /, '')}`;
+}
+
+/** Placeholders inside an expected text → readable markers. */
+function plainMarkers(s: string): string {
+  return s.replace(/\{\{\s*ts\s*\}\}-\{\{\s*rand\s*\}\}/g, '<unique id>').replace(/\{\{\s*(ts|rand)\s*\}\}/g, '<stamp>').replace(/\{\{\s*([\w.-]+)\s*\}\}/g, '<$1>');
 }
 
 /** A templated URL → "the API's health check" / "the sign-in page of the web console". */
@@ -500,8 +578,8 @@ function requestExpected(step: Step): string {
   else if (st !== undefined) parts.push(`it ${plainStatus(st)}`);
   const checks: string[] = [];
   for (const e of step.expect_json || []) checks.push(jsonCheck(e));
-  if (step.expected_body_contains) checks.push(`the reply contains "${String(step.expected_body_contains).slice(0, 80)}"`);
-  if (step.expected_body_not_contains) checks.push(`the reply does not contain "${String(step.expected_body_not_contains).slice(0, 80)}"`);
+  if (step.expected_body_contains) checks.push(`the reply contains "${plainMarkers(String(step.expected_body_contains)).slice(0, 80)}"`);
+  if (step.expected_body_not_contains) checks.push(`the reply does not contain "${plainMarkers(String(step.expected_body_not_contains)).slice(0, 80)}"`);
   for (const h of step.expect_headers || []) checks.push(headerCheck(h));
   if (checks.length) parts.push((parts.length ? 'and ' : 'The reply shows: ') + checks.join('; '));
   if (!parts.length) parts.push('it answers without error');
@@ -514,7 +592,7 @@ function requestText(step: Step): string {
   const who = surface ? SURFACES[surface]! : 'the target';
   const whoShort = surface ? SURFACE_SHORT[surface]! : 'the target';
   const desc = typeof step.description === 'string' ? step.description.trim() : '';
-  const descIsRoute = !desc || /^\/|^(GET|POST|PUT|PATCH|DELETE)\b|^\{\{|^[a-z-]+$/.test(desc) && desc.length < 12;
+  const descIsRoute = !desc || /^\/|^(GET|POST|PUT|PATCH|DELETE)\b|^\{\{|^[a-z]+\/[a-z-]+$/.test(desc) || (/^[a-z-]+$/.test(desc) && desc.length < 12);
   const route = `${method} ${path}`;
 
   // Sign-in has its own wording wherever it appears.
@@ -527,14 +605,14 @@ function requestText(step: Step): string {
 
   let what: string;
   if (page !== null) what = describePage(page, surface);
-  else what = describePath(path);
+  else what = describePath(path, surface);
 
   let verb: string;
-  if (method === 'GET' || method === 'HEAD') verb = page !== null ? `Open ${what}` : `Ask ${who} for ${what}`;
+  if (method === 'GET' || method === 'HEAD') verb = page !== null ? `Open ${what}${surface && surface !== 'web' ? ` of ${whoShort}` : ''}` : `Ask ${who} for ${what}`;
   else if (method === 'DELETE') verb = `Delete ${what.replace(/^(the |a |an )/, 'the ')} on ${whoShort}`;
   else if (method === 'PUT' || method === 'PATCH') verb = `Update ${what} on ${whoShort}`;
   else if (method === 'OPTIONS' || method === 'TRACE') verb = `Send a ${method} request for ${what} to ${whoShort}`;
-  else verb = step.body !== undefined || step.body_raw !== undefined ? `Submit ${what} to ${whoShort}` : `Request ${what} from ${whoShort}`;
+  else verb = `Send ${describePost(path, surface)} to ${whoShort}`;
 
   const extra = desc && !descIsRoute && !/^(load screen|load current|load host screen)/i.test(desc) ? ` — ${desc}` : '';
   let text = `${verb}${extra} (${route})`;
@@ -569,8 +647,9 @@ function uiStep(step: Step): HumanStep {
   switch (a) {
     case 'navigate': {
       const { surface, path, page } = splitUrl(val);
-      const what = page !== null ? describePage(page, surface) : describePath(path);
-      return { text: `Open ${what} in the browser (${plainText(val)})`, expected: 'The page loads.' };
+      const what = page !== null ? describePage(page, surface) : describePath(path, surface);
+      const where = surface ? `${SURFACE_SHORT[surface]} ${path === '/' ? 'home' : path}` : val;
+      return { text: `Open ${what} in the browser (${where})`, expected: 'The page loads.' };
     }
     case 'click': return { text: `Click ${sel}`, expected: 'The click is accepted and the page reacts.' };
     case 'click_text': return { text: `Click the item labelled "${val}"`, expected: 'The click is accepted and the page reacts.' };
@@ -583,7 +662,7 @@ function uiStep(step: Step): HumanStep {
     case 'wait_for_hidden': return { text: `Wait until ${sel} disappears${t}`, expected: 'It disappears in time.' };
     case 'assert_text': return { text: `Check the page shows the text "${exp}"`, expected: `The text "${exp}" is visible on the page.` };
     case 'assert_selector_text': return { text: `Check ${sel} reads "${exp}"`, expected: `It shows "${exp}".` };
-    case 'assert_selector_count_min': return { text: `Count ${sel}`, expected: `There ${Number(exp) === 1 ? 'is at least 1' : `are at least ${exp}`}.` };
+    case 'assert_selector_count_min': { const n = exp || val || '1'; return { text: `Count ${sel}`, expected: `There ${Number(n) === 1 ? 'is at least 1' : `are at least ${n}`}.` }; }
     case 'assert_title': return { text: 'Check the browser tab title', expected: `The tab title is "${exp}".` };
     case 'assert_no_horizontal_overflow': return { text: 'Check the page fits the screen width', expected: 'Nothing sticks out sideways; no horizontal scrolling is needed.' };
     case 'wait': return { text: `Wait ${step.timeout_ms ? Math.round(step.timeout_ms / 1000) + ' s' : 'a moment'}`, expected: 'The page is given time to settle.' };

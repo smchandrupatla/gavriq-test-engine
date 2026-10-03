@@ -219,8 +219,10 @@ export async function infraRoutes(app: FastifyInstance) {
       await query(`UPDATE deployments SET status = 'failed', error = 'cancelled before the agent picked it up', finished_at = now() WHERE id = $1 AND status = 'queued'`, [job.deployment_id]);
     }
     if (job.environment_id) {
+      // The job never ran, so the stack is as it was before it was queued.
       const previous = (job.params || {}).previous_state;
-      await setEnvironmentState(job.environment_id, job.kind === 'teardown' && typeof previous === 'string' ? (previous as any) : 'unknown');
+      const restorable = ['up', 'down', 'failed', 'unknown'];
+      await setEnvironmentState(job.environment_id, typeof previous === 'string' && restorable.includes(previous) ? (previous as any) : 'unknown');
     }
     await audit(req, 'infra.job.cancel', 'infra_job', job.id, { kind: job.kind });
     return reply.send({ data: job });
