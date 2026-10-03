@@ -43,6 +43,22 @@ first half of the check.
   "workflow" and "data integrity" coverage: the UI action, and separately, the database
   write it was supposed to cause.
 
+- `63-selenium-message-definition-wizard.sit.ts` (Selenium, engine-owned): Message Designer →
+  Create message definition, end to end. **Navigation**: Back from the message step and from
+  the chosen message's field step, the earlier choice stays marked, exactly one message is
+  marked, a different message can be chosen after Back and the field step follows it, Start
+  over, keyboard operation. **Saving**: the last step offers *Save definition* with a
+  Saved / Not saved marker and no "Send to system" or publish control; the definition is saved
+  under its own name with the chosen default values as one record however often it is saved
+  (renaming un-marks Saved; Save as draft then continuing updates the same record); it is
+  listed under View saved definitions. **Datasets**: *Create dataset* makes a separate dataset
+  from the definition (a single message or a generated batch), the same definition can make
+  further datasets, and a refused dataset save shows the server's own reason rather than a
+  bare "request failed". Every on-screen "Saved" is confirmed through the API and every case
+  removes what it created. Controls are found by the console's stable `data-testid`s
+  (`wizard-back`, `wizard-save-definition`, `wizard-dataset-create`, ...), through
+  `sit/lib/selenium-wizard.ts`.
+
 Playwright and Selenium are two independent, unrelated browser-automation frameworks
 here on purpose — `60-ui-eventing.sit.ts` was written first with Playwright and stays as
 it is; `70`/`80` add Selenium WebDriver as a second, standalone framework for the broader
