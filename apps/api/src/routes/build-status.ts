@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db/client.js';
+import { DEFAULT_APPLICATION_KEY } from '../app-config.js';
 
 /**
  * In-container / build-time test status (original product requirement).
@@ -88,7 +89,7 @@ export async function buildStatusRoutes(app: FastifyInstance) {
   /** Latest build results for an application */
   app.get('/api/v1/build-results', async (req, reply) => {
     const q = req.query as Record<string, string>;
-    const appKey = q.application_key || 'sand-bench';
+    const appKey = q.application_key || DEFAULT_APPLICATION_KEY;
 
     if (q.build_id) {
       const { rows } = await query(
@@ -139,7 +140,7 @@ export async function buildStatusRoutes(app: FastifyInstance) {
     '/api/v1/build-results/test/:testKey',
     async (req, reply) => {
       const q = req.query as Record<string, string>;
-      const appKey = q.application_key || 'sand-bench';
+      const appKey = q.application_key || DEFAULT_APPLICATION_KEY;
       const { rows } = await query(
         `SELECT * FROM build_test_results
          WHERE application_key = $1 AND test_key = $2
@@ -159,7 +160,7 @@ export async function buildStatusRoutes(app: FastifyInstance) {
   /** Combined view: engine-executed + in-container for an application */
   app.get('/api/v1/test-status', async (req, reply) => {
     const q = req.query as Record<string, string>;
-    const appKey = q.application_key || 'sand-bench';
+    const appKey = q.application_key || DEFAULT_APPLICATION_KEY;
 
     // Engine-side cases
     const cases = await query(
