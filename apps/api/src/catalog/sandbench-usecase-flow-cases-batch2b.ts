@@ -58,6 +58,7 @@ C.push(
   {
     key: 'SB-UC-dsNew-MAIN',
     name: 'UC-dsNew main flow: Create new dataset',
+    objective: 'Walk through the "Create new dataset" screen the way its main use case describes it: operator names a dataset, the shell is created, then assemble is requested with a real message type and the materialised result is returned.',
     description: 'Main flow of UC-dsNew (Create new dataset): operator names a dataset, the shell is created, then assemble is requested with a real message type and the materialised result is returned. Touches POST /api/v1/datasets and POST /api/v1/datasets/:id/assemble.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 message type seeded.',
@@ -75,6 +76,7 @@ C.push(
   {
     key: 'SB-UC-dsNew-ALT-1',
     name: 'UC-dsNew alt flow 1: Items can be added after shell creation.',
+    objective: 'Check an alternative path of "Create new dataset": items can be added after shell creation. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: the matching write fails with an internal server error for every item kind (table/data_file/definition/workspace) on this deployment, even with a correct If-Match.',
     description: 'Alternate flow 1 of UC-dsNew (Create new dataset): "Items can be added after shell creation." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: POST /api/v1/datasets/:id/items returns 500 Internal error for every item kind (table/data_file/definition/workspace) on this deployment, even with a correct If-Match. This case asserts today\'s real (broken) behavior as a regression trip-wire — when fixed, update it to expect 200 with the appended item.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -91,6 +93,7 @@ C.push(
   {
     key: 'SB-UC-dsNew-ALT-2',
     name: 'UC-dsNew alt flow 2: Bulk merge is a separate operation with selected source dataset IDs.',
+    objective: 'Check an alternative path of "Create new dataset": bulk merge is a separate operation with selected source dataset IDs. Two independently created datasets are merged by id into a new named job.',
     description: 'Alternate flow 2 of UC-dsNew (Create new dataset): "Bulk merge is a separate operation with selected source dataset IDs." Two independently created datasets are merged by id into a new named job.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -108,6 +111,7 @@ C.push(
   {
     key: 'SB-UC-dsNew-EXC-1',
     name: 'UC-dsNew exc flow 1: Blank names are rejected.',
+    objective: 'Check that "Create new dataset" fails safely: blank names are rejected. POST with an empty/blank name must fail validation, not create an unnamed shell.',
     description: 'Exception flow 1 of UC-dsNew (Create new dataset): "Blank names are rejected." POST with an empty/blank name must fail validation, not create an unnamed shell.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -122,6 +126,7 @@ C.push(
   {
     key: 'SB-UC-dsNew-EXC-2',
     name: 'UC-dsNew exc flow 2: Shell creation may have succeeded even when later assembly fails; report each result separately.',
+    objective: 'Check that "Create new dataset" fails safely: shell creation may have succeeded even when later assembly fails; report each result separately. The shell create succeeds (a successful answer) while a subsequent assemble call with an invalid item kind fails cleanly (a validation refusal) — the two outcomes are independent, never conflated.',
     description: 'Exception flow 2 of UC-dsNew (Create new dataset): "Shell creation may have succeeded even when later assembly fails; report each result separately." The shell create succeeds (200) while a subsequent assemble call with an invalid item kind fails cleanly (422) — the two outcomes are independent, never conflated.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -145,6 +150,7 @@ C.push(
   {
     key: 'SB-UC-tcNew-MAIN',
     name: 'UC-tcNew main flow: New test case',
+    objective: 'Walk through the "New test case" screen the way its main use case describes it: analyst enters a distinct name and objective, saves, and the application service returns the case identity.',
     description: 'Main flow of UC-tcNew (New test case): analyst enters a distinct name and objective, saves, and the API returns the case identity. Touches POST /api/v1/test-cases.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -161,6 +167,7 @@ C.push(
   {
     key: 'SB-UC-tcNew-ALT-1',
     name: 'UC-tcNew alt flow 1: A case may be saved without a dataset under the current API.',
+    objective: 'Check an alternative path of "New test case": a case may be saved without a dataset under the current application service. Confirmed by the main flow case above already omitting datasetId — this case re-states it with an explicit assertion that datasetId stays unset.',
     description: 'Alternate flow 1 of UC-tcNew (New test case): "A case may be saved without a dataset under the current API." Confirmed by the main flow case above already omitting datasetId — this case re-states it with an explicit assertion that datasetId stays unset.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -176,6 +183,7 @@ C.push(
   {
     key: 'SB-UC-tcNew-ALT-2',
     name: 'UC-tcNew alt flow 2: The describe endpoint supplies a suggestion for analyst review, not a proven assertion.',
+    objective: 'Check an alternative path of "New test case": the describe endpoint supplies a suggestion for analyst review, not a proven assertion. the matching write returns a suggested objective string the analyst can accept or edit — it never itself creates a test case.',
     description: 'Alternate flow 2 of UC-tcNew (New test case): "The describe endpoint supplies a suggestion for analyst review, not a proven assertion." POST /api/v1/test-cases/describe returns a suggested objective string the analyst can accept or edit — it never itself creates a test case.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -190,6 +198,7 @@ C.push(
   {
     key: 'SB-UC-tcNew-EXC-1',
     name: 'UC-tcNew exc flow 1: Blank name is rejected by createCase.',
+    objective: 'Check that "New test case" fails safely: blank name is rejected by createCase. POST with a blank name must fail validation.',
     description: 'Exception flow 1 of UC-tcNew (New test case): "Blank name is rejected by createCase." POST with a blank name must fail validation.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -204,6 +213,7 @@ C.push(
   {
     key: 'SB-UC-tcNew-EXC-2',
     name: 'UC-tcNew exc flow 2: A failed or uncertain save must not be displayed as a confirmed test-case creation.',
+    objective: 'Check that "New test case" fails safely: a failed or uncertain save must not be displayed as a confirmed test-case creation. A rejected create (blank name) returns no id at all — there is no identity to mistake for a confirmed creation.',
     description: 'Exception flow 2 of UC-tcNew (New test case): "A failed or uncertain save must not be displayed as a confirmed test-case creation." A rejected create (blank name) returns no id at all — there is no identity to mistake for a confirmed creation.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -225,6 +235,7 @@ C.push(
   {
     key: 'SB-UC-trNew-MAIN',
     name: 'UC-trNew main flow: New test run',
+    objective: 'Walk through the "New test run" screen the way its main use case describes it: operator chooses message type, count and channel, submits once, and the engine generates/sends data and reports totals plus an evaluation result.',
     description: 'Main flow of UC-trNew (New test run): operator chooses message type, count and channel, submits once, and the engine generates/sends data and reports totals plus an evaluation result. Touches POST /api/v1/runs.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 message type seeded.',
@@ -240,6 +251,7 @@ C.push(
   {
     key: 'SB-UC-trNew-ALT-1',
     name: 'UC-trNew alt flow 1: The current channel default is file.',
+    objective: 'Check an alternative path of "New test run": the current channel default is file. Submitting a run without an explicit channel falls back to "file", not an unconfigured default.',
     description: 'Alternate flow 1 of UC-trNew (New test run): "The current channel default is file." Submitting a run without an explicit channel falls back to "file", not an unconfigured default.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -254,6 +266,7 @@ C.push(
   {
     key: 'SB-UC-trNew-ALT-2',
     name: 'UC-trNew alt flow 2: Boundary, injection, oversized or malformed generation is an explicit security test choice.',
+    objective: 'Check an alternative path of "New test run": boundary, injection, oversized or malformed generation is an explicit security test choice. A run explicitly requesting securityKind="boundary" is accepted as a distinct, named generation mode.',
     description: 'Alternate flow 2 of UC-trNew (New test run): "Boundary, injection, oversized or malformed generation is an explicit security test choice." A run explicitly requesting securityKind="boundary" is accepted as a distinct, named generation mode.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -268,6 +281,7 @@ C.push(
   {
     key: 'SB-UC-trNew-EXC-1',
     name: 'UC-trNew exc flow 1: Missing messageTypeCode is rejected.',
+    objective: 'Check that "New test run" fails safely: missing messageTypeCode is rejected. POST with no messageTypeCode must fail cleanly, not run against an invented default type.',
     description: 'Exception flow 1 of UC-trNew (New test run): "Missing messageTypeCode is rejected." POST with no messageTypeCode must fail cleanly, not run against an invented default type.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -282,6 +296,7 @@ C.push(
   {
     key: 'SB-UC-trNew-EXC-2',
     name: 'UC-trNew exc flow 2: The current persistence fallback can return a local ID; this is not proof of a durable run record.',
+    objective: 'Check that "New test run" fails safely: the current persistence fallback can return a local ID; this is not proof of a durable run record. The returned runId is independently checked against the matching read — a real persisted row, not merely an echoed client-side id.',
     description: 'Exception flow 2 of UC-trNew (New test run): "The current persistence fallback can return a local ID; this is not proof of a durable run record." The returned runId is independently checked against GET /api/v1/runs/:id — a real persisted row, not merely an echoed client-side id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -304,6 +319,7 @@ C.push(
   {
     key: 'SB-UC-tsNew-MAIN',
     name: 'UC-tsNew main flow: New test suite',
+    objective: 'Walk through the "New test suite" screen the way its main use case describes it: this case creates a temporary member case, creates a suite, sets membership, and reopens it to confirm the stored link.',
     description: 'Main flow of UC-tsNew (New test suite): this case creates a temporary member case, creates a suite, sets membership, and reopens it to confirm the stored link.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -323,6 +339,7 @@ C.push(
   {
     key: 'SB-UC-tsNew-ALT-1',
     name: 'UC-tsNew alt flow 1: An empty suite can be created as an incomplete grouping.',
+    objective: 'Check an alternative path of "New test suite": an empty suite can be created as an incomplete grouping. A suite created with no caseIds is accepted with zero members, not rejected.',
     description: 'Alternate flow 1 of UC-tsNew (New test suite): "An empty suite can be created as an incomplete grouping." A suite created with no caseIds is accepted with zero members, not rejected.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -338,6 +355,7 @@ C.push(
   {
     key: 'SB-UC-tsNew-ALT-2',
     name: 'UC-tsNew alt flow 2: Later membership/order changes use the supported suite APIs.',
+    objective: 'Check an alternative path of "New test suite": later membership/order changes use the supported suite APIs. A suite\'s membership, once set, can be changed again via the same PUT endpoint. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: a second PUT with an empty case_ids array (clearing membership) 500s instead of succeeding — this case asserts today\'s real (broken) behavior as a regression trip-wire.',
     description: 'Alternate flow 2 of UC-tsNew (New test suite): "Later membership/order changes use the supported suite APIs." A suite\'s membership, once set, can be changed again via the same PUT endpoint. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: a second PUT with an empty case_ids array (clearing membership) 500s instead of succeeding — this case asserts today\'s real (broken) behavior as a regression trip-wire.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -356,6 +374,7 @@ C.push(
   {
     key: 'SB-UC-tsNew-EXC-1',
     name: 'UC-tsNew exc flow 1: Blank name is rejected.',
+    objective: 'Check that "New test suite" fails safely: blank name is rejected. POST with an empty name must fail, not create an unnamed suite.',
     description: 'Exception flow 1 of UC-tsNew (New test suite): "Blank name is rejected." POST with an empty name must fail, not create an unnamed suite.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -370,6 +389,7 @@ C.push(
   {
     key: 'SB-UC-tsNew-EXC-2',
     name: 'UC-tsNew exc flow 2: Unknown member IDs or duplicate entries need an explicit result rather than silent loss.',
+    objective: 'Check that "New test suite" fails safely: unknown member IDs or duplicate entries need an explicit result rather than silent loss. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: setting membership to a nonexistent case id 500s rather than being silently dropped OR cleanly rejected — the actual failure mode is worse than the spec\'s own concern (an unhandled crash, not even a silent loss).',
     description: 'Exception flow 2 of UC-tsNew (New test suite): "Unknown member IDs or duplicate entries need an explicit result rather than silent loss." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: setting membership to a nonexistent case id 500s rather than being silently dropped OR cleanly rejected — the actual failure mode is worse than the spec\'s own concern (an unhandled crash, not even a silent loss).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -393,6 +413,7 @@ C.push(
   {
     key: 'SB-UC-tsAll-MAIN',
     name: 'UC-tsAll main flow: Test Suites',
+    objective: 'Walk through the "Test Suites" screen the way its main use case describes it: analyst opens Test Suites, inspects a suite\'s member case IDs, requests a supported run, and the application service reports the specific request result (not just acceptance).',
     description: 'Main flow of UC-tsAll (Test Suites): analyst opens Test Suites, inspects a suite\'s member case IDs, requests a supported run, and the API reports the specific request result (not just acceptance). Touches GET /api/v1/test-suites and POST /api/v1/test-suites/:id/run.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -410,6 +431,7 @@ C.push(
   {
     key: 'SB-UC-tsAll-ALT-1',
     name: 'UC-tsAll alt flow 1: An empty suite remains visible with zero members.',
+    objective: 'Check an alternative path of "Test Suites": an empty suite remains visible with zero members. A newly created empty suite is independently readable with case_ids length 0, not hidden from the listing.',
     description: 'Alternate flow 1 of UC-tsAll (Test Suites): "An empty suite remains visible with zero members." A newly created empty suite is independently readable with case_ids length 0, not hidden from the listing.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -426,6 +448,7 @@ C.push(
   {
     key: 'SB-UC-tsAll-ALT-2',
     name: 'UC-tsAll alt flow 2: Deleting a suite removes the grouping, not the test-case definitions.',
+    objective: 'Check an alternative path of "Test Suites": deleting a suite removes the grouping, not the test-case definitions.',
     description: 'Alternate flow 2 of UC-tsAll (Test Suites): "Deleting a suite removes the grouping, not the test-case definitions." This case creates a member case, deletes its containing suite, then verifies the case remains independently readable.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -444,6 +467,7 @@ C.push(
   {
     key: 'SB-UC-tsAll-EXC-1',
     name: 'UC-tsAll exc flow 1: A stale If-Match on update or deletion is rejected.',
+    objective: 'Check that "Test Suites" fails safely: a stale If-Match on update or deletion is rejected. Deleting a suite we created, but with a deliberately wrong If-Match, must be rejected with a precondition failure.',
     description: 'Exception flow 1 of UC-tsAll (Test Suites): "A stale If-Match on update or deletion is rejected." Deleting a suite we created, but with a deliberately wrong If-Match, must be rejected with a precondition failure.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -460,6 +484,7 @@ C.push(
   {
     key: 'SB-UC-tsAll-EXC-2',
     name: 'UC-tsAll exc flow 2: A removed member must not be silently counted as an executed case.',
+    objective: 'Check that "Test Suites" fails safely: a removed member must not be silently counted as an executed case. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: clearing a suite\'s membership to an empty array via PUT the application application service 500s rather than succeeding, so the "removed member, then run" path cannot currently be exercised past the removal step.',
     description: 'Exception flow 2 of UC-tsAll (Test Suites): "A removed member must not be silently counted as an executed case." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: clearing a suite\'s membership to an empty array via PUT /api/v1/test-suites/:id/cases 500s rather than succeeding, so the "removed member, then run" path cannot currently be exercised past the removal step.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',

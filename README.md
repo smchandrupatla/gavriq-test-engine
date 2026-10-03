@@ -16,6 +16,7 @@ Enterprise Test Engineering & Validation platform — central repository, on-dem
 | **In-container status** | CI posts build results; engine displays them (does not re-run them) |
 | **Workers** | Distributed claim/result protocol |
 | **Schedules** | Interval (`every:N`) and event triggers (`after_build`, …) |
+| **Infrastructure lifecycle** | Managed Docker stacks run only while tested: deployed on demand or when a run needs them, torn down after the run / when idle / when up too long; Docker housekeeping on a cadence (`docs/INFRA-LIFECYCLE.md`) |
 | **Release readiness** | READY / READY WITH CONDITIONS / NOT READY |
 | **Dashboard** | Dark UI at port **8787** |
 | **SIT console** | Existing post-deploy runner UI at **8098** (preserved) |

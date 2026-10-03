@@ -9,6 +9,7 @@
  *   node deploy/engine-staging/deploy.mjs seed [--engine URL]
  *   node deploy/engine-staging/deploy.mjs register
  *   node deploy/engine-staging/deploy.mjs stop
+ *   node deploy/engine-staging/deploy.mjs down [--rmi] [--volumes]   containers (+ images, + data) removed; engine told it is down
  *   node deploy/engine-staging/deploy.mjs reset
  *
  * The source is exported with `git archive`, so staging runs exactly what is
@@ -229,7 +230,19 @@ async function seed(target) {
  * Targets are written for the host (127.0.0.1); a containerized worker
  * re-points them at the host gateway (apps/worker/src/worker.ts).
  */
+/** What the engine shows as "deployed": the pinned commit, and whether the stack is up or down. */
+function deploymentInfo(state) {
+  if (!state) return { compose_project: PROJECT };
+  return {
+    compose_project: PROJECT, ref: state.ref, commit: state.commit, version: state.version, deployed_at: state.deployed_at,
+    state: state.state || 'up',
+    ...(state.torn_down_at ? { torn_down_at: state.torn_down_at } : {}),
+  };
+}
+
 async function register(state) {
+  const existing = await call(controller, 'GET', `/api/v1/environments/${ENV_KEY}`);
+  const existingConfig = (existing.ok && existing.json?.data?.config) || {};
   const body = {
     name: 'Test Engine · local Docker (staging)',
     env_type: 'staging',
@@ -238,9 +251,15 @@ async function register(state) {
     config: {
       applications: [APP_KEY],
       vars: { engine: staging },
-      deployment: state
-        ? { compose_project: PROJECT, ref: state.ref, commit: state.commit, version: state.version, deployed_at: state.deployed_at }
-        : { compose_project: PROJECT },
+      // Managed by the engine's infrastructure lifecycle (apps/api/src/infra.ts): the infra agent
+      // deploys and tears this stack down with this script. The console's "Deploy" redeploys the
+      // branch deployed here unless a default_ref was set in the console; hours set there are kept.
+      infra: {
+        ...(state?.ref ? { default_ref: state.ref } : {}),
+        ...(existingConfig.infra || {}),
+        driver: 'compose', script: 'deploy/engine-staging/deploy.mjs', compose_project: PROJECT,
+      },
+      deployment: deploymentInfo(state),
     },
     safety_policy: {
       functional_smoke: 'allowed', read_only_api: 'allowed', write_api: 'allowed',
@@ -249,7 +268,6 @@ async function register(state) {
     },
     updated_by: 'deploy/engine-staging',
   };
-  const existing = await call(controller, 'GET', `/api/v1/environments/${ENV_KEY}`);
   const res = existing.ok
     ? await call(controller, 'PATCH', `/api/v1/environments/${ENV_KEY}`, body)
     : await call(controller, 'POST', '/api/v1/environments', { key: ENV_KEY, created_by: 'deploy/engine-staging', ...body });
@@ -284,12 +302,43 @@ async function main() {
     if (!healthy) throw new Error('staging is up but failed verification — not registering it');
     if (!args.includes('--no-seed')) await seed(staging);
     if (!args.includes('--no-register')) await register(state);
+    // Machine-readable summary for the infra agent (apps/infra-agent).
+    console.log(`[engine-staging] RESULT ${JSON.stringify({ ref: state.ref, commit: state.commit, version: state.version, deployed_at: state.deployed_at })}`);
     return;
   }
 
   const state = readState();
   if (action === 'register') return register(state);
   if (action === 'seed') return seed(option(args, 'engine', staging).replace(/\/$/, ''));
+
+  // Take the stack down: containers and network always; images with --rmi, data volumes with --volumes.
+  // Compose does the orderly part; the label sweep catches whatever it could not. The engine is told
+  // the stack is down.
+  if (action === 'down') {
+    const rmi = args.includes('--rmi');
+    const volumes = args.includes('--volumes');
+    if (state && existsSync(path.join(state.source, 'compose.yaml'))) {
+      const src = { tag: state.tag, commit: state.commit, dir: state.source, version: state.version.replace(/-staging$/, '') };
+      try {
+        compose(src, ['down', '--remove-orphans', ...(rmi ? ['--rmi', 'all'] : []), ...(volumes ? ['-v'] : [])]);
+      } catch (err) {
+        console.warn(`[engine-staging] compose down reported: ${err.message.split('\n')[0]} — sweeping by label`);
+      }
+    }
+    sweep(rmi, volumes);
+    if (state) {
+      const next = { ...state, state: 'down', torn_down_at: new Date().toISOString(), healthy: false };
+      writeFileSync(stateFile, JSON.stringify(next, null, 2));
+      try {
+        await register(next);
+      } catch (err) {
+        console.warn(`[engine-staging] engine not updated: ${err.message}`);
+      }
+    }
+    console.log(`[engine-staging] ${PROJECT} is down${rmi ? ', images removed' : ''}${volumes ? ', volumes removed' : ''}`);
+    return;
+  }
+
   if (!state) throw new Error(`nothing deployed yet (no ${stateFile})`);
   const src = { tag: state.tag, commit: state.commit, dir: state.source, version: state.version.replace(/-staging$/, '') };
 
@@ -303,7 +352,30 @@ async function main() {
   // Throws the staging database and evidence away; the next deploy boots from an empty one.
   if (action === 'reset') return void compose(src, ['down', '-v']);
 
-  console.log('node deploy/engine-staging/deploy.mjs <deploy [--ref REF] [--no-seed] [--no-register] | status | seed [--engine URL] | register | stop | reset>');
+  console.log('node deploy/engine-staging/deploy.mjs <deploy [--ref REF] [--no-seed] [--no-register] | status | seed [--engine URL] | register | stop | down [--rmi] [--volumes] | reset>');
+}
+
+/** Remove everything still carrying this compose project's label. Each removal is best effort: an image another project shares stays. */
+function sweep(rmi, volumes) {
+  const filter = `label=com.docker.compose.project=${PROJECT}`;
+  const ids = (out) => out.split(/\s+/).filter(Boolean);
+  const containers = ids(run('docker', ['ps', '-aq', '--filter', filter]));
+  if (containers.length) run('docker', ['rm', '-f', ...containers]);
+  for (const id of ids(run('docker', ['network', 'ls', '-q', '--filter', filter]))) {
+    try { run('docker', ['network', 'rm', id]); } catch { /* in use elsewhere */ }
+  }
+  let images = 0;
+  if (rmi) {
+    for (const id of new Set(ids(run('docker', ['images', '-q', '--filter', filter])))) {
+      try { run('docker', ['rmi', id]); images++; } catch { /* another container uses it */ }
+    }
+  }
+  if (volumes) {
+    for (const name of ids(run('docker', ['volume', 'ls', '-q', '--filter', filter]))) {
+      try { run('docker', ['volume', 'rm', name]); } catch { /* in use */ }
+    }
+  }
+  console.log(`[engine-staging] swept ${containers.length} container(s)${rmi ? `, ${images} image(s)` : ''} of ${PROJECT}`);
 }
 
 main().catch((err) => {

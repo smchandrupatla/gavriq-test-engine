@@ -26,6 +26,7 @@ C.push(
   {
     key: 'SB-UC-messageDesigner-MAIN',
     name: 'UC-messageDesigner main flow: Build a schema-ready message',
+    objective: 'Walk through the "Build a schema-ready message" screen the way its main use case describes it: analyst loads designer types, creates a custom message type, then saves a definition against it; the save result is reported distinct from generation/delivery.',
     description: 'Main flow of UC-messageDesigner (Build a schema-ready message): analyst loads designer types, creates a custom message type, then saves a definition against it; the save result is reported distinct from generation/delivery. Touches GET /api/v1/catalog/designer-types, POST /api/v1/message-types and POST /api/v1/definitions.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -43,6 +44,7 @@ C.push(
   {
     key: 'SB-UC-messageDesigner-ALT-1',
     name: 'UC-messageDesigner alt flow 1: A verified Scheme Definitions handoff opens the workspace with the selected schema.',
+    objective: 'Check an alternative path of "Build a schema-ready message": a verified Scheme Definitions handoff opens the workspace with the selected schema. A definition created against a real, pre-existing registered message type (pain.001.001.09, not a freshly minted one) is accepted exactly as if handed off from Scheme Definitions.',
     description: 'Alternate flow 1 of UC-messageDesigner (Build a schema-ready message): "A verified Scheme Definitions handoff opens the workspace with the selected schema." A definition created against a real, pre-existing registered message type (pain.001.001.09, not a freshly minted one) is accepted exactly as if handed off from Scheme Definitions.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 seeded.',
@@ -57,6 +59,7 @@ C.push(
   {
     key: 'SB-UC-messageDesigner-ALT-2',
     name: 'UC-messageDesigner alt flow 2: Back changes the current step; Start over deliberately resets the selection.',
+    objective: 'Check an alternative path of "Build a schema-ready message": back changes the current step; Start over deliberately resets the selection.',
     description: 'Alternate flow 2 of UC-messageDesigner (Build a schema-ready message): "Back changes the current step; Start over deliberately resets the selection." No backing API call is made for this flow by design — step navigation is pure client-side wizard state with no server round trip.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -70,6 +73,7 @@ C.push(
   {
     key: 'SB-UC-messageDesigner-EXC-1',
     name: 'UC-messageDesigner exc flow 1: An empty catalogue offers import guidance.',
+    objective: 'Check that "Build a schema-ready message" fails safely: an empty catalogue offers import guidance.',
     description: 'Exception flow 1 of UC-messageDesigner (Build a schema-ready message): "An empty catalogue offers import guidance." Closest executable proxy: the designer-types read always answers with a clean 200/array shape (never an error masquerading as an empty catalogue), which is the precondition for the UI to correctly distinguish "truly empty" from "failed to load".',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -84,6 +88,7 @@ C.push(
   {
     key: 'SB-UC-messageDesigner-EXC-2',
     name: 'UC-messageDesigner exc flow 2: A stale or missing handoff schema cannot be replaced silently with another message type.',
+    objective: 'Check that "Build a schema-ready message" fails safely: a stale or missing handoff schema cannot be replaced silently with another message type. Saving a definition against a nonexistent msgTypeCode must be rejected or clearly disclosed, never silently rewritten to a different real type.',
     description: 'Exception flow 2 of UC-messageDesigner (Build a schema-ready message): "A stale or missing handoff schema cannot be replaced silently with another message type." Saving a definition against a nonexistent msgTypeCode must be rejected or clearly disclosed, never silently rewritten to a different real type.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -105,6 +110,7 @@ C.push(
   {
     key: 'SB-UC-messageDesignerWorkspace-MAIN',
     name: 'UC-messageDesignerWorkspace main flow: Generate test data',
+    objective: 'Walk through the "Generate test data" screen the way its main use case describes it: analyst saves a definition, requests a preview, and the system distinguishes the definition, the generated preview batch, and (separately) any delivery outcome.',
     description: 'Main flow of UC-messageDesignerWorkspace (Generate test data): analyst saves a definition, requests a preview, and the system distinguishes the definition, the generated preview batch, and (separately) any delivery outcome. Touches POST /api/v1/definitions and POST /api/v1/definitions/preview.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 seeded.',
@@ -121,6 +127,7 @@ C.push(
   {
     key: 'SB-UC-messageDesignerWorkspace-ALT-1',
     name: 'UC-messageDesignerWorkspace alt flow 1: Single and multiple generation have separate count settings.',
+    objective: 'Check an alternative path of "Generate test data": single and multiple generation have separate count settings. A count=1 preview and a count=5 preview each report exactly the requested count, not a shared/ignored default.',
     description: 'Alternate flow 1 of UC-messageDesignerWorkspace (Generate test data): "Single and multiple generation have separate count settings." A count=1 preview and a count=5 preview each report exactly the requested count, not a shared/ignored default.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -136,6 +143,7 @@ C.push(
   {
     key: 'SB-UC-messageDesignerWorkspace-ALT-2',
     name: 'UC-messageDesignerWorkspace alt flow 2: Adversarial generation intentionally violates selected constraints and is labelled as such.',
+    objective: 'Check an alternative path of "Generate test data": adversarial generation intentionally violates selected constraints and is labelled as such. The randomize endpoint reports schemaValid explicitly on its generated values, so a constraint-violating generation is always distinguishable from a valid one.',
     description: 'Alternate flow 2 of UC-messageDesignerWorkspace (Generate test data): "Adversarial generation intentionally violates selected constraints and is labelled as such." The randomize endpoint reports schemaValid explicitly on its generated values, so a constraint-violating generation is always distinguishable from a valid one.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -150,6 +158,7 @@ C.push(
   {
     key: 'SB-UC-messageDesignerWorkspace-EXC-1',
     name: 'UC-messageDesignerWorkspace exc flow 1: Preview failure is not a saved batch.',
+    objective: 'Check that "Generate test data" fails safely: preview failure is not a saved batch. A preview request against an unknown message type fails cleanly and is never confused with the matching read (the actually-saved batch collection, which this failed preview must not appear in).',
     description: 'Exception flow 1 of UC-messageDesignerWorkspace (Generate test data): "Preview failure is not a saved batch." A preview request against an unknown message type fails cleanly and is never confused with GET /api/v1/generated-messages (the actually-saved batch collection, which this failed preview must not appear in).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -164,6 +173,7 @@ C.push(
   {
     key: 'SB-UC-messageDesignerWorkspace-EXC-2',
     name: 'UC-messageDesignerWorkspace exc flow 2: Partial or uncertain saving reports the known result without claiming every requested message persisted.',
+    objective: 'Check that "Generate test data" fails safely: partial or uncertain saving reports the known result without claiming every requested message persisted. The preview response\'s own count/messages length is checked for internal consistency — the application service never reports a count larger than the messages it actually returns.',
     description: 'Exception flow 2 of UC-messageDesignerWorkspace (Generate test data): "Partial or uncertain saving reports the known result without claiming every requested message persisted." The preview response\'s own count/messages length is checked for internal consistency — the API never reports a count larger than the messages it actually returns.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',

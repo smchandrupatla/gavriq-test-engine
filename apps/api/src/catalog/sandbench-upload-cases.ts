@@ -28,6 +28,7 @@ function uploadCase(fileName: string, markdownFileName?: string): CaseDef {
   return {
     key: markdownFileName ? 'SB-UPLOAD-MARKDOWN-MDR-2025-2026' : `SB-UPLOAD-XSD-${fileName.replace(/\.xsd$/, '').toUpperCase().replaceAll('.', '-')}`,
     name: `${markdownFileName ? 'Upload Markdown test case' : 'Upload XSD test case'} - ${document}`,
+    objective: `Upload the ISO 20022 file ${document}${markdownFileName ? ` together with its companion schema ${fileName}` : ''} through the Import Scheme screen, confirm it is stored and appears in the list of scheme definitions after a reload, then remove only this run's import.`,
     description: `Validate Sandbench Enterprise using ${document}. ${markdownFileName ? `Upload this Markdown as an accompanying document with ${fileName}, as required by the Import Scheme screen.` : 'Upload this XSD alone through the Import Scheme screen.'} Require a successful new stored response, verify the saved filename and content, then locate the exact imported record in Scheme Definitions after reloading. Capture screenshot evidence and remove only this execution's temporary import.`,
     suiteKey: SANDBENCH_UPLOAD_SUITE.key,
     testType: 'acceptance',

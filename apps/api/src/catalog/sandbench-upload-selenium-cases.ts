@@ -14,6 +14,7 @@ function uploadCase(fileName: string, markdownFileName?: string): CaseDef {
   return {
     key: markdownFileName ? 'SB-UPLOAD-MARKDOWN-SELENIUM-MDR-2025-2026' : `SB-UPLOAD-XSD-SELENIUM-${fileName.replace(/\.xsd$/, '').toUpperCase().replaceAll('.', '-')}`,
     name: `${markdownFileName ? 'Upload Markdown test case (Selenium)' : 'Upload XSD test case (Selenium)'} - ${document}`,
+    objective: `Using the Selenium browser driver, upload the ISO 20022 file ${document}${markdownFileName ? ` together with its companion schema ${fileName}` : ''} through the Import Scheme screen, confirm it is stored and listed after a reload, then remove only this run's import.`,
     description: `Validate Sandbench Enterprise using ${document} via Selenium WebDriver. ${markdownFileName ? `Upload this Markdown as an accompanying document with ${fileName}, as required by the Import Scheme screen.` : 'Upload this XSD alone through the Import Scheme screen.'} Require a successful new stored response, verify the saved filename and content, then locate the exact imported record in Scheme Definitions after reloading. Capture screenshot evidence and remove only this execution's temporary import. Runs headless by default; pass metadata.headless=false on the execution request to watch the browser.`,
     suiteKey: SANDBENCH_UPLOAD_SELENIUM_SUITE.key,
     testType: 'selenium-baseline',

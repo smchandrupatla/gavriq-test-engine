@@ -156,7 +156,7 @@ export const PRE = {
   browser: 'Target engine reachable; worker has the browser engine the case names.',
 };
 
-type Overrides = Partial<CaseDef> & Pick<CaseDef, 'key' | 'name' | 'description'>;
+type Overrides = Partial<CaseDef> & Pick<CaseDef, 'key' | 'name' | 'objective' | 'description'>;
 
 function cleanupExecutions(steps: unknown[] | undefined): Step[] {
   const ids = new Set<string>();

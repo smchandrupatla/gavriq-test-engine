@@ -51,6 +51,7 @@ C.push(
   {
     key: 'SB-UC-configuration-MAIN',
     name: 'UC-configuration main flow: Configuration',
+    objective: 'Walk through the "Configuration" screen the way its main use case describes it: administrator loads the use-case-visibility setting, applies it back unchanged (an idempotent echo of the real current value), and reopens it to confirm the effective value.',
     description: 'Main flow of UC-configuration (Configuration): administrator loads the use-case-visibility setting, applies it back unchanged (an idempotent echo of the real current value), and reopens it to confirm the effective value. Touches PATCH /api/v1/settings/use-cases.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -69,6 +70,7 @@ C.push(
   {
     key: 'SB-UC-configuration-ALT-1',
     name: 'UC-configuration alt flow 1: Use-case visibility can be enabled or disabled independently.',
+    objective: 'Check an alternative path of "Configuration": use-case visibility can be enabled or disabled independently. The setting is its own independent resource at the application application service, distinct from every other settings endpoint — confirmed by reading it in isolation.',
     description: 'Alternate flow 1 of UC-configuration (Configuration): "Use-case visibility can be enabled or disabled independently." The setting is its own independent resource at /api/v1/settings/use-cases, distinct from every other settings endpoint — confirmed by reading it in isolation.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -83,6 +85,7 @@ C.push(
   {
     key: 'SB-UC-configuration-ALT-2',
     name: 'UC-configuration alt flow 2: Logging, eventing and feature access are distinct settings operations.',
+    objective: 'Check an alternative path of "Configuration": logging, eventing and feature access are distinct settings operations. Three separate reads (logging, eventing, features) each answer from their own distinct resource.',
     description: 'Alternate flow 2 of UC-configuration (Configuration): "Logging, eventing and feature access are distinct settings operations." Three separate reads (logging, eventing, features) each answer from their own distinct resource.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -99,6 +102,7 @@ C.push(
   {
     key: 'SB-UC-configuration-EXC-1',
     name: 'UC-configuration exc flow 1: A failed save does not change the displayed confirmed value.',
+    objective: 'Check that "Configuration" fails safely: a failed save does not change the displayed confirmed value.',
     description: 'Exception flow 1 of UC-configuration (Configuration): "A failed save does not change the displayed confirmed value." Verified live: this endpoint accepts any non-false value as enabled=true (the check is `enabled !== false`, not a strict boolean), so a loosely-typed value like the string "yes" is coerced to true rather than rejected — a looser validation than a strict boolean would give, worth noting even though it never produces an inconsistent displayed value. Immediately restored to enabled=true afterward.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -114,6 +118,7 @@ C.push(
   {
     key: 'SB-UC-configuration-EXC-2',
     name: 'UC-configuration exc flow 2: A static settings row without a write binding is identified as a placeholder.',
+    objective: 'Check that "Configuration" fails safely: a static settings row without a write binding is identified as a placeholder. UC-configurationApiAccess, UC-configurationDataRetention and UC-configurationEnvironmentDefaults all register zero backing APIs — confirmed by their own documented action contracts carrying no application service entries at all, the honest signal of a placeholder/unwired row.',
     description: 'Exception flow 2 of UC-configuration (Configuration): "A static settings row without a write binding is identified as a placeholder." UC-configurationApiAccess, UC-configurationDataRetention and UC-configurationEnvironmentDefaults all register zero backing APIs — confirmed by their own documented action contracts carrying no API entries at all, the honest signal of a placeholder/unwired row.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -134,6 +139,7 @@ C.push(
   {
     key: 'SB-UC-configurationAppConfigs-MAIN',
     name: 'UC-configurationAppConfigs main flow: App configs',
+    objective: 'Walk through the "App configs" screen the way its main use case describes it: administrator mounts logging/event panels, reviews current values, and saves the logging panel back unchanged (idempotent echo), with the server-confirmed result reported.',
     description: 'Main flow of UC-configurationAppConfigs (App configs): administrator mounts logging/event panels, reviews current values, and saves the logging panel back unchanged (idempotent echo), with the server-confirmed result reported. Touches GET/PUT /api/v1/settings/logging and GET /api/v1/events/catalog.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -151,6 +157,7 @@ C.push(
   {
     key: 'SB-UC-configurationAppConfigs-ALT-1',
     name: 'UC-configurationAppConfigs alt flow 1: Event catalogue and origin headers can be inspected without edits.',
+    objective: 'Check an alternative path of "App configs": event catalogue and origin headers can be inspected without edits. the matching read and the matching read are both read-only inspections with no write counterpart fired here.',
     description: 'Alternate flow 1 of UC-configurationAppConfigs (App configs): "Event catalogue and origin headers can be inspected without edits." GET /api/v1/events/catalog and GET /api/v1/events/headers are both read-only inspections with no write counterpart fired here.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -166,6 +173,7 @@ C.push(
   {
     key: 'SB-UC-configurationAppConfigs-ALT-2',
     name: 'UC-configurationAppConfigs alt flow 2: Logging forward destination can be changed independently from other panels.',
+    objective: 'Check an alternative path of "App configs": logging forward destination can be changed independently from other panels. Saving the logging panel (echoed) never touches the eventing panel\'s own stored value, confirmed by reading eventing unchanged immediately after.',
     description: 'Alternate flow 2 of UC-configurationAppConfigs (App configs): "Logging forward destination can be changed independently from other panels." Saving the logging panel (echoed) never touches the eventing panel\'s own stored value, confirmed by reading eventing unchanged immediately after.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -184,6 +192,7 @@ C.push(
   {
     key: 'SB-UC-configurationAppConfigs-EXC-1',
     name: 'UC-configurationAppConfigs exc flow 1: Timeout save failure may leave a local-only value; it is not a tenant-persisted success.',
+    objective: 'Check that "App configs" fails safely: timeout save failure may leave a local-only value; it is not a tenant-persisted success.',
     description: 'Exception flow 1 of UC-configurationAppConfigs (App configs): "Timeout save failure may leave a local-only value; it is not a tenant-persisted success." Verified live: an unrecognized forward destination is not rejected — it is silently sanitized to "off" server-side (never saved as the bogus value, and never left claiming an unsupported destination is active). Immediately restored to the real original value afterward.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -200,6 +209,7 @@ C.push(
   {
     key: 'SB-UC-configurationAppConfigs-EXC-2',
     name: 'UC-configurationAppConfigs exc flow 2: A displayed origin JSON block is not an edit control.',
+    objective: 'Check that "App configs" fails safely: a displayed origin data block is not an edit control. the matching read is documented and callable only as a read; this case confirms it has no corresponding write fired through this flow (the real update /events/headers has an entirely different request shape and is governed by its own UC-eventFramework contract, not this one).',
     description: 'Exception flow 2 of UC-configurationAppConfigs (App configs): "A displayed origin JSON block is not an edit control." GET /api/v1/events/headers is documented and callable only as a read; this case confirms it has no corresponding write fired through this flow (the real PATCH /events/headers has an entirely different request shape and is governed by its own UC-eventFramework contract, not this one).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -221,6 +231,7 @@ C.push(
   {
     key: 'SB-UC-configurationEventing-MAIN',
     name: 'UC-configurationEventing main flow: Eventing',
+    objective: 'Walk through the "Eventing" screen the way its main use case describes it: administrator loads current delivery settings, saves them back unchanged (idempotent echo), then explicitly tests connectivity — connectivity and configuration are reported as separate, distinct outcomes.',
     description: 'Main flow of UC-configurationEventing (Eventing): administrator loads current delivery settings, saves them back unchanged (idempotent echo), then explicitly tests connectivity — connectivity and configuration are reported as separate, distinct outcomes. Touches GET/PUT /api/v1/settings/eventing and POST /api/v1/settings/eventing/test.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -238,6 +249,7 @@ C.push(
   {
     key: 'SB-UC-configurationEventing-ALT-1',
     name: 'UC-configurationEventing alt flow 1: Configuration can be saved without sending a message.',
+    objective: 'Check an alternative path of "Eventing": configuration can be saved without sending a message. The save call above never fires a dummy send; this case confirms the save endpoint alone succeeds with no POST ./dummy involved.',
     description: 'Alternate flow 1 of UC-configurationEventing (Eventing): "Configuration can be saved without sending a message." The save call above never fires a dummy send; this case confirms the save endpoint alone succeeds with no POST .../dummy involved.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -253,6 +265,7 @@ C.push(
   {
     key: 'SB-UC-configurationEventing-ALT-2',
     name: 'UC-configurationEventing alt flow 2: A test connection is not a business message delivery.',
+    objective: 'Check an alternative path of "Eventing": a test connection is not a business message delivery. the matching write and the matching write are two distinct, explicitly-named test actions — neither is the real business event pipeline (the matching write, exercised elsewhere in this catalogue).',
     description: 'Alternate flow 2 of UC-configurationEventing (Eventing): "A test connection is not a business message delivery." POST /api/v1/settings/eventing/test and POST /api/v1/settings/eventing/dummy are two distinct, explicitly-named test actions — neither is the real business event pipeline (POST /api/v1/events/emit, exercised elsewhere in this catalogue).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -268,6 +281,7 @@ C.push(
   {
     key: 'SB-UC-configurationEventing-EXC-1',
     name: 'UC-configurationEventing exc flow 1: An unreachable destination produces a visible test failure.',
+    objective: 'Check that "Eventing" fails safely: an unreachable destination produces a visible test failure. A connectivity test is checked for an explicit ok/status field every time — the field\'s presence is what lets a real failure ever be visible (rather than silently swallowed).',
     description: 'Exception flow 1 of UC-configurationEventing (Eventing): "An unreachable destination produces a visible test failure." A connectivity test is checked for an explicit ok/status field every time — the field\'s presence is what lets a real failure ever be visible (rather than silently swallowed).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -282,6 +296,7 @@ C.push(
   {
     key: 'SB-UC-configurationEventing-EXC-2',
     name: 'UC-configurationEventing exc flow 2: A save failure does not confirm the new channel is effective.',
+    objective: 'Check that "Eventing" fails safely: a save failure does not confirm the new channel is effective. After a save, the channel is independently re-read (not just trusted from the save response) to confirm it is genuinely persisted.',
     description: 'Exception flow 2 of UC-configurationEventing (Eventing): "A save failure does not confirm the new channel is effective." After a save, the channel is independently re-read (not just trusted from the save response) to confirm it is genuinely persisted.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -305,6 +320,7 @@ C.push(
   {
     key: 'SB-UC-eventFramework-MAIN',
     name: 'UC-eventFramework main flow: Event framework',
+    objective: 'Walk through the "Event framework" screen the way its main use case describes it: administrator reviews domain-event emission settings as a setting distinct from the origin-header contract.',
     description: 'Main flow of UC-eventFramework (Event framework): administrator reviews domain-event emission settings as a setting distinct from the origin-header contract. Touches GET /api/v1/events/framework, PATCH /api/v1/events/framework and GET /api/v1/events/headers.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -322,6 +338,7 @@ C.push(
   {
     key: 'SB-UC-eventFramework-ALT-1',
     name: 'UC-eventFramework alt flow 1: A verified Scheme Definitions handoff opens the workspace with the selected schema.',
+    objective: 'Check an alternative path of "Event framework": event catalogue and origin headers can be inspected without edits. the matching read is read-only and distinct from the framework\'s own enabled/events settings.',
     description: 'Alternate flow 1 of UC-eventFramework (Event framework): "Event catalogue and origin headers can be inspected without edits." GET /api/v1/events/catalog is read-only and distinct from the framework\'s own enabled/events settings.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -336,6 +353,7 @@ C.push(
   {
     key: 'SB-UC-eventFramework-ALT-2',
     name: 'UC-eventFramework alt flow 2: Logging forward destination can be changed independently from other panels.',
+    objective: 'Check an alternative path of "Event framework": . per-event overrides exist inside the events map; this case confirms the per-event enabled flags are inspectable independently of the top-level framework enabled flag.',
     description: 'Alternate flow 2 of UC-eventFramework (Event framework): per-event overrides exist inside the events map; this case confirms the per-event enabled flags are inspectable independently of the top-level framework enabled flag.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -350,6 +368,7 @@ C.push(
   {
     key: 'SB-UC-eventFramework-EXC-1',
     name: 'UC-eventFramework exc flow 1: A failed save does not change the displayed confirmed value.',
+    objective: 'Check that "Event framework" fails safely: . update the application application service has a request/response shape entirely different from its own the matching read (a reference catalog vs. an enforcement config) — this case documents that mismatch rather than firing a write with unknown real-world effect, since there is no safe way to echo its current value back.',
     description: 'Exception flow 1 of UC-eventFramework (Event framework): PATCH /api/v1/events/headers has a request/response shape entirely different from its own GET /api/v1/events/headers (a reference catalog vs. an enforcement config) — this case documents that mismatch rather than firing a write with unknown real-world effect, since there is no safe way to echo its current value back.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -364,6 +383,7 @@ C.push(
   {
     key: 'SB-UC-eventFramework-EXC-2',
     name: 'UC-eventFramework exc flow 2: A displayed origin JSON block is not an edit control.',
+    objective: 'Check that "Event framework" fails safely: . the framework\'s own update is independently re-verified by a follow-up GET, not just trusted from the update response — confirming the save is genuinely persisted, not merely echoed back once.',
     description: 'Exception flow 2 of UC-eventFramework (Event framework): the framework\'s own PATCH is independently re-verified by a follow-up GET, not just trusted from the PATCH response — confirming the save is genuinely persisted, not merely echoed back once.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -387,6 +407,7 @@ C.push(
   {
     key: 'SB-UC-externalSystems-MAIN',
     name: 'UC-externalSystems main flow: External systems',
+    objective: 'Walk through the "External systems" screen the way its main use case describes it: administrator lists registered external systems, saves one back unchanged (idempotent echo), and sends it a dummy event.',
     description: 'Main flow of UC-externalSystems (External systems): administrator lists registered external systems, saves one back unchanged (idempotent echo), and sends it a dummy event. Touches GET /api/v1/external-systems, PUT /api/v1/external-systems/:id and POST /api/v1/external-systems/:id/dummy.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled; external systems seeded.',
@@ -405,6 +426,7 @@ C.push(
   {
     key: 'SB-UC-externalSystems-ALT-1',
     name: 'UC-externalSystems alt flow 1: Keep programmatic access disabled.',
+    objective: 'Check an alternative path of "External systems": . the matching read and the matching read are both read-only inspections of the external-system wiring, inspected without any edit.',
     description: 'Alternate flow 1 of UC-externalSystems (External systems): GET /api/v1/inbound/events and GET /api/v1/integration are both read-only inspections of the external-system wiring, inspected without any edit.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -420,6 +442,7 @@ C.push(
   {
     key: 'SB-UC-externalSystems-ALT-2',
     name: 'UC-externalSystems alt flow 2: Session authentication remains a separate flow.',
+    objective: 'Check an alternative path of "External systems": . the Kafka connectivity check is a distinct, explicitly-named probe, separate from any single external system\'s own dummy send.',
     description: 'Alternate flow 2 of UC-externalSystems (External systems): the Kafka connectivity check is a distinct, explicitly-named probe, separate from any single external system\'s own dummy send.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -434,6 +457,7 @@ C.push(
   {
     key: 'SB-UC-externalSystems-EXC-1',
     name: 'UC-externalSystems exc flow 1: An unwired toggle must not claim to create or revoke credentials.',
+    objective: 'Check that "External systems" fails safely: . deleting a nonexistent external system id must never claim something was actually removed.',
     description: 'Exception flow 1 of UC-externalSystems (External systems): deleting a nonexistent external system id must never claim something was actually removed. Verified live: the endpoint answers 200 with an explicit deleted=false (not a 404, and not a false deleted=true) — an honest "nothing happened" result rather than a fabricated success.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -448,6 +472,7 @@ C.push(
   {
     key: 'SB-UC-externalSystems-EXC-2',
     name: 'UC-externalSystems exc flow 2: A failure cannot expose a fabricated API key.',
+    objective: 'Check that "External systems" fails safely: . sending a dummy event to a nonexistent system id must return a clean not-found, never a fabricated success for a system that was never registered.',
     description: 'Exception flow 2 of UC-externalSystems (External systems): sending a dummy event to a nonexistent system id must return a clean not-found, never a fabricated success for a system that was never registered.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -469,6 +494,7 @@ C.push(
   {
     key: 'SB-UC-features-MAIN',
     name: 'UC-features main flow: Features',
+    objective: 'Walk through the "Features" screen the way its main use case describes it: administrator reads the feature catalogue and the signed-in operator\'s own effective grant, separate from job permissions.',
     description: 'Main flow of UC-features (Features): administrator reads the feature catalogue and the signed-in operator\'s own effective grant, separate from job permissions. Touches GET /api/v1/features and GET /api/v1/session/features.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -485,6 +511,7 @@ C.push(
   {
     key: 'SB-UC-features-ALT-1',
     name: 'UC-features alt flow 1: The catalogue can be inspected without edits.',
+    objective: 'Check an alternative path of "Features": . the feature catalogue is readable twice with the same page count both times — a plain inspection never mutates it.',
     description: 'Alternate flow 1 of UC-features (Features): the feature catalogue is readable twice with the same page count both times — a plain inspection never mutates it.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -500,6 +527,7 @@ C.push(
   {
     key: 'SB-UC-features-ALT-2',
     name: 'UC-features alt flow 2: No catalogue availability produces an explicit unavailable state.',
+    objective: 'Check an alternative path of "Features": . the feature catalogue always answers with a well-formed a successful answer/array (the structural precondition for honestly distinguishing a genuinely empty/unavailable catalogue from a failed read).',
     description: 'Alternate flow 2 of UC-features (Features): the feature catalogue always answers with a well-formed 200/array (the structural precondition for honestly distinguishing a genuinely empty/unavailable catalogue from a failed read).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -514,6 +542,7 @@ C.push(
   {
     key: 'SB-UC-features-EXC-1',
     name: 'UC-features exc flow 1: An unwired toggle must not claim to create or revoke credentials.',
+    objective: 'Check that "Features" fails safely: . update the application application service (tenant-wide maxLevel) is NOT fired here by policy — it would change every operator\'s effective access tenant-wide, including the personas other cases in this catalogue depend on to authenticate.',
     description: 'Exception flow 1 of UC-features (Features): PATCH /api/v1/settings/feature-access (tenant-wide maxLevel) is NOT fired here by policy — it would change every operator\'s effective access tenant-wide, including the personas other cases in this catalogue depend on to authenticate. This case documents the real, verified rejection shape instead: an invalid maxLevel is cleanly rejected before anything is applied.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -528,6 +557,7 @@ C.push(
   {
     key: 'SB-UC-features-EXC-2',
     name: 'UC-features exc flow 2: A failure cannot expose a fabricated API key.',
+    objective: 'Check that "Features" fails safely: . the session features endpoint requires authentication — an invalid session must be rejected cleanly, never answering with a fabricated or default-admin grant.',
     description: 'Exception flow 2 of UC-features (Features): the session features endpoint requires authentication — an invalid session must be rejected cleanly, never answering with a fabricated or default-admin grant.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable.',
@@ -548,6 +578,7 @@ C.push(
   {
     key: 'SB-UC-security-MAIN',
     name: 'UC-security main flow: Security & cryptography',
+    objective: 'Walk through the "Security & cryptography" screen the way its main use case describes it: operator reviews health/policy, creates a supported synthetic protected record, and the system reports its encryption state honestly.',
     description: 'Main flow of UC-security (Security & cryptography): operator reviews health/policy, creates a supported synthetic protected record, and the system reports its encryption state honestly. Touches GET /api/v1/security/health, POST /api/v1/security/records and GET /api/v1/security/records/:id. PATCH /security/encryption, POST /security/rotate and /security/remediate are NOT fired (see file header): they change the tenant\'s live encryption posture and key material for every historical and future record, well beyond this one case\'s blast radius.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled (security:manage).',
@@ -566,6 +597,7 @@ C.push(
   {
     key: 'SB-UC-security-ALT-1',
     name: 'UC-security alt flow 1: Rotate the key while retaining supported historical-key decryption.',
+    objective: 'Check an alternative path of "Security & cryptography": rotate the key while retaining supported historical-key decryption. the matching write is NOT fired here by policy (see file header) — rotating the tenant\'s live encryption key is irreversible-in-effect and would touch every historical record, not a single scoped resource.',
     description: 'Alternate flow 1 of UC-security (Security & cryptography): "Rotate the key while retaining supported historical-key decryption." POST /api/v1/security/rotate is NOT fired here by policy (see file header) — rotating the tenant\'s live encryption key is irreversible-in-effect and would touch every historical record, not a single scoped resource. This case instead confirms the health endpoint already reports the current key/vault posture that a real rotation would need to change.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -580,6 +612,7 @@ C.push(
   {
     key: 'SB-UC-security-ALT-2',
     name: 'UC-security alt flow 2: Write-disabled behavior follows the configured reject or pending-plaintext policy.',
+    objective: 'Check an alternative path of "Security & cryptography": write-disabled behavior follows the configured reject or pending-plaintext policy. update the application application service (the writeEnabled toggle) is NOT fired here by policy; this case instead confirms the current policy is explicitly disclosed via health, the precondition for the screen ever correctly describing write-disabled behavior.',
     description: 'Alternate flow 2 of UC-security (Security & cryptography): "Write-disabled behavior follows the configured reject or pending-plaintext policy." PATCH /api/v1/security/encryption (the writeEnabled toggle) is NOT fired here by policy; this case instead confirms the current policy is explicitly disclosed via health, the precondition for the UI ever correctly describing write-disabled behavior.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -594,6 +627,7 @@ C.push(
   {
     key: 'SB-UC-security-EXC-1',
     name: 'UC-security exc flow 1: Provider failure does not silently store plaintext under an encrypted-success claim.',
+    objective: 'Check that "Security & cryptography" fails safely: provider failure does not silently store plaintext under an encrypted-success claim. The created record\'s own encryptionStatus field is checked for presence on every create — the honest label that would ever let a plaintext fallback be told apart from a true encrypted success.',
     description: 'Exception flow 1 of UC-security (Security & cryptography): "Provider failure does not silently store plaintext under an encrypted-success claim." The created record\'s own encryptionStatus field is checked for presence on every create — the honest label that would ever let a plaintext fallback be told apart from a true encrypted success.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -608,6 +642,7 @@ C.push(
   {
     key: 'SB-UC-security-EXC-2',
     name: 'UC-security exc flow 2: A failed reveal is not reported as empty plaintext.',
+    objective: 'Check that "Security & cryptography" fails safely: a failed reveal is not reported as empty plaintext. Requesting a nonexistent record id must return a clean not-found, never a a successful answer with empty/fabricated plaintext.',
     description: 'Exception flow 2 of UC-security (Security & cryptography): "A failed reveal is not reported as empty plaintext." Requesting a nonexistent record id must return a clean not-found, never a 200 with empty/fabricated plaintext.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',

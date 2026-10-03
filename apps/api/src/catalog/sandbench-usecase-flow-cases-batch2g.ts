@@ -35,6 +35,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-MAIN',
     name: 'UC-msgCreateSchema main flow: Create schema',
+    objective: 'Check that uC-msgCreateSchema main flow: Create schema.',
     description: 'Main flow of UC-msgCreateSchema (Create schema) condensed to its registered API contract: build a schema from a field tree, save it as a draft, validate an instance against it, add a passing and a failing test, and publish — each step\'s result checked before the next. Touches POST /api/v1/catalog/schemas/build, /drafts, /validate, /drafts/:id/tests and /drafts/:id/publish.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -55,6 +56,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-ALT-1',
     name: 'UC-msgCreateSchema alt flow 1 (A7 — Save and resume draft): save incomplete work without claiming Ready status.',
+    objective: 'Check an alternative path of "Create schema": save incomplete work as a draft without claiming validation or Ready status. A freshly saved draft (no tests yet) reports status "draft", never "published" or any Ready-implying status.',
     description: 'Alternate flow 1 of UC-msgCreateSchema (Create schema): "Save incomplete work as a draft without claiming validation or Ready status." A freshly saved draft (no tests yet) reports status "draft", never "published" or any Ready-implying status.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -70,6 +72,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-ALT-2',
     name: 'UC-msgCreateSchema alt flow 2 (A8 — Edit after generation): a model-affecting edit marks the generated artefact stale.',
+    objective: 'Check an alternative path of "Create schema": any model-affecting edit marks the generated artefact stale; return to validation and generation. Rebuilding the same draft name with a changed field tree (now 2 fields) produces a build whose fieldCount reflects the NEW model, not the stale original.',
     description: 'Alternate flow 2 of UC-msgCreateSchema (Create schema): "Any model-affecting edit marks the generated artefact stale; return to validation and generation." Rebuilding the same draft name with a changed field tree (now 2 fields) produces a build whose fieldCount reflects the NEW model, not the stale original.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -85,6 +88,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-EXC-1',
     name: 'UC-msgCreateSchema exc flow 1 (E7 — Generation/validation failure): a failed output is not publishable as Ready.',
+    objective: 'Check that "Create schema" fails safely: a failed output is not downloadable as an approved valid pack or publishable as Ready. Publishing a draft with no tests at all is rejected, never silently treated as Ready.',
     description: 'Exception flow 1 of UC-msgCreateSchema (Create schema): "A failed output is not downloadable as an approved valid pack or publishable as Ready." Publishing a draft with no tests at all is rejected, never silently treated as Ready.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -100,6 +104,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-EXC-2',
     name: 'UC-msgCreateSchema exc flow 2 (E8 — Duplicate publication version): preserve the draft and existing version; ask for a new identity rather than silently overwriting.',
+    objective: 'Check that "Create schema" fails safely: preserve the draft and existing version. Ask for a new version/identity; do not silently overwrite. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: creating a second draft whose root name was already used by an earlier draft never produces the clean "ask for a new identity" conflict this flow calls for — it is observed to behave NON-DETERMINISTICALLY, sometimes…',
     description: 'Exception flow 2 of UC-msgCreateSchema (Create schema): "Preserve the draft and existing version. Ask for a new version/identity; do not silently overwrite." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: creating a second draft whose root name was already used by an earlier draft never produces the clean "ask for a new identity" conflict this flow calls for — it is observed to behave NON-DETERMINISTICALLY, sometimes silently succeeding with 201 (a second distinct draft reusing the same root, i.e. "silently overwrite"-adjacent) and sometimes 500ing (an uncaught collision on an internally derived identity). Both are wrong in different ways; neither is the documented clean conflict. This case accepts either observed outcome and records which one occurred, rather than hiding the inconsistency behind a single hard-coded expectation.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -122,6 +127,7 @@ C.push(
   {
     key: 'SB-UC-msgSchemaCanvas-MAIN',
     name: 'UC-msgSchemaCanvas main flow: Schema canvas',
+    objective: 'Walk through the "Schema canvas" screen the way its main use case describes it: analyst selects a draft, inspects it, applies a supported edit (adding an enrichment rule), and the draft remains inspectable before any publication.',
     description: 'Main flow of UC-msgSchemaCanvas (Schema canvas): analyst selects a draft, inspects it, applies a supported edit (adding an enrichment rule), and the draft remains inspectable before any publication. Touches GET /api/v1/catalog/schemas/drafts, GET /drafts/:id, POST /drafts/:id/rules.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -140,6 +146,7 @@ C.push(
   {
     key: 'SB-UC-msgSchemaCanvas-ALT-1',
     name: 'UC-msgSchemaCanvas alt flow 1: Pan, zoom and layout change the view rather than the schema meaning.',
+    objective: 'Check an alternative path of "Schema canvas": pan, zoom and layout change the view rather than the schema meaning.',
     description: 'Alternate flow 1 of UC-msgSchemaCanvas (Schema canvas): "Pan, zoom and layout change the view rather than the schema meaning." No backing API call is made for this flow by design — view navigation is pure client-side canvas state with no server round trip.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -153,6 +160,7 @@ C.push(
   {
     key: 'SB-UC-msgSchemaCanvas-ALT-2',
     name: 'UC-msgSchemaCanvas alt flow 2: Enrichment rules can be attached where their supported kind is available.',
+    objective: 'Check an alternative path of "Schema canvas": enrichment rules can be attached where their supported kind is available. A second, different rule (constraintKind "fixed") is attached to the same draft, confirming more than one rule kind is supported.',
     description: 'Alternate flow 2 of UC-msgSchemaCanvas (Schema canvas): "Enrichment rules can be attached where their supported kind is available." A second, different rule (constraintKind "fixed") is attached to the same draft, confirming more than one rule kind is supported.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -168,6 +176,7 @@ C.push(
   {
     key: 'SB-UC-msgSchemaCanvas-EXC-1',
     name: 'UC-msgSchemaCanvas exc flow 1: Deleting or unlinking a non-root node must expose broken dependencies.',
+    objective: 'Check that "Schema canvas" fails safely: . attaching an enrichment rule to a field path that does not exist on the draft is checked for an explicit result rather than a silent accept — the rule store does not pretend a fieldXpath resolved when it did not.',
     description: 'Exception flow 1 of UC-msgSchemaCanvas (Schema canvas): attaching an enrichment rule to a field path that does not exist on the draft is checked for an explicit result rather than a silent accept — the rule store does not pretend a fieldXpath resolved when it did not.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -183,6 +192,7 @@ C.push(
   {
     key: 'SB-UC-msgSchemaCanvas-EXC-2',
     name: 'UC-msgSchemaCanvas exc flow 2: A failed draft save leaves no claimed persisted revision.',
+    objective: 'Check that "Schema canvas" fails safely: . a rule with an invalid constraint (min > max) is rejected before anything is stored — a rejected edit never silently becomes a claimed persisted rule.',
     description: 'Exception flow 2 of UC-msgSchemaCanvas (Schema canvas): a rule with an invalid constraint (min > max) is rejected before anything is stored — a rejected edit never silently becomes a claimed persisted rule.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -206,6 +216,7 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-MAIN',
     name: 'UC-msgImportSchema main flow: Import schema',
+    objective: 'Check that uC-msgImportSchema main flow: Import schema.',
     description: 'Main flow of UC-msgImportSchema (Import schema) condensed to its registered API contract: the system parses a selected schema input and cross-checks accompanying Markdown coverage before import. (The full file-upload-and-register import path is exercised separately and extensively by the dedicated Upload XSD/Markdown suite in this catalogue — sb-upload-xsd.) Touches POST /api/v1/catalog/iso/parse and POST /api/v1/catalog/iso/validate-markdown.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -222,6 +233,7 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-ALT-1',
     name: 'UC-msgImportSchema alt flow 1 (A1 — Import without accompanying Markdown): parses and skips the coverage check.',
+    objective: 'Check an alternative path of "Import schema": the system parses the schema or field-layout input and skips the accompanying-documentation coverage check. Parsing alone succeeds with no markdowns supplied at all.',
     description: 'Alternate flow 1 of UC-msgImportSchema (Import schema): "The system parses the schema or field-layout input and skips the accompanying-documentation coverage check." Parsing alone succeeds with no markdowns supplied at all.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -236,6 +248,7 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-ALT-2',
     name: 'UC-msgImportSchema alt flow 2 (A2 — Markdown coverage mismatch): a warning is explicit, not a silent proceed.',
+    objective: 'Check an alternative path of "Import schema": the system displays a warning describing the mismatches. Markdown that documents none of the schema\'s real fields produces an explicit, inspectable coverage result rather than a silent pass.',
     description: 'Alternate flow 2 of UC-msgImportSchema (Import schema): "The system displays a warning describing the mismatches." Markdown that documents none of the schema\'s real fields produces an explicit, inspectable coverage result rather than a silent pass.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -250,6 +263,7 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-EXC-1',
     name: 'UC-msgImportSchema exc flow 1 (E1 — Malformed input): reject loading with file/location details.',
+    objective: 'Check that "Import schema" fails safely: the system cannot parse the selected schema or field-layout input because it is malformed. The system rejects the upload and displays the parsing error.',
     description: 'Exception flow 1 of UC-msgImportSchema (Import schema): "The system cannot parse the selected schema or field-layout input because it is malformed. The system rejects the upload and displays the parsing error." Verified live: malformed/unparseable content is not rejected outright — it is parsed to a result carrying an explicit error-severity finding (no_elements) naming the actual problem, rather than silently returning an empty-but-successful schema.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -264,6 +278,7 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-EXC-2',
     name: 'UC-msgImportSchema exc flow 2 (E2 — Unreadable accompanying Markdown): does not silently discard the Markdown or continue schema-only.',
+    objective: 'Check that "Import schema" fails safely: the system does not silently discard the Markdown or continue with schema-only import. Calling the coverage check with a schema but no markdowns array at all returns the documented explicit "choose a markdown file" result, never silently treating it as covered.',
     description: 'Exception flow 2 of UC-msgImportSchema (Import schema): "The system does not silently discard the Markdown or continue with schema-only import." Calling the coverage check with a schema but no markdowns array at all returns the documented explicit "choose a markdown file" result, never silently treating it as covered.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -285,6 +300,7 @@ C.push(
   {
     key: 'SB-UC-msgExportTemplate-MAIN',
     name: 'UC-msgExportTemplate main flow: Export template',
+    objective: 'Walk through the "Export template" screen the way its main use case describes it: analyst chooses a real message type, requests the download, and the current CSV template is returned with its real header row.',
     description: 'Main flow of UC-msgExportTemplate (Export template): analyst chooses a real message type, requests the download, and the current CSV template is returned with its real header row. Touches GET /api/v1/message-types/:code/template.csv.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 seeded.',
@@ -300,6 +316,7 @@ C.push(
   {
     key: 'SB-UC-msgExportTemplate-ALT-1',
     name: 'UC-msgExportTemplate alt flow 1: Bulk generation uses its separate endpoint and parameters.',
+    objective: 'Check an alternative path of "Export template": bulk generation uses its separate endpoint and parameters. the matching write (filled-in rows from a CSV) is a distinct action from the blank-template download above.',
     description: 'Alternate flow 1 of UC-msgExportTemplate (Export template): "Bulk generation uses its separate endpoint and parameters." POST /api/v1/templates/generate (filled-in rows from a CSV) is a distinct action from the blank-template download above.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -314,6 +331,7 @@ C.push(
   {
     key: 'SB-UC-msgExportTemplate-ALT-2',
     name: 'UC-msgExportTemplate alt flow 2: A zero-field type receives an explicit empty-template result.',
+    objective: 'Check an alternative path of "Export template": . the template download for a real but minimally-fielded type still returns a successful answer with a well-formed CSV (header row present), never an error for having few fields.',
     description: 'Alternate flow 2 of UC-msgExportTemplate (Export template): the template download for a real but minimally-fielded type still returns 200 with a well-formed CSV (header row present), never an error for having few fields.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -328,6 +346,7 @@ C.push(
   {
     key: 'SB-UC-msgExportTemplate-EXC-1',
     name: 'UC-msgExportTemplate exc flow 1: Unknown message type is an error, not a blank successful template.',
+    objective: 'Check that "Export template" fails safely: unknown message type is an error, not a blank successful template. Requesting a template for a nonexistent code must return a clean not-found, never a a successful answer with an empty CSV.',
     description: 'Exception flow 1 of UC-msgExportTemplate (Export template): "Unknown message type is an error, not a blank successful template." Requesting a template for a nonexistent code must return a clean not-found, never a 200 with an empty CSV.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -342,6 +361,7 @@ C.push(
   {
     key: 'SB-UC-msgExportTemplate-EXC-2',
     name: 'UC-msgExportTemplate exc flow 2: An HTTP error body is not saved as CSV content.',
+    objective: 'Check that "Export template" fails safely: . the error response for an unknown type is checked for an actual error shape (not CSV content-type), so a client naively saving the response body would never save a data error as if it were a .csv file.',
     description: 'Exception flow 2 of UC-msgExportTemplate (Export template): the error response for an unknown type is checked for an actual error shape (not CSV content-type), so a client naively saving the response body would never save a JSON error as if it were a .csv file.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',

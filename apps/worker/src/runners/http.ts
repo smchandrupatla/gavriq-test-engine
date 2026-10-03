@@ -66,6 +66,8 @@ export interface HttpStep {
   allow_failure?: boolean;
   precondition?: boolean;
   description?: string;
+  /** Plain-language wording of the step (what is done), as the Test cases screen shows it. */
+  text?: string;
 }
 
 export interface HttpRunInput {
@@ -88,6 +90,25 @@ export interface HttpRunResult {
   classification?: string;
   metrics?: Record<string, number>;
   evidence?: EvidenceItem[];
+  /** What happened, in plain words: one line per step, then the outcome (shown as the run's remarks). */
+  remarks?: string[];
+}
+
+/** "answered OK (200)" — the status in words for a remark line. */
+function statusWords(code: number): string {
+  const map: Record<number, string> = {
+    200: 'answered OK', 201: 'confirmed it was created', 202: 'accepted it for processing', 204: 'answered with nothing to show',
+    400: 'rejected the request as invalid', 401: 'refused — sign-in required', 403: 'refused — not allowed', 404: 'reported nothing is there',
+    405: 'reported the action is not allowed', 409: 'reported a conflict', 412: 'refused — precondition failed', 413: 'rejected the request as too large',
+    415: 'rejected the content type', 422: 'rejected the content as unprocessable', 429: 'asked the caller to slow down', 500: 'failed with an internal error', 503: 'reported it is unavailable',
+  };
+  return `${map[code] || (code < 300 ? 'answered successfully' : code < 400 ? 'redirected' : code < 500 ? 'rejected the request' : 'failed on the server side')} (${code})`;
+}
+
+/** The remark label of a step: its plain-language text, else its description, else the request. */
+function stepLabel(step: HttpStep, idx: number, method: string): string {
+  const what = step.text || step.description || `${method} ${String(step.url || step.path || '/').replace(/^https?:\/\/[^/]+/, '').replace(/\{\{\s*\w+\s*\}\}/, '')}`;
+  return `Step ${idx + 1} — ${what.replace(/\.$/, '')}`;
 }
 
 interface Exchange {
@@ -230,7 +251,9 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
     if (result.status === 'passed' || result.status === 'skipped') result.status = 'failed';
     result.classification ||= 'cleanup_failure';
     result.message = `${result.message}; cleanup failed: ${cleanupFailures.join('; ')}`.slice(0, 900);
+    result.remarks = [...(result.remarks || []), `Cleanup failed: ${cleanupFailures.join('; ')}.`];
   }
+  if (!result.remarks?.length) result.remarks = [result.message];
 
   const secrets = secretValues(trace.vars);
   const item = writeJsonEvidence('http_transcript', 'http', {
@@ -414,6 +437,7 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
 
     if (input.steps?.length) {
       const results: string[] = [];
+      const remarks: string[] = [];
       let lastLatency = 0;
       let lastStatus = 0;
 
@@ -467,22 +491,27 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
         if (failure) {
           if (step.allow_failure) {
             results.push(`step ${idx + 1} (${step.description || method}) tolerated: ${failure}`);
+            remarks.push(`${stepLabel(step, idx, method)}: did not pass (${failure}) — tolerated, the test continues.`);
             continue;
           }
           if (step.precondition) {
+            remarks.push(`${stepLabel(step, idx, method)}: the target is not ready for this test (${failure}). Test skipped, not failed.`);
             return {
               status: 'skipped',
               message: `Precondition not met — step ${idx + 1}${step.description ? ` (${step.description})` : ''}: ${failure}`,
               duration_ms: Date.now() - start,
               metrics: { latency_ms: lastLatency, status_code: lastStatus, skipped_at_step: idx + 1 },
+              remarks,
             };
           }
+          remarks.push(`${stepLabel(step, idx, method)}: FAILED — ${failure}.`, `Result: failed at step ${idx + 1} of ${input.steps.length}.`);
           return {
             status: 'failed',
             message: `step ${idx + 1}${step.description ? ` (${step.description})` : ''}: ${failure}`,
             duration_ms: Date.now() - start,
             classification: /status 401|status 403/.test(failure) ? 'authentication_problem' : 'assertion_failure',
             metrics: { latency_ms: lastLatency, status_code: lastStatus, failed_step: idx + 1 },
+            remarks,
           };
         }
 
@@ -492,13 +521,16 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
         }
 
         results.push(`${method} ${step.description || outcome.rawUrl.replace(/^https?:\/\/[^/]+/, '')} → ${outcome.res.status} (${lastLatency}ms)`);
+        remarks.push(`${stepLabel(step, idx, method)}: ${statusWords(outcome.res.status)} in ${lastLatency} ms${attempts > 1 ? ` after ${attempts} attempts` : ''}.`);
       }
 
+      remarks.push(`Result: all ${input.steps.length} steps passed in ${Date.now() - start} ms.`);
       return {
         status: 'passed',
         message: results.join('; ').slice(0, 900),
         duration_ms: Date.now() - start,
         metrics: { latency_ms: lastLatency, status_code: lastStatus, steps: input.steps.length },
+        remarks,
       };
     }
 

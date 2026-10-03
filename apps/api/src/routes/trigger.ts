@@ -18,6 +18,7 @@ import { audit } from '../middleware/rbac.js';
 import { gateMode } from '../evidence-gate.js';
 import { evidenceUrl } from '../evidence-store.js';
 import { humanDateTime } from '../lib/naming.js';
+import { deployFirstIfDown } from '../infra.js';
 
 const ACTIVE = ['queued', 'preparing', 'running'];
 const VERDICT_STATUSES = new Set(['passed', 'failed']);
@@ -185,6 +186,8 @@ export interface RunOutcome {
   body: Record<string, any>;
   /** Set when executions were queued: what to audit. */
   queued?: { run_id: string; application_id: string; environment: string; executions: number; total_cases: number; excluded: number; trigger_source: string };
+  /** Set when the environment was down: a deploy was queued and the run starts once it succeeds (infra.ts). */
+  deferred?: { deployment_id: string; environment: string };
 }
 
 /**
@@ -205,13 +208,24 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   if (!application) return { status: 404, body: { error: 'Application not found', application: appRef } };
 
   const envRow = await query(
-    `SELECT id, key, name, env_type, base_url, status, safety_policy FROM environments WHERE id::text = $1 OR key = $1`,
+    `SELECT id, key, name, env_type, base_url, status, safety_policy, config FROM environments WHERE id::text = $1 OR key = $1`,
     [envRef]
   );
   const environment = envRow.rows[0];
   if (!environment) return { status: 404, body: { error: 'Environment not found', environment: envRef } };
   if (environment.status !== 'active') {
     return { status: 409, body: { error: `Environment is ${environment.status}`, environment: environment.key } };
+  }
+
+  // A managed stack that is down is deployed first; this same request is replayed when the deploy succeeds.
+  if (r.dry_run !== true) {
+    const { dry_run: _dryRun, ...replay } = r;
+    const deferred = await deployFirstIfDown(
+      environment,
+      { ...replay, planner: 'run', application: application.key, environment: environment.key, requested_by: r.requested_by ?? actorId ?? null },
+      actorId
+    );
+    if (deferred) return deferred;
   }
 
   if (r.exclusive === true) {

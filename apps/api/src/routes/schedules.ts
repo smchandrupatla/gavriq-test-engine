@@ -53,7 +53,8 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
       },
       opts.requested_by
     );
-    if (outcome.queued) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+    // A deferred outcome (stack was down, deploy queued, run follows) counts as fired: the occurrence is consumed.
+    if (outcome.queued || outcome.deferred) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
     return { status: outcome.status, body: outcome.body, queued: outcome.queued };
   }
 

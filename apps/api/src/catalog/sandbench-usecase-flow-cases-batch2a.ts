@@ -61,6 +61,7 @@ C.push(
   {
     key: 'SB-UC-schNew-MAIN',
     name: 'UC-schNew main flow: New schedule',
+    objective: 'Walk through the "New schedule" screen the way its main use case describes it: operator names a schedule, picks cadence "daily" against a real test-suite target, creates it, and the application service returns an identity with a calculated next run time.',
     description: 'Main flow of UC-schNew (New schedule): operator names a schedule, picks cadence "daily" against a real test-suite target, creates it, and the API returns an identity with a calculated next_run_at. Touches POST /api/v1/schedules.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -78,6 +79,7 @@ C.push(
   {
     key: 'SB-UC-schNew-ALT-1',
     name: 'UC-schNew alt flow 1: Different supported cadence values produce their defined next occurrence.',
+    objective: 'Check an alternative path of "New schedule": different supported cadence values produce their defined next occurrence.',
     description: 'Alternate flow 1 of UC-schNew (New schedule): "Different supported cadence values produce their defined next occurrence." Creates one schedule per supported cadence (once/hourly/weekly) and confirms each gets its own next_run_at.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -96,6 +98,7 @@ C.push(
   {
     key: 'SB-UC-schNew-ALT-2',
     name: 'UC-schNew alt flow 2: The proposed run-template linkage requires a separately confirmed payload.',
+    objective: 'Check an alternative path of "New schedule": the proposed run-template linkage requires a separately confirmed payload.',
     description: 'Alternate flow 2 of UC-schNew (New schedule): "The proposed run-template linkage requires a separately confirmed payload." Closest executable proxy: a schedule created WITHOUT a channel/connectionId still succeeds (those are genuinely optional, not silently defaulted into an unconfirmed run template).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -112,6 +115,7 @@ C.push(
   {
     key: 'SB-UC-schNew-EXC-1',
     name: 'UC-schNew exc flow 1: Missing name or cadence is rejected.',
+    objective: 'Check that "New schedule" fails safely: missing name or cadence is rejected. POST with neither name nor cadence must fail validation, not create a half-formed schedule.',
     description: 'Exception flow 1 of UC-schNew (New schedule): "Missing name or cadence is rejected." POST with neither name nor cadence must fail validation, not create a half-formed schedule.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -126,6 +130,7 @@ C.push(
   {
     key: 'SB-UC-schNew-EXC-2',
     name: 'UC-schNew exc flow 2: A sch_local fallback is not evidence that a scheduler will execute a durable record.',
+    objective: 'Check that "New schedule" fails safely: a sch_local fallback is not evidence that a scheduler will execute a durable record.',
     description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id — proving it is a real persisted row, not a client-side-only fallback id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -150,6 +155,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-MAIN',
     name: 'UC-ruleBenchCreate main flow: Create new rule',
+    objective: 'Walk through the "Create new rule" screen the way its main use case describes it: analyst names a rule, picks condition kind amount_gte with a threshold, submits once, and the application service returns the created identity and lifecycle (status in_review).',
     description: 'Main flow of UC-ruleBenchCreate (Create new rule): analyst names a rule, picks condition kind amount_gte with a threshold, submits once, and the API returns the created identity and lifecycle (status in_review). Touches POST /api/v1/rules.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -166,6 +172,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-ALT-1',
     name: 'UC-ruleBenchCreate alt flow 1: Analyst revises a rejected input and deliberately resubmits.',
+    objective: 'Check an alternative path of "Create new rule": analyst revises a rejected input and deliberately resubmits. A rejected category is corrected and the resubmission succeeds with its own identity.',
     description: 'Alternate flow 1 of UC-ruleBenchCreate (Create new rule): "Analyst revises a rejected input and deliberately resubmits." A rejected category is corrected and the resubmission succeeds with its own identity.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -182,6 +189,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-ALT-2',
     name: 'UC-ruleBenchCreate alt flow 2: Analyst leaves without saving; no rule is inferred from a partially completed form.',
+    objective: 'Check an alternative path of "Create new rule": analyst leaves without saving; no rule is inferred from a partially completed form.',
     description: 'Alternate flow 2 of UC-ruleBenchCreate (Create new rule): "Analyst leaves without saving; no rule is inferred from a partially completed form." No backing API call is made for this flow by design — leaving the form is evidenced only by the screen loading and no POST ever firing.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -195,6 +203,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-EXC-1',
     name: 'UC-ruleBenchCreate exc flow 1: Missing condition.kind is a validation failure.',
+    objective: 'Check that "Create new rule" fails safely: missing condition.kind is a validation failure. POST with a condition object missing kind must be rejected, not silently defaulted.',
     description: 'Exception flow 1 of UC-ruleBenchCreate (Create new rule): "Missing condition.kind is a validation failure." POST with a condition object missing kind must be rejected, not silently defaulted.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -209,6 +218,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-EXC-2',
     name: 'UC-ruleBenchCreate exc flow 2: A lost save response is unconfirmed; a second write is not evidence that the first failed.',
+    objective: 'Check that "Create new rule" fails safely: a lost save response is unconfirmed; a second write is not evidence that the first failed. Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
     description: 'Exception flow 2 of UC-ruleBenchCreate (Create new rule): "A lost save response is unconfirmed; a second write is not evidence that the first failed." Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -232,6 +242,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchStage-MAIN',
     name: 'UC-ruleBenchStage main flow: Stage rules',
+    objective: 'Walk through the "Stage rules" screen the way its main use case describes it: analyst identifies a rule (one created by this case), requests Stage, and the registered transition path reports the new lifecycle state.',
     description: 'Main flow of UC-ruleBenchStage (Stage rules): analyst identifies a rule (one created by this case), requests Stage, and the registered transition path reports the new lifecycle state. Touches POST /api/v1/rules/:id/stage.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -249,6 +260,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchStage-ALT-1',
     name: 'UC-ruleBenchStage alt flow 1: Analyst cancels before submission; no stage request is made.',
+    objective: 'Check an alternative path of "Stage rules": analyst cancels before submission; no stage request is made. No stage application service call is made for this flow by design.',
     description: 'Alternate flow 1 of UC-ruleBenchStage (Stage rules): "Analyst cancels before submission; no stage request is made." No stage API call is made for this flow by design.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -262,6 +274,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchStage-ALT-2',
     name: 'UC-ruleBenchStage alt flow 2: A transition through the wider lifecycle endpoint includes its required If-Match value.',
+    objective: 'Check an alternative path of "Stage rules": a transition through the wider lifecycle endpoint includes its required If-Match value. The general /transitions endpoint (as opposed to the /stage alias) is exercised directly with transition="stage" and a real If-Match.',
     description: 'Alternate flow 2 of UC-ruleBenchStage (Stage rules): "A transition through the wider lifecycle endpoint includes its required If-Match value." The general /transitions endpoint (as opposed to the /stage alias) is exercised directly with transition="stage" and a real If-Match.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -278,6 +291,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchStage-EXC-1',
     name: 'UC-ruleBenchStage exc flow 1: A stale version must not silently replace another edit.',
+    objective: 'Check that "Stage rules" fails safely: a stale version must not silently replace another edit. A stage request carrying a deliberately wrong If-Match (not the rule\'s real version tag) must be rejected with a precondition failure, not applied.',
     description: 'Exception flow 1 of UC-ruleBenchStage (Stage rules): "A stale version must not silently replace another edit." A stage request carrying a deliberately wrong If-Match (not the rule\'s real etag) must be rejected with a precondition failure, not applied.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -294,6 +308,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchStage-EXC-2',
     name: 'UC-ruleBenchStage exc flow 2: A rejected or unknown transition leaves no claimed successful stage.',
+    objective: 'Check that "Stage rules" fails safely: a rejected or unknown transition leaves no claimed successful stage. An unknown transition name must be rejected cleanly via validation, never silently treated as a successful stage.',
     description: 'Exception flow 2 of UC-ruleBenchStage (Stage rules): "A rejected or unknown transition leaves no claimed successful stage." An unknown transition name must be rejected cleanly via validation, never silently treated as a successful stage.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -317,6 +332,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-MAIN',
     name: 'UC-ruleBenchValidate main flow: Validate rules',
+    objective: 'Walk through the "Validate rules" screen the way its main use case describes it: analyst selects a rule (one created by this case) and requests validation against generated pain.001 data; the service evaluates the condition and reports measurements.',
     description: 'Main flow of UC-ruleBenchValidate (Validate rules): analyst selects a rule (one created by this case) and requests validation against generated pain.001 data; the service evaluates the condition and reports measurements. Touches POST /api/v1/rules/:id/validate.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; pain.001.001.09 message type seeded.',
@@ -334,6 +350,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-ALT-1',
     name: 'UC-ruleBenchValidate alt flow 1: A repeat with the same seed supports comparison only when input and rule versions are also unchanged.',
+    objective: 'Check an alternative path of "Validate rules": a repeat with the same seed supports comparison only when input and rule versions are also unchanged. Running validate twice with the identical seed against the unchanged rule produces the same coverage both times.',
     description: 'Alternate flow 1 of UC-ruleBenchValidate (Validate rules): "A repeat with the same seed supports comparison only when input and rule versions are also unchanged." Running validate twice with the identical seed against the unchanged rule produces the same coverage both times.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -351,6 +368,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-ALT-2',
     name: 'UC-ruleBenchValidate alt flow 2: A broader test run is a separate action from the rule validation endpoint.',
+    objective: 'Check an alternative path of "Validate rules": a broader test run is a separate action from the rule validation endpoint. Validating a rule does not itself create a run row — the matching read count is unaffected by the validate call above.',
     description: 'Alternate flow 2 of UC-ruleBenchValidate (Validate rules): "A broader test run is a separate action from the rule validation endpoint." Validating a rule does not itself create a run row — GET /api/v1/runs count is unaffected by the validate call above.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -368,6 +386,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-EXC-1',
     name: 'UC-ruleBenchValidate exc flow 1: No cases or unavailable data is not a passed validation.',
+    objective: 'Check that "Validate rules" fails safely: no cases or unavailable data is not a passed validation. A condition engineered to match nothing (amount_gte 999999999) must report a result other than "passed" (warning, since zero hits out of N is a non-trigger, not a pass).',
     description: 'Exception flow 1 of UC-ruleBenchValidate (Validate rules): "No cases or unavailable data is not a passed validation." A condition engineered to match nothing (amount_gte 999999999) must report a result other than "passed" (warning, since zero hits out of N is a non-trigger, not a pass).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -384,6 +403,7 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-EXC-2',
     name: 'UC-ruleBenchValidate exc flow 2: A processing error is distinguished from a correctly detected negative test.',
+    objective: 'Check that "Validate rules" fails safely: a processing error is distinguished from a correctly detected negative test. Validating against a nonexistent messageTypeCode must return a clean error, not a fabricated validation result.',
     description: 'Exception flow 2 of UC-ruleBenchValidate (Validate rules): "A processing error is distinguished from a correctly detected negative test." Validating against a nonexistent messageTypeCode must return a clean error, not a fabricated validation result.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
