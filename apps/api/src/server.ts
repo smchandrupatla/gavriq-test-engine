@@ -6,8 +6,9 @@ import Fastify from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { migrate } from './db/client.js';
+import { migrate, query } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
+import { registerTargets } from './targets.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
 import { environmentRoutes } from './routes/environments.js';
@@ -75,6 +76,13 @@ async function main() {
     await maybeAutoSeed();
   } catch (err) {
     console.warn('[boot] auto-seed warning:', (err as Error).message);
+  }
+
+  try {
+    const keys = await registerTargets(query);
+    if (keys.length) console.log(`[boot] registered targets: ${keys.join(', ')}`);
+  } catch (err) {
+    console.warn('[boot] target registration warning:', (err as Error).message);
   }
 
   const app = Fastify({
