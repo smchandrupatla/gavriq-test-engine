@@ -355,12 +355,19 @@ async function main() {
   console.log('node deploy/engine-staging/deploy.mjs <deploy [--ref REF] [--no-seed] [--no-register] | status | seed [--engine URL] | register | stop | down [--rmi] [--volumes] | reset>');
 }
 
-/** Remove everything still carrying this compose project's label. Each removal is best effort: an image another project shares stays. */
+/**
+ * Remove everything still carrying this compose project's label. Each removal is best effort — an
+ * image another project shares stays, and a daemon under memory pressure sometimes cannot remove a
+ * container it has already stopped ("did not receive an exit event"). The stack is down when nothing
+ * of it is RUNNING; a stopped leftover is reported and removed by the engine's housekeeping later.
+ */
 function sweep(rmi, volumes) {
   const filter = `label=com.docker.compose.project=${PROJECT}`;
   const ids = (out) => out.split(/\s+/).filter(Boolean);
-  const containers = ids(run('docker', ['ps', '-aq', '--filter', filter]));
-  if (containers.length) run('docker', ['rm', '-f', ...containers]);
+  let removed = 0;
+  for (const id of ids(run('docker', ['ps', '-aq', '--filter', filter]))) {
+    try { run('docker', ['rm', '-f', id]); removed++; } catch (err) { console.warn(`[engine-staging] could not remove ${id}: ${err.message.split('\n').pop()}`); }
+  }
   for (const id of ids(run('docker', ['network', 'ls', '-q', '--filter', filter]))) {
     try { run('docker', ['network', 'rm', id]); } catch { /* in use elsewhere */ }
   }
@@ -375,7 +382,10 @@ function sweep(rmi, volumes) {
       try { run('docker', ['volume', 'rm', name]); } catch { /* in use */ }
     }
   }
-  console.log(`[engine-staging] swept ${containers.length} container(s)${rmi ? `, ${images} image(s)` : ''} of ${PROJECT}`);
+  const running = ids(run('docker', ['ps', '-q', '--filter', filter]));
+  const leftover = ids(run('docker', ['ps', '-aq', '--filter', filter])).length;
+  console.log(`[engine-staging] swept ${removed} container(s)${rmi ? `, ${images} image(s)` : ''} of ${PROJECT}${leftover ? `; ${leftover} stopped container(s) could not be removed yet` : ''}`);
+  if (running.length) throw new Error(`${running.length} container(s) of ${PROJECT} are still running: ${running.join(' ')}`);
 }
 
 main().catch((err) => {

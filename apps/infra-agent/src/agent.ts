@@ -152,13 +152,14 @@ async function deploy(job: Job, progress: Progress) {
 
 /** Everything a compose project left behind, by label — the safety net under `down`. */
 async function sweepProject(project: string, opts: { images: boolean; volumes: boolean }, progress: Progress) {
-  const removed = { containers: 0, networks: 0, images: 0, volumes: 0 };
+  const removed = { containers: 0, networks: 0, images: 0, volumes: 0, not_removed: 0 };
   const filter = `label=com.docker.compose.project=${project}`;
   const containers = await dockerLines(['ps', '-aq', '--filter', filter]);
-  if (containers.length) {
-    progress(`sweep: removing ${containers.length} container(s) of ${project}\n`);
-    await docker(['rm', '-f', ...containers]);
-    removed.containers = containers.length;
+  if (containers.length) progress(`sweep: removing ${containers.length} container(s) of ${project}\n`);
+  for (const id of containers) {
+    // A daemon under memory pressure sometimes cannot remove a container it has already stopped
+    // ("did not receive an exit event"); a stopped leftover is housekeeping's job, not a failure.
+    try { await docker(['rm', '-f', id]); removed.containers++; } catch (err) { removed.not_removed++; progress(`could not remove ${id}: ${(err as Error).message.split('\n').pop()}\n`); }
   }
   const networks = await dockerLines(['network', 'ls', '-q', '--filter', filter]);
   for (const id of networks) {
@@ -192,10 +193,14 @@ async function teardown(job: Job, progress: Progress) {
 
   let swept = null;
   if (project) swept = await sweepProject(project, { images: removeImages, volumes: removeVolumes }, progress);
-  const remaining = project ? await dockerLines(['ps', '-aq', '--filter', `label=com.docker.compose.project=${project}`]) : [];
-  if (remaining.length) throw new Error(`${remaining.length} container(s) of ${project} still exist after teardown${scriptError ? `; ${scriptError}` : ''}`);
+  // Down means nothing of the stack is running. Stopped leftovers the daemon would not remove are reported;
+  // housekeeping removes them when the daemon is well again.
+  const running = project ? await dockerLines(['ps', '-q', '--filter', `label=com.docker.compose.project=${project}`]) : [];
+  if (running.length) throw new Error(`${running.length} container(s) of ${project} are still running after teardown${scriptError ? `; ${scriptError}` : ''}`);
   if (scriptError && !project) throw new Error(scriptError);
-  return { compose_project: project, remove_images: removeImages, remove_volumes: removeVolumes, swept, script_error: scriptError };
+  const leftover = project ? (await dockerLines(['ps', '-aq', '--filter', `label=com.docker.compose.project=${project}`])).length : 0;
+  if (leftover) progress(`${leftover} stopped container(s) of ${project} could not be removed yet; housekeeping will\n`);
+  return { compose_project: project, remove_images: removeImages, remove_volumes: removeVolumes, swept, stopped_leftovers: leftover, script_error: scriptError };
 }
 
 const SIZE_UNITS: Record<string, number> = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12, KIB: 1024, MIB: 1024 ** 2, GIB: 1024 ** 3 };
