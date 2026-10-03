@@ -29,6 +29,7 @@ C.push(
   {
     key: 'SB-UC-naming-MAIN',
     name: 'UC-naming main flow: Naming conventions',
+    objective: 'Walk through the "Naming conventions" screen the way its main use case describes it: operator loads the available patterns, edits one and previews its token expansion without running arbitrary expressions.',
     description: 'Main flow of UC-naming (Naming conventions): operator loads the available patterns, edits one and previews its token expansion without running arbitrary expressions. Touches GET /api/v1/naming, GET /api/v1/naming-conventions and POST /api/v1/naming/preview.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -45,6 +46,7 @@ C.push(
   {
     key: 'SB-UC-naming-ALT-1',
     name: 'UC-naming alt flow 1: Unknown tokens remain visible for correction.',
+    objective: 'Check an alternative path of "Naming conventions": unknown tokens remain visible for correction. A pattern referencing a token with no supplied context value is listed in unknownTokens, not silently dropped.',
     description: 'Alternate flow 1 of UC-naming (Naming conventions): "Unknown tokens remain visible for correction." A pattern referencing a token with no supplied context value is listed in unknownTokens, not silently dropped.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -59,6 +61,7 @@ C.push(
   {
     key: 'SB-UC-naming-ALT-2',
     name: 'UC-naming alt flow 2: The operator may keep the existing default.',
+    objective: 'Check an alternative path of "Naming conventions": the operator may keep the existing default. Requesting a preview by kind="test_case" (the stored default) without an explicit pattern override succeeds using the current stored pattern.',
     description: 'Alternate flow 2 of UC-naming (Naming conventions): "The operator may keep the existing default." Requesting a preview by kind="test_case" (the stored default) without an explicit pattern override succeeds using the current stored pattern.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -73,6 +76,7 @@ C.push(
   {
     key: 'SB-UC-naming-EXC-1',
     name: 'UC-naming exc flow 1: An unsupported token must not execute code.',
+    objective: 'Check that "Naming conventions" fails safely: an unsupported token must not execute code. A pattern containing a code-injection-shaped token is treated as plain text/an unknown token, never evaluated — the application service answers a successful answer with the literal token reported, not a server error or evaluated expression.',
     description: 'Exception flow 1 of UC-naming (Naming conventions): "An unsupported token must not execute code." A pattern containing a code-injection-shaped token is treated as plain text/an unknown token, never evaluated — the API answers 200 with the literal token reported, not a server error or evaluated expression.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -87,6 +91,7 @@ C.push(
   {
     key: 'SB-UC-naming-EXC-2',
     name: 'UC-naming exc flow 2: A preview does not reserve a unique name.',
+    objective: 'Check that "Naming conventions" fails safely: a preview does not reserve a unique name. Requesting the identical preview twice returns the identical name both times — nothing is incremented or reserved by the read-only preview call.',
     description: 'Exception flow 2 of UC-naming (Naming conventions): "A preview does not reserve a unique name." Requesting the identical preview twice returns the identical name both times — nothing is incremented or reserved by the read-only preview call.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -109,6 +114,7 @@ C.push(
   {
     key: 'SB-UC-schemeDefinitions-MAIN',
     name: 'UC-schemeDefinitions main flow: Scheme definitions',
+    objective: 'Walk through the "Scheme definitions" screen the way its main use case describes it: analyst selects a family, the system lists that family\'s imported schemas with field paths and types, available for handoff to the message-definition wizard.',
     description: 'Main flow of UC-schemeDefinitions (Scheme definitions): analyst selects a family, the system lists that family\'s imported schemas with field paths and types, available for handoff to the message-definition wizard. Touches GET /api/v1/catalog/designer-types.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one schema imported.',
@@ -124,6 +130,7 @@ C.push(
   {
     key: 'SB-UC-schemeDefinitions-ALT-1',
     name: 'UC-schemeDefinitions alt flow 1: Back changes family or schema selection.',
+    objective: 'Check an alternative path of "Scheme definitions": back changes family or schema selection.',
     description: 'Alternate flow 1 of UC-schemeDefinitions (Scheme definitions): "Back changes family or schema selection." No backing API call is made for this flow by design — family/schema selection re-filters the same already-loaded designer-types list client-side.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -138,6 +145,7 @@ C.push(
   {
     key: 'SB-UC-schemeDefinitions-ALT-2',
     name: 'UC-schemeDefinitions alt flow 2: Print/PDF conversion is a documentation representation, not a new schema.',
+    objective: 'Check an alternative path of "Scheme definitions": print/PDF conversion is a documentation representation, not a new schema.',
     description: 'Alternate flow 2 of UC-schemeDefinitions (Scheme definitions): "Print/PDF conversion is a documentation representation, not a new schema." Closest executable proxy: the designer-types catalogue stays non-empty and readable across two separate reads — a documentation export of one schema never adds a new catalogue entry or breaks the read.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -153,6 +161,7 @@ C.push(
   {
     key: 'SB-UC-schemeDefinitions-EXC-1',
     name: 'UC-schemeDefinitions exc flow 1: An unavailable original file is reported as missing.',
+    objective: 'Check that "Scheme definitions" fails safely: an unavailable original file is reported as missing. Requesting a source file for a fabricated upload id must return a clean not-found, never a fabricated/empty file.',
     description: 'Exception flow 1 of UC-schemeDefinitions (Scheme definitions): "An unavailable original file is reported as missing." Requesting a source file for a fabricated upload id must return a clean not-found, never a fabricated/empty file.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -167,6 +176,7 @@ C.push(
   {
     key: 'SB-UC-schemeDefinitions-EXC-2',
     name: 'UC-schemeDefinitions exc flow 2: No imported schemas produces import guidance.',
+    objective: 'Check that "Scheme definitions" fails safely: no imported schemas produces import guidance.',
     description: 'Exception flow 2 of UC-schemeDefinitions (Scheme definitions): "No imported schemas produces import guidance." Closest executable proxy: the designer-types read always answers with a well-formed 200/array (the structural precondition the UI needs to correctly show import guidance only when the array is genuinely empty, not on a failed read).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -188,6 +198,7 @@ C.push(
   {
     key: 'SB-UC-trActive-MAIN',
     name: 'UC-trActive main flow: Active runs',
+    objective: 'Walk through the "Active runs" screen the way its main use case describes it: operator opens Active runs, the system selects active-state runs from the collection, and opening one by ID retrieves that exact run\'s detail.',
     description: 'Main flow of UC-trActive (Active runs): operator opens Active runs, the system selects active-state runs from the collection, and opening one by ID retrieves that exact run\'s detail. Touches GET /api/v1/runs and GET /api/v1/runs/:id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one run exists.',
@@ -204,6 +215,7 @@ C.push(
   {
     key: 'SB-UC-trActive-ALT-1',
     name: 'UC-trActive alt flow 1: Tile and table views represent the same records.',
+    objective: 'Check an alternative path of "Active runs": tile and table views represent the same records. Both views read the same the matching read collection — a second read returns the identical record set a tile-view and table-view would both be built from.',
     description: 'Alternate flow 1 of UC-trActive (Active runs): "Tile and table views represent the same records." Both views read the same GET /api/v1/runs collection — a second read returns the identical record set a tile-view and table-view would both be built from.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -218,6 +230,7 @@ C.push(
   {
     key: 'SB-UC-trActive-ALT-2',
     name: 'UC-trActive alt flow 2: An empty active collection links to a new run or history.',
+    objective: 'Check an alternative path of "Active runs": an empty active collection links to a new run or history.',
     description: 'Alternate flow 2 of UC-trActive (Active runs): "An empty active collection links to a new run or history." Closest executable proxy: GET /api/v1/runs always answers with a well-formed 200/array (the structural precondition for honestly distinguishing a genuinely empty active set from a failed read).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -232,6 +245,7 @@ C.push(
   {
     key: 'SB-UC-trActive-EXC-1',
     name: 'UC-trActive exc flow 1: A disconnected stream marks data stale rather than inventing progress.',
+    objective: 'Check that "Active runs" fails safely: a disconnected stream marks data stale rather than inventing progress. The stream endpoint itself is server-sent-events (not exercised directly here to avoid hanging a plain HTTP request on a long-lived connection); this case instead confirms the sibling run-detail read never fabricates progress fields that are not actually present on the row.',
     description: 'Exception flow 1 of UC-trActive (Active runs): "A disconnected stream marks data stale rather than inventing progress." The stream endpoint itself is server-sent-events (not exercised directly here to avoid hanging a plain HTTP request on a long-lived connection); this case instead confirms the sibling run-detail read never fabricates progress fields that are not actually present on the row.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one run exists.',
@@ -247,6 +261,7 @@ C.push(
   {
     key: 'SB-UC-trActive-EXC-2',
     name: 'UC-trActive exc flow 2: A missing run detail is reported without opening another run.',
+    objective: 'Check that "Active runs" fails safely: a missing run detail is reported without opening another run. Requesting a nonexistent run id must return a clean not-found, never silently substituting a different real run.',
     description: 'Exception flow 2 of UC-trActive (Active runs): "A missing run detail is reported without opening another run." Requesting a nonexistent run id must return a clean not-found, never silently substituting a different real run.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',

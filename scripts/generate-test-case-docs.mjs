@@ -27,7 +27,7 @@ async function j(p) {
 async function allCases(appId) {
   const out = [];
   for (let off = 0; ; off += 200) {
-    const r = await j(`/api/v1/test-cases?application_id=${appId}&limit=200&offset=${off}`);
+    const r = await j(`/api/v1/test-cases?application_id=${appId}&full=1&limit=200&offset=${off}`);
     out.push(...(r.data || []));
     if (!(r.data || []).length || out.length >= (r.total ?? out.length)) break;
   }
@@ -64,23 +64,51 @@ function caseSection(c) {
   const lines = [];
   lines.push(`#### ${c.key} — ${c.name}`);
   lines.push('');
+  // The Test cases screen fields (adopted from Sand Bench): objective first, then the card.
+  if (c.objective) {
+    lines.push(`**Objective.** ${mdEscape(c.objective)}`);
+    lines.push('');
+  }
   lines.push(`| | |`);
   lines.push(`|---|---|`);
+  lines.push(`| **Test ID** | \`${c.key}\` |`);
+  lines.push(`| **Priority / severity** | ${c.priority_label || c.priority || '—'} (${c.priority || '—'}) / ${c.severity || '—'} |`);
+  lines.push(`| **Status** | ${c.run_status || 'Not run'}${c.last_run_at ? ` (last run ${c.last_run_at})` : ''} · definition ${c.status || c.lifecycle} |`);
+  lines.push(`| **Owner / component** | ${mdEscape(c.owner || c.owner_id || '—')} / ${mdEscape(c.component || '—')} |`);
+  lines.push(`| **Environment / duration** | ${mdEscape(c.environment || '—')} / ${c.estimated_duration || '—'} |`);
+  lines.push(`| **Visibility** | ${c.visibility || 'Team'} |`);
   lines.push(`| **Runner** | \`${c.execution_method || '—'}\`${rules.browser ? ` (${rules.browser})` : ''}${rules.viewport ? ` @ ${rules.viewport.width}×${rules.viewport.height}` : ''} |`);
   lines.push(`| **Type / level** | ${c.test_type || '—'} / ${c.test_level || '—'} |`);
-  lines.push(`| **Priority / severity** | ${c.priority || '—'} / ${c.severity || '—'} |`);
   lines.push(`| **Lifecycle** | ${c.lifecycle} (${c.automation_status}) |`);
   lines.push(`| **Timeout** | ${c.timeout_seconds ?? '—'}s |`);
   lines.push(`| **Tags** | ${(c.tags || []).map((t) => `\`${t}\``).join(' ') || '—'} |`);
+  lines.push(`| **Automation link** | ${mdEscape(c.automation_link || c.script || '—')} |`);
+  if (Array.isArray(c.attachments) && c.attachments.length) lines.push(`| **Attachments** | ${c.attachments.map((a) => `[${mdEscape(a.name)}](${a.url})`).join(' · ')} |`);
+  if (Array.isArray(c.dependency_ids) && c.dependency_ids.length) lines.push(`| **Dependencies** | ${c.dependency_ids.map((d) => `\`${d}\``).join(' ')} |`);
+  if (c.triage_status && c.triage_status !== 'None') lines.push(`| **Triage** | ${c.triage_status}${c.assignee ? ` · ${mdEscape(c.assignee)}` : ''}${c.linked_issue_url ? ` · ${c.linked_issue_url}` : ''} |`);
   lines.push('');
-  lines.push(`**What it does.** ${c.description || '—'}`);
+  lines.push(`**What it does (technical).** ${c.description || '—'}`);
   lines.push('');
   if (c.preconditions) {
     lines.push(`**Preconditions.** ${c.preconditions}`);
     lines.push('');
   }
   const steps = Array.isArray(c.steps) ? c.steps : [];
-  if (steps.length) {
+  const plain = steps.filter((s) => s && typeof s === 'object' && s.text);
+  if (plain.length) {
+    lines.push(`**Steps.**`);
+    lines.push('');
+    lines.push('| # | Step | Expected result | Test data |');
+    lines.push('|---|---|---|---|');
+    plain.forEach((s, i) => lines.push(`| ${i + 1} | ${mdEscape(s.text)} | ${mdEscape(s.expected || '')} | ${mdEscape(s.testData || '—')} |`));
+    lines.push('');
+    lines.push('<details><summary>Executable detail</summary>');
+    lines.push('');
+    steps.forEach((s, i) => lines.push(`   ${stepLine(s, i + 1)}`));
+    lines.push('');
+    lines.push('</details>');
+    lines.push('');
+  } else if (steps.length) {
     lines.push(`**Steps.**`);
     lines.push('');
     steps.forEach((s, i) => lines.push(`   ${stepLine(s, i + 1)}`));
@@ -99,17 +127,30 @@ function caseSection(c) {
     cleanupSteps.forEach((s, i) => lines.push(`   ${stepLine(s, i + 1)}`));
     lines.push('');
   }
-  if (dp) {
-    lines.push(`**Data used.** ${dp.data}`);
+  if (c.test_data) {
+    lines.push(`**Overall test data.** ${mdEscape(c.test_data)}`);
     lines.push('');
+  }
+  if (dp) {
+    if (!c.test_data) { lines.push(`**Data used.** ${dp.data}`); lines.push(''); }
     lines.push(`**Data profile.** \`${dp.profile}\` — ${dp.source}`);
     lines.push('');
-  } else if (c.test_data_ref) {
+  } else if (c.test_data_ref && !c.test_data) {
     lines.push(`**Data used.** ${c.test_data_ref}`);
     lines.push('');
   }
   if (c.expected_results) {
     lines.push(`**Expected result.** ${c.expected_results}`);
+    lines.push('');
+  }
+  if (c.flakiness_notes || c.known_workarounds || c.common_failure_causes) {
+    lines.push('<details><summary>Triage notes</summary>');
+    lines.push('');
+    if (c.flakiness_notes) lines.push(`- **Flakiness.** ${mdEscape(c.flakiness_notes)}`);
+    if (c.known_workarounds) lines.push(`- **Known workarounds.** ${mdEscape(c.known_workarounds)}`);
+    if (c.common_failure_causes) lines.push(`- **Common failure causes.** ${mdEscape(c.common_failure_causes)}`);
+    lines.push('');
+    lines.push('</details>');
     lines.push('');
   }
   return lines.join('\n');

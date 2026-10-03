@@ -30,24 +30,28 @@ const C: CaseDef[] = [];
 C.push(
   smoke({
     key: 'TE-SMOKE-HEALTH', name: 'Engine health endpoint answers',
+    objective: 'Confirm the test engine is up: its health check answers, names the service and version, and says the console is enabled.',
     description: 'GET {{engine}}/health must identify the service ("gavriq-test-engine") with a version and the console enabled.',
     steps: [GET('/health', { expect_json: [{ path: 'status', equals: 'ok' }, { path: 'service', equals: 'gavriq-test-engine' }, { path: 'version', exists: true }, { path: 'ui', equals: true }], description: 'engine /health' })],
     tags: ['health'], expected: '200 {"status":"ok","service":"gavriq-test-engine",…}.',
   }),
   smoke({
     key: 'TE-SMOKE-READY', name: 'Engine readiness probe answers',
+    objective: 'Confirm the test engine reports itself ready, the signal an orchestrator waits for before sending traffic.',
     description: 'GET {{engine}}/ready must return {"status":"ready"} — the probe an orchestrator gates traffic on.',
     steps: [GET('/ready', { expect_json: [{ path: 'status', equals: 'ready' }], description: 'engine /ready' })],
     tags: ['health'], expected: '200 {"status":"ready"}.',
   }),
   smoke({
     key: 'TE-SMOKE-DATABASE', name: 'Control plane reads its database',
+    objective: 'Confirm the engine can really read its database by asking for the list of registered applications.',
     description: '/ready is static, so this is the check that the API can actually query Postgres: the application registry must come back with at least one row.',
     steps: [GET('/api/v1/applications', { expect_json: [{ path: 'data', min_length: 1 }], description: 'application registry' })],
     tags: ['health', 'database'], expected: '200 with at least one application.',
   }),
   smoke({
     key: 'TE-SMOKE-UI-SHELL', name: 'Unified console shell is served',
+    objective: 'Confirm the console\'s web page is served with its title and script references.',
     description: 'GET {{engine}}/ must serve the unified console HTML (title "GAVRIQ Test Engine") and reference its script bundle.',
     severity: 'high',
     steps: [GET('/', { expected_body_contains: '<title>GAVRIQ Test Engine</title>', expect_headers: [{ name: 'content-type', contains: 'text/html' }], description: 'console shell' })],
@@ -55,6 +59,7 @@ C.push(
   }),
   smoke({
     key: 'TE-SMOKE-CONSOLE-ASSETS', name: 'Console script bundles are served',
+    objective: 'Confirm the console\'s script files are served as scripts, because without them the page is empty.',
     description: 'The shell is useless without its scripts: /catalog/app.js and /catalog/charts.js must be served as JavaScript.',
     severity: 'high',
     steps: [
@@ -65,6 +70,7 @@ C.push(
   }),
   smoke({
     key: 'TE-SMOKE-SIT-CONSOLE', name: 'Embedded SIT console answers behind the same port',
+    objective: 'Confirm the embedded SIT console answers through the engine\'s own address.',
     description: 'The consolidated container proxies /sit/* to the SIT console process. GET {{engine}}/sit/health must answer from it.',
     severity: 'high',
     steps: [GET('/sit/health', { expect_json: [{ path: 'status', equals: 'ok' }, { path: 'service', equals: 'sit-console' }], description: 'sit console /health' })],
@@ -72,12 +78,14 @@ C.push(
   }),
   smoke({
     key: 'TE-SMOKE-CATALOGUE-LOADED', name: 'Test repository is seeded',
+    objective: 'Confirm the test repository is not empty; an engine with no cases can run nothing.',
     description: 'A deployed engine with an empty repository can run nothing. GET /api/v1/test-cases must report a non-zero total.',
     steps: [GET('/api/v1/test-cases?limit=1', { expect_json: [{ path: 'total', min: 1 }, { path: 'data', min_length: 1 }], description: 'repository total' })],
     tags: ['repository'], expected: 'total >= 1.',
   }),
   smoke({
     key: 'TE-SMOKE-CONSOLE-BOOT', name: 'Console boot payload loads for the engine application',
+    objective: 'Confirm the single call the console starts from returns the engine application, its cases and its environments.',
     description: 'The console starts from one call, /api/v1/ui/summary. For the engine\'s own application it must return the application, its cases and its environments.',
     severity: 'high',
     steps: [GET('/api/v1/ui/summary?application_key=gavriq-test-engine', { expect_json: [{ path: 'data.application.key', equals: 'gavriq-test-engine' }, { path: 'data.cases', min_length: 1 }, { path: 'data.environments', min_length: 1 }], description: 'ui summary' })],
@@ -85,6 +93,7 @@ C.push(
   }),
   smoke({
     key: 'TE-SMOKE-WORKER-REGISTRY', name: 'Worker registry answers',
+    objective: 'Confirm the worker registry answers, since workers must register there before they can take work.',
     description: 'GET /api/v1/workers must answer — workers register and heartbeat against it before they can claim anything.',
     severity: 'high',
     steps: [GET('/api/v1/workers', { expect_json: [{ path: 'data', exists: true }], description: 'workers' })],
@@ -99,28 +108,33 @@ C.push(
 C.push(
   api({
     key: 'TE-API-META', name: 'Capability map is published',
+    objective: 'Confirm the engine publishes its version and the capability map other systems check before using it.',
     description: 'GET /api/v1/meta must publish the engine version and the capability map clients feature-detect against.',
     steps: [GET('/api/v1/meta', { expect_json: [{ path: 'service', equals: 'gavriq-test-engine' }, { path: 'control_plane', equals: true }, { path: 'capabilities.repository', equals: true }, { path: 'capabilities.executions', equals: true }, { path: 'version', exists: true }], description: 'meta' })],
   }),
   api({
     key: 'TE-API-APPLICATIONS', name: 'Application registry is multi-application',
+    objective: 'Confirm at least two applications are registered: Sand Bench and the engine itself.',
     description: 'GET /api/v1/applications must list at least two registered applications — Sand Bench and the engine itself.',
     severity: 'critical', priority: 'p0',
     steps: [GET('/api/v1/applications', { expect_json: [{ path: 'data', min_length: 2 }, { path: 'data', contains: '"key":"sand-bench"' }, { path: 'data', contains: '"key":"gavriq-test-engine"' }], description: 'applications' })],
   }),
   api({
     key: 'TE-API-APPLICATION-DETAIL', name: 'Application detail is retrievable by key',
+    objective: 'Confirm an application can be looked up by its key, with its cases and recent runs (currently a known defect: the lookup fails).',
     description: 'GET /api/v1/applications/gavriq-test-engine must return the application with its test cases and recent executions. Probed 2026-09-30: the route answers 500 ("operator does not exist: text = uuid") — this case stays red until it is fixed.',
     steps: [GET('/api/v1/applications/gavriq-test-engine', { expect_json: [{ path: 'data.key', equals: 'gavriq-test-engine' }, { path: 'data.test_cases', exists: true }], description: 'application detail' })],
     tags: ['known-defect'], expected: '200 with the application, its test_cases and recent_executions.',
   }),
   api({
     key: 'TE-API-TEST-CASES', name: 'Repository lists cases with its pagination contract',
+    objective: 'Confirm the repository lists cases a page at a time and reports the total number.',
     description: 'GET /api/v1/test-cases?limit=5 must return at most five rows plus the numeric total of the whole result set.',
     steps: [GET('/api/v1/test-cases?limit=5', { expect_json: [{ path: 'data', min_length: 1 }, { path: 'data', max_length: 5 }, { path: 'total', min: 1 }], description: 'test-cases page' })],
   }),
   api({
     key: 'TE-API-CASE-PAGING', name: 'Offset walks the same ordering as the first page',
+    objective: 'Confirm paging through the repository neither skips nor repeats a case.',
     description: 'Read two rows, then read one row at offset 1: it must be the second row of the first page. Guards against a page that skips or repeats cases.',
     steps: [
       GET('/api/v1/test-cases?limit=2', { expect_json: [{ path: 'data', min_length: 2 }], save: { second_key: 'data.1.key' }, description: 'first page of two' }),
@@ -129,6 +143,7 @@ C.push(
   }),
   api({
     key: 'TE-API-CASE-LIMIT-CAP', name: 'Page size is capped at 200',
+    objective: 'Confirm a request for an enormous page is capped at 200 rows.',
     description: 'A client asking for 100000 rows must get at most 200 — the repository list cannot be used to pull the whole table in one response.',
     severity: 'medium',
     steps: [GET('/api/v1/test-cases?limit=100000', { expect_json: [{ path: 'data', max_length: 200 }], description: 'oversized limit' })],
@@ -136,6 +151,7 @@ C.push(
   }),
   api({
     key: 'TE-API-CASE-FILTERS', name: 'Repository filters narrow the list',
+    objective: 'Confirm each repository filter (type, lifecycle, tag, free text) narrows the list to matching cases.',
     description: 'test_type, lifecycle, tag and free-text q must each filter: every probe returns rows that match what was asked for.',
     steps: [
       GET('/api/v1/test-cases?test_type=smoke&limit=3', { expect_json: [{ path: 'data', min_length: 1 }, { path: 'data.0.test_type', equals: 'smoke' }], description: 'test_type=smoke' }),
@@ -147,17 +163,20 @@ C.push(
   }),
   api({
     key: 'TE-API-CASE-DETAIL', name: 'Case detail includes version history',
+    objective: 'Confirm a case opened by its key shows its steps and its version history.',
     description: 'Fetch one known case by key (TE-SMOKE-HEALTH): the detail payload must carry its executable steps and its version list.',
     steps: [GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { expect_json: [{ path: 'data.key', equals: 'TE-SMOKE-HEALTH' }, { path: 'data.steps', min_length: 1 }, { path: 'data.versions', exists: true }], description: 'case detail' })],
   }),
   api({
     key: 'TE-API-CASE-NOT-FOUND', name: 'Unknown case is a clean 404',
+    objective: 'Confirm asking for a case that does not exist gives a clean not-found answer.',
     description: 'GET /api/v1/test-cases/<unknown key> must answer 404 {"error":"Test case not found"}.',
     severity: 'medium',
     steps: [GET('/api/v1/test-cases/TE-NO-SUCH-CASE', { expected_status: 404, expect_json: [{ path: 'error', equals: 'Test case not found' }], description: 'unknown case' })],
   }),
   api({
     key: 'TE-API-SUITES', name: 'Suites and plans are listable',
+    objective: 'Confirm suites, plans and suite membership can each be listed.',
     description: 'GET /api/v1/suites, /api/v1/plans and the bulk membership read /api/v1/test-case-suites must each return a data array (an engine whose suites are maintained by hand may have none).',
     steps: [
       GET('/api/v1/suites', { expect_json: [{ path: 'data', exists: true }], description: 'suites' }),
@@ -167,11 +186,13 @@ C.push(
   }),
   api({
     key: 'TE-API-ENVIRONMENTS', name: 'Environment registry with safety policies',
+    objective: 'Confirm the environment registry lists the environments, including the Sand Bench development target.',
     description: 'GET /api/v1/environments must list environments including the Sand Bench development target.',
     steps: [GET('/api/v1/environments', { expect_json: [{ path: 'data', min_length: 1 }, { path: 'data', contains: '"key":"sand-bench-local"' }], description: 'environments' })],
   }),
   api({
     key: 'TE-API-ENVIRONMENT-DETAIL', name: 'Environment detail carries target and policy',
+    objective: 'Confirm an environment opened by key shows its address, its variables and its safety policy, and an unknown key is not found.',
     description: 'GET /api/v1/environments/sand-bench-local must return its base URL, the variables cases template against and its safety policy; an unknown key is a 404.',
     steps: [
       GET('/api/v1/environments/sand-bench-local', { expect_json: [{ path: 'data.key', equals: 'sand-bench-local' }, { path: 'data.base_url', matches: '^https?://' }, { path: 'data.config.vars.web', exists: true }, { path: 'data.safety_policy.functional_smoke', equals: 'allowed' }], description: 'environment detail' }),
@@ -180,6 +201,7 @@ C.push(
   }),
   api({
     key: 'TE-API-SAFETY-POLICY-CHECK', name: 'Safety policy check answers per category',
+    objective: 'Confirm the safety policy check gives the right decision per category: smoke allowed, stress needs approval, destructive database work prohibited.',
     description: 'POST /api/v1/environments/:id/policy/check must translate the policy into a decision: functional smoke allowed, stress behind approval, destructive database work prohibited.',
     steps: [
       GET('/api/v1/environments/sand-bench-local/policy', { expect_json: [{ path: 'data.safety_policy.destructive_db', equals: 'prohibited' }], description: 'policy' }),
@@ -191,6 +213,7 @@ C.push(
   }),
   api({
     key: 'TE-API-EXEC-VALIDATION', name: 'Execution queue validates its input',
+    objective: 'Confirm an empty request to queue an execution is refused, so nothing unconstrained enters the queue.',
     description: 'POST /api/v1/executions with an empty body must be rejected with 400 — no unconstrained execution can enter the queue.',
     steps: [POST('/api/v1/executions', { body: {}, expected_status: 400, expect_json: [{ path: 'error', contains: 'test_case_ids' }], description: 'reject empty execution' })],
     dataProfile: { profile: 'negative', data: 'Empty JSON body.', source: 'Hand-crafted.' },
@@ -198,6 +221,7 @@ C.push(
   }),
   api({
     key: 'TE-API-EXECUTIONS-LIST', name: 'Execution history is queryable',
+    objective: 'Confirm recent executions can be listed and filtered by status.',
     description: 'GET /api/v1/executions must return the recent executions, and the status filter must narrow them (queued only).',
     steps: [
       GET('/api/v1/executions', { expect_json: [{ path: 'data', exists: true }, { path: 'data', max_length: 50 }], description: 'executions' }),
@@ -206,6 +230,7 @@ C.push(
   }),
   api({
     key: 'TE-API-EXECUTION-NOT-FOUND', name: 'Unknown execution is a clean 404 on every read',
+    objective: 'Confirm every read of an execution that does not exist (detail, console view, evidence, report) is a clean not-found.',
     description: 'The execution detail, its console read model, its evidence list and its summary report must each answer 404 for an unknown id.',
     severity: 'medium',
     steps: [
@@ -217,16 +242,19 @@ C.push(
   }),
   api({
     key: 'TE-API-UI-SUMMARY', name: 'Console read model answers per application',
+    objective: 'Confirm the console\'s boot data for Sand Bench contains its cases, suites, environments and weekly statistics.',
     description: 'GET /api/v1/ui/summary?application_key=sand-bench must return the console\'s boot payload scoped to that application: cases, suites, environments and the 7-day stats.',
     steps: [GET('/api/v1/ui/summary?application_key=sand-bench', { expect_json: [{ path: 'data.application.key', equals: 'sand-bench' }, { path: 'data.cases', min_length: 1 }, { path: 'data.suites', exists: true }, { path: 'data.environments', min_length: 1 }, { path: 'data.stats.runs_7d', min: 0 }], description: 'ui summary' })],
   }),
   api({
     key: 'TE-API-UI-LIVE', name: 'Console live poll answers',
+    objective: 'Confirm the live poll an open console makes returns the clock, the catalogue signature, executions and workers.',
     description: 'GET /api/v1/ui/live is what an open console polls: it must return the server clock, the catalogue signature, executions and workers.',
     steps: [GET('/api/v1/ui/live?application_key=gavriq-test-engine', { expect_json: [{ path: 'data.now', matches: ISO }, { path: 'data.catalog_sig', exists: true }, { path: 'data.executions', exists: true }, { path: 'data.workers', exists: true }, { path: 'data.changed', exists: true }], description: 'ui live' })],
   }),
   api({
     key: 'TE-API-UI-HISTORY', name: 'Tile history answers for a set of cases',
+    objective: 'Confirm the tile history answers: empty for no cases, and with runs, top failures and totals for a real case.',
     description: 'POST /api/v1/ui/history returns per-run pass/fail for the cases of a tile. An empty selection is an empty history, not an error; a real case id returns the runs/top_failing/totals structure.',
     steps: [
       POST('/api/v1/ui/history', { body: { case_ids: [] }, expect_json: [{ path: 'data.totals.cases_run', equals: 0 }], expected_body_contains: '"runs":[]', description: 'empty selection' }),
@@ -237,11 +265,13 @@ C.push(
   }),
   api({
     key: 'TE-API-DASHBOARD', name: 'Dashboard aggregates answer',
+    objective: 'Confirm the dashboard totals and breakdowns by lifecycle and type answer.',
     description: 'GET /api/v1/dashboard must return the repository aggregates: totals, automation count and the by-lifecycle / by-type breakdowns.',
     steps: [GET('/api/v1/dashboard', { expect_json: [{ path: 'data.total_tests', min: 1 }, { path: 'data.automated', min: 0 }, { path: 'data.by_lifecycle', min_length: 1 }, { path: 'data.by_type', min_length: 1 }, { path: 'data.total_environments', min: 1 }], description: 'dashboard' })],
   }),
   api({
     key: 'TE-API-SEARCH', name: 'Global search spans the repository',
+    objective: 'Confirm global search covers cases, applications, suites, environments and defects, and refuses a one-character query.',
     description: 'GET /api/v1/search?q=… must search cases, applications, suites, environments and defects at once, and refuse a query shorter than two characters.',
     steps: [
       GET('/api/v1/search?q=TE-SMOKE', { expect_json: [{ path: 'data.test_cases', min_length: 1 }, { path: 'data.test_cases.0.resource_type', equals: 'test_case' }, { path: 'data.applications', exists: true }, { path: 'data.environments', exists: true }], description: 'search cases' }),
@@ -252,16 +282,19 @@ C.push(
   }),
   api({
     key: 'TE-API-RELEASE-READINESS', name: 'Release readiness verdict is computable',
+    objective: 'Confirm the release readiness verdict answers with the pass rate and its reasons.',
     description: 'GET /api/v1/release-readiness must return one of the three verdicts with the pass rate and the reasons behind it.',
     steps: [GET('/api/v1/release-readiness', { expect_json: [{ path: 'data.readiness', matches: '^(READY|READY WITH CONDITIONS|NOT READY)$' }, { path: 'data.pass_rate', min: 0 }, { path: 'data.pass_rate', max: 100 }, { path: 'data.reasons', min_length: 1 }, { path: 'data.evaluated_at', matches: ISO }], description: 'release readiness' })],
   }),
   api({
     key: 'TE-API-SIT-CATALOG', name: 'SIT catalog is importable and listed',
+    objective: 'Confirm the SIT catalogue lists its packs with applications, types and counts.',
     description: 'GET /api/v1/sit-catalog must return the SIT packs read from sit/cases, with their apps, types and counts.',
     steps: [GET('/api/v1/sit-catalog', { expect_json: [{ path: 'data.files', min_length: 1 }, { path: 'data.apps', min_length: 1 }, { path: 'data.types', min_length: 1 }, { path: 'data.counts.files', min: 1 }], description: 'sit catalog' })],
   }),
   api({
     key: 'TE-API-RUN-ALL-DRYRUN', name: 'Run-everything endpoint validates and previews',
+    objective: 'Confirm the run-everything preview returns the per-suite plan without queueing anything, and refuses a request naming no application.',
     description: 'POST /api/v1/executions/run-all with dry_run=true must return the per-suite plan without queueing anything, and refuse a request that names no application.',
     steps: [
       POST('/api/v1/executions/run-all', { body: { application_key: 'sand-bench', dry_run: true }, expect_json: [{ path: 'data.application', equals: 'sand-bench' }, { path: 'data.suites', exists: true }, { path: 'data.total_cases', min: 0 }], description: 'run-all dry run' }),
@@ -273,6 +306,7 @@ C.push(
   }),
   api({
     key: 'TE-API-RUN-PLAN', name: 'Run trigger plans a run without queueing it',
+    objective: 'Confirm the run preview for the engine application shows the plan, the excluded cases, the live worker count and the evidence gate mode.',
     description: 'POST /api/v1/runs with dry_run=true is the pipeline-facing preview: for the engine application on its development environment it must return the plan, the excluded cases, the number of live workers and the evidence gate mode.',
     severity: 'critical', priority: 'p0',
     steps: [POST('/api/v1/runs', { body: { application: 'gavriq-test-engine', environment: 'engine-local', dry_run: true }, expect_json: [{ path: 'data.application', equals: 'gavriq-test-engine' }, { path: 'data.environment', equals: 'engine-local' }, { path: 'data.total_cases', min: 1 }, { path: 'data.suites', min_length: 1 }, { path: 'data.excluded', exists: true }, { path: 'data.workers_online', min: 0 }, { path: 'data.evidence_gate', matches: '^(enforce|report|off)$' }], description: 'dry-run plan' })],
@@ -280,6 +314,7 @@ C.push(
   }),
   api({
     key: 'TE-API-RUN-VALIDATION', name: 'Run trigger refuses incomplete and unknown targets',
+    objective: 'Confirm a run request is refused when it names no application or environment, or names ones that do not exist.',
     description: 'POST /api/v1/runs must answer 400 without application/environment and 404 for an application or environment it does not know — before anything is planned.',
     steps: [
       POST('/api/v1/runs', { body: {}, expected_status: 400, expect_json: [{ path: 'error', contains: 'application and environment are required' }], description: 'empty body' }),
@@ -290,6 +325,7 @@ C.push(
   }),
   api({
     key: 'TE-API-RUNS-LIST', name: 'Runs are listable and an unknown run is a 404',
+    objective: 'Confirm runs can be listed by application and an unknown run is a clean not-found.',
     description: 'GET /api/v1/runs lists grouped runs filterable by application; GET /api/v1/runs/<unknown> and its evidence manifest answer 404.',
     steps: [
       GET('/api/v1/runs?limit=5', { expect_json: [{ path: 'data', exists: true }, { path: 'data', max_length: 5 }], description: 'recent runs' }),
@@ -300,12 +336,14 @@ C.push(
   }),
   api({
     key: 'TE-API-WORKERS', name: 'Workers report a derived status',
+    objective: 'Confirm each worker reports a known status and a silent worker reads as offline.',
     description: 'GET /api/v1/workers must return each worker with a status from the known set; a worker whose heartbeat is stale reads "offline" whatever it last reported.',
     severity: 'medium',
     steps: [GET('/api/v1/workers', { expect_json: [{ path: 'data', exists: true }], expected_body_not_contains: '"status":null', description: 'workers' })],
   }),
   api({
     key: 'TE-API-SCHEDULES', name: 'Schedules are listable and validate their input',
+    objective: 'Confirm schedules are listed with the time zone, and badly formed schedule requests are refused.',
     description: 'GET /api/v1/schedules returns the schedules with the scheduler time zone; creating one without a name, without a trigger, with a malformed cron expression or for an unknown application is refused.',
     steps: [
       GET('/api/v1/schedules', { expect_json: [{ path: 'data', exists: true }], description: 'schedules' }),
@@ -319,6 +357,7 @@ C.push(
   }),
   api({
     key: 'TE-API-SETTINGS', name: 'Engine settings are readable and validated',
+    objective: 'Confirm the engine settings (run retention, per-type timeouts, failure limit) can be read and out-of-range values are refused.',
     description: 'GET /api/v1/settings returns the run retention window, per-test-type case timeouts (24h default) and the consecutive-failure circuit breaker (default 20); PUT refuses an out-of-range value on any of the three without changing it.',
     severity: 'medium',
     steps: [
@@ -347,6 +386,7 @@ C.push(
   }),
   api({
     key: 'TE-API-BUILD-STATUS', name: 'In-container build status answers',
+    objective: 'Confirm build results answer empty for an application that never reported, and the combined test status answers.',
     description: 'GET /api/v1/build-results for an application that never reported answers with an empty set and no build id; /api/v1/test-status combines engine-executed cases with in-container results.',
     steps: [
       GET('/api/v1/build-results?application_key=no-such-application', { expect_json: [{ path: 'application_key', equals: 'no-such-application' }], expected_body_contains: '"build_id":null', description: 'no builds yet' }),
@@ -356,6 +396,7 @@ C.push(
   }),
   api({
     key: 'TE-API-INTELLIGENCE', name: 'Quality intelligence endpoints answer',
+    objective: 'Confirm coverage gaps, flaky-case detection and AI proposals each answer in their documented structure.',
     description: 'Coverage gaps, flaky-case detection and AI proposals must each return their documented structure.',
     severity: 'medium',
     steps: [
@@ -366,12 +407,14 @@ C.push(
   }),
   api({
     key: 'TE-API-AGENT-CONTEXT', name: 'Agent context is published',
+    objective: 'Confirm an autonomous agent is given the applications and capabilities it may use.',
     description: 'GET /api/v1/agents/context gives an autonomous agent the applications and the capabilities it may use.',
     severity: 'medium',
     steps: [GET('/api/v1/agents/context', { expect_json: [{ path: 'data.applications', min_length: 2 }, { path: 'data.agent_capabilities', min_length: 7 }, { path: 'data.agent_capabilities', contains: 'request_executions' }, { path: 'data.untested_requirements_count', min: 0 }], description: 'agents context' })],
   }),
   api({
     key: 'TE-API-OPS', name: 'Operational endpoints answer',
+    objective: 'Confirm the operational endpoints (catalogue counts, target preflight, SIT runner status) answer.',
     description: 'Catalogue counts (post-seed verification), target preflight and the SIT runner status/log must each answer with their structure. The preflight probes a port nothing listens on, so its verdict is "blocked".',
     severity: 'medium',
     steps: [
@@ -384,12 +427,14 @@ C.push(
   }),
   api({
     key: 'TE-API-AUDIT-LIST', name: 'Audit events are listable',
+    objective: 'Confirm the most recent audit events can be listed.',
     description: 'GET /api/v1/audit must return the most recent audit events (at most 100).',
     severity: 'medium',
     steps: [GET('/api/v1/audit', { expect_json: [{ path: 'data', exists: true }, { path: 'data', max_length: 100 }], description: 'audit' })],
   }),
   api({
     key: 'TE-API-EVIDENCE-MISSING', name: 'Missing evidence is a 404, not an empty 200',
+    objective: 'Confirm asking for an evidence file that does not exist is a clean not-found naming only the file.',
     description: 'GET /api/v1/evidence/file for a key that is not in the store must answer 404 with the file name only.',
     severity: 'medium',
     steps: [
@@ -408,6 +453,7 @@ const TMP_CASE = `TE-TMP-${UNIQ}`;
 C.push(
   integration({
     key: 'TE-INT-CASE-LIFECYCLE', name: 'Case is created, versioned and archived',
+    objective: 'Create a case, update it (making version 2) and archive it: the repository\'s core write path end to end.',
     description: 'Create a case in the sandbox application (version 1, draft), update it (version 2 with a snapshot and change summary), then archive it. The repository\'s core write path, end to end.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -424,6 +470,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-CASE-CLONE', name: 'Clone copies a case as a new draft',
+    objective: 'Clone a case and confirm the copy is a draft named Clone of the original with the same steps, leaving the original untouched.',
     description: 'Clone the manual fixture case: the clone must be a draft named "Clone of …" under the requested key, with the source\'s steps and application, and leave the source untouched.',
     steps: [
       ...FIXTURES,
@@ -438,6 +485,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-CASE-NAME-UNIQUE', name: 'A duplicate case name is made unique with a timestamp',
+    objective: 'Create a second case with a name already in use and confirm it is accepted with a timestamp added to make the name unique.',
     description: 'Case names are unique across the repository. Creating a second case with a name already taken must succeed and store the name with a UTC timestamp suffix, so the duplicate says when it was made.',
     severity: 'medium',
     steps: [
@@ -452,6 +500,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-CASE-REQUIRED-FIELDS', name: 'Case creation requires key, name and application',
+    objective: 'Confirm a case cannot be created without a key, a name and an application.',
     description: 'POST /api/v1/test-cases without key, name or application_id must be refused with 400 and store nothing.',
     preconditions: PRE.readOnly,
     steps: [
@@ -464,6 +513,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-SUITE-MEMBERSHIP', name: 'Suite is created and cases are attached',
+    objective: 'Create a suite, add two cases to it, confirm the membership shows them, then remove the suite.',
     description: 'Create a suite in the sandbox application, attach two fixture cases, confirm the bulk membership read shows them, then queue nothing and remove the suite. (An engine without the suite-delete route keeps the temporary suite; the step is tolerated.)',
     steps: [
       ...FIXTURES,
@@ -481,6 +531,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-RUN-PLAN-SAFETY', name: 'Run planner applies automation status, lifecycle and safety policy',
+    objective: 'Plan a run on the fixture environment and confirm only runnable cases are included: manual, prohibited and approval-needing cases are excluded with reasons, archived cases ignored.',
     description: 'Plan a run of the sandbox application on the fixture environment. Of its six cases exactly two are runnable; the manual case, the chaos-tagged case (chaos prohibited there) and the load case (load needs approval) are excluded with their reasons; the archived case is not considered at all.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -502,6 +553,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-RUN-PLAN-APPROVAL', name: 'An approved category lifts its approval gate only',
+    objective: 'Plan the same run with load approved and confirm the load case joins the plan while the prohibited chaos case still does not.',
     description: 'Plan the same run with approved_categories ["load"]: the load case joins the plan (three runnable), while the chaos case stays excluded — approval cannot override a prohibition.',
     steps: [
       ...FIXTURES,
@@ -517,6 +569,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-RUN-PLAN-SCOPE', name: 'Run scope narrows the plan by case, method and type',
+    objective: 'Confirm a run scope narrows the plan by case, by method and by type, and a scope matching nothing is refused rather than queued empty.',
     description: 'The same planner honours a scope: one case key plans one case; a method filter plans only cases of that method; a scope that matches nothing plans zero cases and, when actually triggered, is refused with 422 instead of queueing an empty run.',
     steps: [
       ...FIXTURES,
@@ -530,6 +583,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-WORKER-PROTOCOL', name: 'Execution is carried from queue to verdict over the worker protocol',
+    objective: 'Act as a worker: queue, claim, upload evidence, report a pass and complete; the execution must end passed with its exit criteria met.',
     description: 'Acts as the worker: queue an execution, claim it, upload an artefact, report the case passed with that evidence and complete. The execution must end "passed" with its exit criteria met, and the run view must report state completed / verdict pass with one evidence item.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -543,6 +597,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-FAILED-RESULT', name: 'A failing result fails the execution whatever the worker claims',
+    objective: 'Report a case failed but complete the execution as passed; the engine must derive the real outcome (failed) from the recorded results.',
     description: 'The worker reports the case failed (with evidence) but then completes the execution as "passed". Under the enforced gate the final status is derived from the recorded results: the execution is failed, the run verdict is fail and the failing case is listed under problems.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -558,6 +613,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-CANCEL', name: 'A queued execution can be cancelled and is never handed out',
+    objective: 'Queue an execution and cancel it: it reads cancelled, a second cancel is refused, and a worker asking for work gets nothing.',
     description: 'Queue an execution and cancel it: it reads cancelled with a finish time, a second cancel is refused, and a worker asking for work gets nothing (204).',
     preconditions: PRE.isolated,
     steps: [
@@ -572,6 +628,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-CLAIM-ORDER', name: 'Workers are handed executions oldest first, once each',
+    objective: 'Queue two executions and claim three times: oldest first, each handed out once, the third claim gets nothing.',
     description: 'Queue two executions, then claim three times: the first claim returns the older one, the second the newer, the third nothing. No execution is handed out twice.',
     preconditions: PRE.isolated,
     steps: [
@@ -590,6 +647,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-SUITE-EXECUTION', name: 'Queueing a suite resolves its cases',
+    objective: 'Queue a suite by its id alone and confirm the execution carries all its cases and the suite\'s name.',
     description: 'Create a suite with two fixture cases and queue it by suite id alone: the execution must carry both cases and take the suite\'s name. Cancelled before any worker sees it.',
     preconditions: PRE.isolated,
     steps: [
@@ -606,6 +664,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-SCHEDULE-CRUD', name: 'Schedule is created, edited and deleted',
+    objective: 'Create a schedule, confirm it lists with its application and environment, change it, delete it, and confirm deleting again is not found.',
     description: 'Create a disabled cron schedule for the sandbox application, confirm it lists with its application and environment keys, change its expression, then delete it; deleting it again is a 404.',
     steps: [
       ...FIXTURES,
@@ -622,6 +681,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-SCHEDULE-EVENT', name: 'An event fires the schedules bound to it',
+    objective: 'Bind a schedule to an event, post that event, and confirm exactly one run starts carrying the event as its reason.',
     description: 'Create a schedule bound to a unique event, post that event: exactly one run is started through the run planner for the sandbox application, carrying the event in its reason. The queued execution is cancelled and the schedule deleted.',
     preconditions: PRE.isolated,
     steps: [
@@ -642,6 +702,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-SCHEDULER-DAEMON', name: 'Scheduler daemon fires a due schedule',
+    objective: 'Create a schedule due immediately and wait for the scheduler process to queue a run for it, proving the scheduler is alive.',
     description: 'The scheduler is a separate process that polls the API. Create an interval schedule that has never run (due at once) and wait for an execution carrying its name to appear in the queue — proof the daemon is alive and fires through the same planner.',
     preconditions: `${PRE.isolated} The target\'s scheduler service must be running.`,
     timeoutSeconds: 30,
@@ -661,6 +722,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-BUILD-RESULTS', name: 'CI build results are ingested and surfaced',
+    objective: 'Post build results from CI and read them back three ways: the build, the per-test history and the console build history.',
     description: 'Post a build\'s in-container results for the sandbox application, then read them back three ways: the build itself, the per-test history and the console build history with its pass/fail counts.',
     steps: [
       ...FIXTURES,
@@ -675,6 +737,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-ENVIRONMENT-PATCH', name: 'Environment patch merges instead of replacing',
+    objective: 'Change one environment variable, then another, and confirm the first survives along with the safety policy (currently a known defect: a patch replaces all variables).',
     description: 'Patch one variable of the fixture environment, then a second one: the first must still be there, along with the application scope and every safety-policy entry. A caller can change one value without resending the whole configuration. Probed 2026-09-30: a patch of config.vars replaces the whole variable set (the second patch drops the first marker) — this case stays red until the merge is fixed. It resends the engine variable on every patch so the fixture environment is not damaged meanwhile.',
     steps: [
       ...FIXTURES,
@@ -692,6 +755,7 @@ C.push(
   }),
   integration({
     key: 'TE-INT-AI-PROPOSALS', name: 'Generated proposals are drafts until reviewed',
+    objective: 'Request generated test proposals, confirm they are stored as drafts, reject them, and confirm an unknown review action is refused.',
     description: 'Request test generation for the sandbox application: three proposals are stored as "proposed". Rejecting them changes their status; a review with an unknown action is refused.',
     severity: 'medium',
     steps: [
@@ -729,6 +793,7 @@ const CLAIM_TRIGGERED: Step = POST('/api/v1/executions/claim', { body: { worker_
 C.push(
   usecase({
     key: 'TE-UC-PIPELINE-RUN', name: 'A deploy pipeline triggers a run and reads its verdict',
+    objective: 'Play a deploy pipeline: trigger a run, follow its status while it is in flight, let the worker finish it, then read the verdict, exit criteria and evidence.',
     description: 'The documented CI flow: POST /api/v1/runs for one application on one environment, follow the returned status URL while the run is in flight (no verdict yet), let the worker execute it, then read the verdict, the exit criteria and the evidence manifest.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -745,6 +810,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-EXCLUSIVE-RUN', name: 'A second pipeline cannot start a run over one in progress',
+    objective: 'Confirm a second pipeline cannot start a run while one is already in progress for the same application and environment, until the first is cancelled.',
     description: 'With exclusive=true a trigger for an application and environment that already has a run in flight is refused with 409 and pointed at the active run — two deploys racing each other do not double-run the tests. Once the first run is cancelled, a new trigger is accepted.',
     preconditions: PRE.isolated,
     steps: [
@@ -760,6 +826,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-RETIRED-ENVIRONMENT', name: 'A run cannot be triggered against a retired environment',
+    objective: 'Confirm a retired environment keeps its history but refuses new runs.',
     description: 'An environment that was retired stays in the registry for its history but must refuse new runs: POST /api/v1/runs answers 409. Uses local-dev, which the catalogue seed retires.',
     preconditions: 'Target engine reachable; environment local-dev exists and is retired (seeded state).',
     steps: [
@@ -771,6 +838,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-FAILURE-TRIAGE', name: 'An engineer triages a failed run down to its evidence',
+    objective: 'After a failing run, confirm an engineer can get from the run to the problem, its evidence list and the evidence file itself.',
     description: 'After a failing run, everything needed to triage is reachable from the run: the problem entry with its message, the evidence list of that result, and the artefact itself served with its content.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -789,6 +857,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-SUMMARY-REPORT', name: 'A test summary report is generated for an execution',
+    objective: 'Confirm a finished execution can be turned into a summary report with a verdict, pass rate, results and a recommendation.',
     description: 'GET /api/v1/reports/summary/:id turns a finished execution into a report: executive summary with verdict and pass rate, the results with their case keys, and a recommendation.',
     preconditions: PRE.isolated,
     steps: [
@@ -801,6 +870,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-OPERATOR-FINDS-CASE', name: 'An operator finds a case and opens its definition and history',
+    objective: 'Search for a case, open it by the id the search returned, and load its run history: the console\'s search-to-case path.',
     description: 'Search for a case by key, open it by the id the search returned, and load its run history — the path from the console\'s search box to a case screen.',
     steps: [
       GET('/api/v1/search?q=Engine%20health%20endpoint%20answers', { expect_json: [{ path: 'data.test_cases.0.key', equals: 'TE-SMOKE-HEALTH' }], save: { case_id: 'data.test_cases.0.id' }, description: 'search by name' }),
@@ -812,6 +882,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-ENVIRONMENT-SCOPED-STATUS', name: 'Case status is reported per environment',
+    objective: 'Confirm case statuses can be asked for per environment, since the same case can pass on one and fail on another.',
     description: 'The same case can pass on staging and fail on development, so the console asks for statuses of one environment. With environment_id (a key is accepted) the summary echoes the resolved environment id; without it, none.',
     steps: [
       GET('/api/v1/environments/engine-local', { save: { env_id: 'data.id' }, description: 'resolve the environment' }),
@@ -824,6 +895,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-APPLICATION-SCOPED-ENVIRONMENTS', name: 'Each application is offered only its own environments',
+    objective: 'Confirm each application is offered only the environments it is deployed on.',
     description: 'Environments list the applications deployed there. The console summary for Sand Bench must offer the Sand Bench target and not the engine\'s; the summary for the engine must offer the engine\'s and not Sand Bench\'s.',
     steps: [
       GET('/api/v1/ui/summary?application_key=sand-bench', { expect_json: [{ path: 'data.environments', contains: '"key":"sand-bench-local"' }], expected_body_not_contains: '"key":"engine-local"', description: 'Sand Bench environments' }),
@@ -833,6 +905,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-RELEASE-DECISION', name: 'A release manager reads readiness next to the evidence behind it',
+    objective: 'Confirm the readiness verdict and the dashboard figures come from the same records and agree; a Ready verdict never carries failures.',
     description: 'Readiness is a verdict over the last 14 days of results. The totals it reports and the dashboard\'s seven-day figures come from the same records: both must answer, and the verdict must be consistent with its own totals (a "READY" verdict never carries failures).',
     steps: [
       GET('/api/v1/release-readiness', { expect_json: [{ path: 'data.readiness', exists: true }, { path: 'data.totals', exists: true }, { path: 'data.reasons.0', exists: true }], save: { readiness: 'data.readiness' }, description: 'readiness' }),
@@ -843,6 +916,7 @@ C.push(
   }),
   usecase({
     key: 'TE-UC-AGENT-PLANS-RUN', name: 'An autonomous agent goes from context to a run plan',
+    objective: 'Play an autonomous agent: read its context, confirm it may request runs, and ask what a run would contain without queueing anything.',
     description: 'An agent reads /api/v1/agents/context, confirms it may request executions, picks the engine application and asks the planner what a run would contain — without queueing anything.',
     severity: 'medium',
     steps: [
@@ -861,11 +935,13 @@ C.push(
 C.push(
   regression({
     key: 'TE-REG-HEALTH-SHAPE', name: 'Health payload keeps its fields',
+    objective: 'Guard that the health answer keeps the exact fields monitors and the console read.',
     description: 'Monitors and the console read these exact fields from /health: status, service, a semantic version, the rbac and jwt flags, ui and the database schema name.',
     steps: [GET('/health', { expect_json: [{ path: 'status', equals: 'ok' }, { path: 'service', equals: 'gavriq-test-engine' }, { path: 'version', matches: '^\\d+\\.\\d+\\.\\d+' }, { path: 'rbac', matches: '^(true|false)$' }, { path: 'jwt', matches: '^(true|false)$' }, { path: 'ui', equals: true }, { path: 'schema', equals: 'test_engine' }], description: 'health shape' })],
   }),
   regression({
     key: 'TE-REG-META-ENDPOINT-MAP', name: 'Published endpoint map stays accurate',
+    objective: 'Guard that the published map of endpoints stays accurate and every route it names answers.',
     description: 'Clients discover routes from /api/v1/meta.endpoints. The map must keep its entries, and the routes it names must actually answer.',
     steps: [
       GET('/api/v1/meta', { expect_json: [{ path: 'endpoints.health', equals: '/health' }, { path: 'endpoints.test_cases', equals: '/api/v1/test-cases' }, { path: 'endpoints.executions', equals: '/api/v1/executions' }, { path: 'endpoints.environments', equals: '/api/v1/environments' }, { path: 'endpoints.release_readiness', equals: '/api/v1/release-readiness' }, { path: 'endpoints.meta', equals: '/api/v1/meta' }, { path: 'runners', contains: 'playwright' }, { path: 'runners', contains: 'selenium' }, { path: 'runners', contains: 'performance' }], description: 'endpoint map' }),
@@ -876,11 +952,13 @@ C.push(
   }),
   regression({
     key: 'TE-REG-ERROR-ENVELOPE', name: 'Unknown routes answer with the JSON error envelope',
+    objective: 'Guard that an unknown address answers with the structured not-found envelope, never an HTML error page.',
     description: 'A request for a route that does not exist must answer 404 with {statusCode, error, message} as JSON — clients parse it; an HTML error page would break them.',
     steps: [GET('/api/v1/no-such-route', { expected_status: 404, expect_json: [{ path: 'statusCode', equals: 404 }, { path: 'error', equals: 'Not Found' }, { path: 'message', equals: 'Route GET:/api/v1/no-such-route not found' }], expect_headers: [{ name: 'content-type', contains: 'application/json' }], description: 'unknown route' })],
   }),
   regression({
     key: 'TE-REG-VALIDATION-COPY', name: 'Validation messages keep their wording',
+    objective: 'Guard that validation messages keep their exact wording, as the console and CI scripts show them verbatim.',
     description: 'The console and CI scripts show these messages verbatim. Each must keep its exact wording.',
     severity: 'medium',
     steps: [
@@ -897,22 +975,26 @@ C.push(
   }),
   regression({
     key: 'TE-REG-CASE-ROW-SHAPE', name: 'Case detail keeps the fields runners and the console read',
+    objective: 'Guard that a case detail keeps the fields the worker runs from and the console renders.',
     description: 'The worker executes a case from these fields and the console renders them; none may disappear or change type.',
     steps: [GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { expect_json: [{ path: 'data.id', matches: UUID }, { path: 'data.application_id', matches: UUID }, { path: 'data.execution_method', equals: 'http' }, { path: 'data.steps.0.action', equals: 'request' }, { path: 'data.validation_rules.data_profile.profile', exists: true }, { path: 'data.timeout_seconds', min: 1 }, { path: 'data.tags', min_length: 1 }, { path: 'data.automation_status', equals: 'automated' }, { path: 'data.lifecycle', equals: 'active' }, { path: 'data.version', min: 1 }, { path: 'data.versions', exists: true }, { path: 'data.created_at', matches: ISO }], description: 'case row shape' })],
   }),
   regression({
     key: 'TE-REG-SUMMARY-ROW-SHAPE', name: 'Console summary keeps its compact row',
+    objective: 'Guard that the console summary stays a compact row per case and does not grow back into full definitions.',
     description: 'The summary sends a compact row per case — id, key, name, tags, type, method, suite ids — and must not grow back into full rows with steps and scripts.',
     steps: [GET('/api/v1/ui/summary?application_key=gavriq-test-engine', { expect_json: [{ path: 'data.cases.0.id', matches: UUID }, { path: 'data.cases.0.key', exists: true }, { path: 'data.cases.0.name', exists: true }, { path: 'data.cases.0.tags', exists: true }, { path: 'data.cases.0.test_type', exists: true }, { path: 'data.cases.0.execution_method', exists: true }, { path: 'data.cases.0.suite_ids', exists: true }, { path: 'data.cases.0.steps', exists: false }, { path: 'data.cases.0.description', exists: false }, { path: 'data.application.types', min_length: 1 }, { path: 'data.now', matches: ISO }], description: 'summary row shape' })],
   }),
   regression({
     key: 'TE-REG-RUN-PLAN-SHAPE', name: 'Run plan keeps its fields',
+    objective: 'Guard that the run plan keeps the fields pipelines read.',
     description: 'Pipelines read the dry-run plan: application, environment, base_url, total_cases, per-suite counts, excluded cases with reasons, live workers and the gate mode.',
     steps: [POST('/api/v1/runs', { body: { application: 'gavriq-test-engine', environment: 'engine-local', dry_run: true }, expect_json: [{ path: 'data.application', exists: true }, { path: 'data.environment', exists: true }, { path: 'data.base_url', matches: '^https?://' }, { path: 'data.total_cases', min: 0 }, { path: 'data.suites.0.key', exists: true }, { path: 'data.suites.0.name', exists: true }, { path: 'data.suites.0.cases', min: 1 }, { path: 'data.excluded', exists: true }, { path: 'data.workers_online', min: 0 }, { path: 'data.evidence_gate', exists: true }], description: 'plan shape' })],
     dataProfile: { profile: 'none (dry run)', data: 'One dry-run plan.', source: 'Hand-crafted.' },
   }),
   regression({
     key: 'TE-REG-POLICY-DEFAULT-DENY', name: 'A category the policy does not name is prohibited',
+    objective: 'Guard that a safety category the policy does not name is prohibited, never silently allowed.',
     description: 'The safety policy is an allow-list: a category that is misspelt or not configured must be answered "prohibited", never silently allowed.',
     severity: 'critical', priority: 'p0',
     steps: [POST('/api/v1/environments/sand-bench-local/policy/check', { body: { category: 'not-a-category' }, expect_json: [{ path: 'data.decision', equals: 'prohibited' }, { path: 'data.allowed', equals: false }, { path: 'data.prohibited', equals: true }], description: 'unknown category' })],
@@ -920,6 +1002,7 @@ C.push(
   }),
   regression({
     key: 'TE-REG-DRY-RUN-QUEUES-NOTHING', name: 'A dry run leaves the queue untouched',
+    objective: 'Guard that planning a run (three kinds of dry run) never queues anything.',
     description: 'Planning must never queue. On a target with an empty queue, three dry runs (run trigger, run-all, scoped) leave it empty.',
     preconditions: PRE.isolated,
     steps: [
@@ -934,6 +1017,7 @@ C.push(
   }),
   regression({
     key: 'TE-REG-CONSOLE-SHELL-ANCHORS', name: 'Console shell keeps the elements its scripts bind to',
+    objective: 'Guard that the console page keeps every element its script looks up at start, or the console would die on load.',
     description: 'app.js looks these ids up by name at start. If the shell loses one the console dies on load, so the served HTML must contain each.',
     steps: [
       GET('/', { expected_body_contains: 'id="sideNav"', description: 'side navigation' }),
@@ -946,6 +1030,7 @@ C.push(
   }),
   regression({
     key: 'TE-REG-CATALOG-ALIAS', name: 'The console is also served under /catalog/',
+    objective: 'Guard that the older console address still lands on the same console.',
     description: 'Older bookmarks use /catalog and /catalog/. Both must still land on the same console shell.',
     severity: 'medium',
     steps: [
@@ -955,6 +1040,7 @@ C.push(
   }),
   regression({
     key: 'TE-REG-EXECUTION-ROW-SHAPE', name: 'Execution rows keep the fields workers read',
+    objective: 'Guard that an execution row keeps the fields a worker runs from, plus its timing after it finishes.',
     description: 'A worker runs a claimed execution from its id, key, case ids, environment id and metadata. After a full pass the row must still carry all of them plus its timing.',
     preconditions: PRE.isolated,
     steps: [
@@ -973,6 +1059,7 @@ C.push(
 C.push(
   dq({
     key: 'TE-DQ-CASE-TOTALS-AGREE', name: 'Case totals agree across three read paths',
+    objective: 'Confirm three different ways of counting test cases (repository list, dashboard, ops counts) give the same number.',
     description: 'The repository list, the dashboard and the ops catalogue counts each count test cases with their own query. All three must report the same number.',
     steps: [
       GET('/api/v1/test-cases?limit=1', { save: { total: 'total' }, expect_json: [{ path: 'total', min: 1 }], description: 'repository total' }),
@@ -983,6 +1070,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-APPLICATION-TOTALS-AGREE', name: 'Per-application totals agree',
+    objective: 'Confirm the repository list and the dashboard count the same cases for the engine application.',
     description: 'For the engine application, the filtered repository list and the filtered dashboard must count the same cases.',
     steps: [
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { save: { app_id: 'data.application_id' }, description: 'resolve the application id' }),
@@ -993,6 +1081,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-CASE-REFERENCES-RESOLVE', name: 'A case\'s application reference resolves',
+    objective: 'Confirm every case points at an application that really exists in the registry.',
     description: 'Every case belongs to an application. The application id on a case must be one the registry lists.',
     steps: [
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { save: { app_id: 'data.application_id' }, description: 'case' }),
@@ -1001,11 +1090,13 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-CASE-ENUMS', name: 'Case classification fields hold valid values',
+    objective: 'Confirm a seeded case\'s severity, priority, lifecycle and automation status each hold a valid value.',
     description: 'Severity, priority, lifecycle and automation status drive filtering, planning and reporting. On a seeded case each must be one of its defined values.',
     steps: [GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { expect_json: [{ path: 'data.severity', matches: '^(critical|high|medium|low|trivial)$' }, { path: 'data.priority', matches: '^p[0-4]$' }, { path: 'data.lifecycle', matches: '^(draft|ready_for_review|approved|active|maintenance|deprecated|archived)$' }, { path: 'data.automation_status', matches: '^(manual|automated|partially_automated|to_be_automated|not_automatable)$' }, { path: 'data.test_level', matches: '^(unit|integration|system|acceptance)$' }], description: 'enum fields' })],
   }),
   dq({
     key: 'TE-DQ-AUTOMATED-CASES-EXECUTABLE', name: 'An automated case carries what its runner needs',
+    objective: 'Confirm cases marked automated actually carry steps to run and a documented data profile.',
     description: 'A case marked automated with no steps runs nothing and passes nothing. The seeded HTTP cases must carry at least one request step with a URL, and their documented data profile.',
     severity: 'critical',
     steps: [
@@ -1016,6 +1107,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-ENVIRONMENT-TARGETS', name: 'Environments hold usable targets',
+    objective: 'Confirm the development environments carry a usable address, their variables and a known status.',
     description: 'A run is pointed at environment.base_url and templates config.vars. The development targets must carry an http(s) base URL, their variables and a known status.',
     steps: [
       GET('/api/v1/environments/sand-bench-local', { expect_json: [{ path: 'data.base_url', matches: '^https?://[^/]+' }, { path: 'data.config.vars.api', matches: '^https?://' }, { path: 'data.status', matches: '^(active|retired)$' }, { path: 'data.env_type', exists: true }], description: 'Sand Bench target' }),
@@ -1024,12 +1116,14 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-TYPE-METADATA', name: 'Application type metadata is complete',
+    objective: 'Confirm each test type the console builds its menu from has a key, a label and a category.',
     description: 'The console builds its navigation from the application\'s type list. Each entry must carry key, label and category.',
     severity: 'medium',
     steps: [GET('/api/v1/ui/summary?application_key=sand-bench', { expect_json: [{ path: 'data.application.types', min_length: 10 }, { path: 'data.application.types.0.key', exists: true }, { path: 'data.application.types.0.label', exists: true }, { path: 'data.application.types.0.category', matches: '^(qa|qc)$' }], description: 'type list' })],
   }),
   dq({
     key: 'TE-DQ-VERSION-HISTORY', name: 'Version number and version history stay in step',
+    objective: 'Update a case twice and confirm it is at version 3 with exactly three numbered snapshots, newest first.',
     description: 'After two updates a case must be at version 3 with exactly three snapshots, newest first, each numbered one below the one before.',
     preconditions: PRE.sandbox,
     steps: [
@@ -1044,6 +1138,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-EVIDENCE-INTEGRITY', name: 'Evidence keeps its bytes and its hash from upload to download',
+    objective: 'Confirm the hash computed on upload, the hash stored, the hash in the run manifest and the downloaded bytes all agree.',
     description: 'The hash the store computes on upload, the hash recorded on the evidence row, the hash in the run manifest and the downloaded content must all describe the same 52 bytes.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -1059,6 +1154,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-RUN-TOTALS-ADD-UP', name: 'Run totals add up',
+    objective: 'Report one pass and one fail for a two-case execution and confirm the run totals add up exactly.',
     description: 'Queue an execution of two cases, report one passed and one failed. The run must report cases 2, reported 2, passed 1, failed 1, nothing inconclusive, nothing without evidence, and two evidence items.',
     preconditions: PRE.isolated,
     steps: [
@@ -1078,6 +1174,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-TIMESTAMPS', name: 'Timestamps are ISO-8601 in UTC',
+    objective: 'Confirm every timestamp the engine publishes is in the standard UTC format clients compute from.',
     description: 'Clients compute durations and "ago" labels from these values. Server clock, case and environment timestamps must all be ISO-8601 with a Z suffix.',
     severity: 'medium',
     steps: [
@@ -1088,6 +1185,7 @@ C.push(
   }),
   dq({
     key: 'TE-DQ-SIT-CATALOG-COUNTS', name: 'SIT catalogue counts match its listing',
+    objective: 'Confirm the SIT catalogue reports its on-disk source, extracted cases and the rows registered in the repository.',
     description: 'The SIT catalogue reads case files from disk. It must report the on-disk source, a non-zero number of extracted cases and SIT rows registered in the repository.',
     severity: 'medium',
     steps: [GET('/api/v1/sit-catalog', { expect_json: [{ path: 'data.source', equals: 'sit/cases' }, { path: 'data.counts.files', min: 1 }, { path: 'data.counts.extracted', min: 1 }, { path: 'data.counts.registered', min: 1 }, { path: 'data.files.0.onDisk', equals: true }, { path: 'data.files.0.cases', min_length: 1 }], description: 'sit catalogue' })],

@@ -58,8 +58,10 @@ const state={
   envId:null,headed:false,search:'',selected:new Set(),rowLimit:ROWS,tile:null,tiles:new Map(),panels:new Set(),
   history:new Map(),charts:new Map(),open:new Set(),section:null,live:{inRun:new Map(),current:new Set()},
   run:null,buildRows:null,
-  // Deploy main to the selected environment: null until triggered, then polled to a terminal status.
-  deploy:null,
+  // Deploy to the selected environment: null until triggered, then polled to a terminal status (and through its teardown).
+  deploy:null,deployMode:'deploy_run_teardown',
+  // Configuration · Infrastructure (managed Docker stacks, lifecycle policy, jobs)
+  infra:null,infraSig:'',infraOpenJob:null,
   // Configuration · Applications / Environments maintenance pages
   appFormOpen:false,appForm:{key:'',name:'',description:'',status:'active'},
   envFormOpen:false,envForm:{id:null,key:'',name:'',env_type:'remote',base_url:'',applications:'',api:'',dbviewer:'',testhub:'',tenant:'',username:'',password_env:'',safety:{...SAFETY_DEFAULT}},
@@ -225,6 +227,9 @@ async function applyLive(d){
   if(d.now){state.skew=ms(d.now)-Date.now();state.since=d.now;}
   state.executions=d.executions||[];state.workers=d.workers||[];state.liveLoaded=true;state.lastPoll=d.now||new Date().toISOString();
   let dirty=false;
+  // The selected environment's stack state (up/down/deploying…) rides along with the live poll.
+  if(d.environment_deployment!==undefined){const env=currentEnv();if(env&&JSON.stringify(env.deployment||null)!==JSON.stringify(d.environment_deployment)){env.deployment=d.environment_deployment;renderEnvSelect();dirty=true;}}
+  if(state.view==='config-infra')loadInfra(true);
   for(const r of d.changed||[]){
     const c=state.idx&&state.idx.caseById.get(r.test_case_id);
     if(c&&(c.last_status!==r.status||c.last_at!==r.last_at)){c.last_status=r.status;c.last_at=r.last_at;c.last_duration_ms=r.duration_ms;dirty=true;}
@@ -517,6 +522,7 @@ function renderSideNav(){
   h+=navItem('config-retention',null,'Run retention');
   h+=navItem('config-apps',null,'Applications',state.applications.length||null);
   h+=navItem('config-envs',null,'Environments',state.environments.length||null);
+  h+=navItem('config-infra',null,'Infrastructure',null,infraNavDot());
   if(sitCases().length){
     h+='<div class="nav-section">SIT console</div>';
     h+=navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit');
@@ -568,7 +574,11 @@ function renderOverview(){
     const hot=live.filter(e=>!isStalled(e)).length;
     const b=state.build;
     const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
-    h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span></h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment">▶ Run everything (${all.total})</button><button class="btn" data-action="schedule" data-what="all"${all.total?'':' disabled'}>Schedule…</button><select id="deployMode" aria-label="After deploying" title="What to do once the deploy succeeds"><option value="deploy_only">Deploy only</option><option value="deploy_and_run">Deploy and run</option></select><button class="btn" data-action="deploy-main"${state.envId?'':' disabled'} title="Deploy main to the selected environment">⇪ Deploy main</button></div></div>`;
+    const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null,ref=(managed&&env.infra.default_ref)||'main';
+    const mode=state.deployMode||'deploy_run_teardown';
+    const opt=(v,l,t)=>`<option value="${v}"${mode===v?' selected':''} title="${esc(t)}">${l}</option>`;
+    const tearBtn=managed&&(stackSt==='up'||stackSt==='failed'||stackSt==='unknown')?`<button class="btn" data-action="infra-teardown" data-id="${esc(env.id)}" data-name="${esc(env.name||env.key)}" data-active="${activeRuns().length}" title="Take the Docker stack down now — it is deployed again on the next deploy or run">⏏ Tear down</button>`:'';
+    h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment${managed?'. A stack that is down is deployed first and torn down after the run':''}">▶ Run everything (${all.total})</button><button class="btn" data-action="schedule" data-what="all"${all.total?'':' disabled'}>Schedule…</button><select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds">${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select><button class="btn" data-action="deploy-main"${state.envId?'':' disabled'} title="Deploy ${esc(ref)} to the selected environment">⇪ Deploy ${esc(ref)}</button>${tearBtn}</div></div>`;
     h+=deployStatusHtml();
     h+='<div class="kpi-grid">'+
       kpi('All cases',all.total,'in repository')+
@@ -840,7 +850,7 @@ async function saveApplication(btn){
   }catch(e){formError('appError','Save failed: '+e.message);btn.disabled=false;}
 }
 function envFormHtml(){
-  const f=state.envForm;
+  const f=state.envForm,inf=f.infra||EMPTY_INFRA_FORM;
   const safetyRow=c=>`<label class="type-check" style="flex-direction:column;align-items:flex-start;gap:2px"><span class="muted small">${esc(c.replace(/_/g,' '))}</span><select id="envSafety_${c}" style="width:160px"><option value="allowed"${f.safety[c]==='allowed'?' selected':''}>Allowed</option><option value="approval_required"${f.safety[c]==='approval_required'?' selected':''}>Approval required</option><option value="prohibited"${f.safety[c]==='prohibited'?' selected':''}>Prohibited</option></select></label>`;
   return `<div class="card" data-form="env" style="margin-bottom:12px"><div class="card-head"><h2>${f.id?'Edit environment · '+esc(f.key):'New environment'}</h2></div>
     <div class="form-row"><span class="form-label">Key</span><input type="text" id="envKey" value="${esc(f.key)}" placeholder="render-cloud"${f.id?' disabled':''}></div>
@@ -855,24 +865,32 @@ function envFormHtml(){
     <div class="form-row"><span class="form-label">Sign-in username</span><input type="text" id="envUsername" value="${esc(f.username)}" placeholder="operator.acme"></div>
     <div class="form-row"><span class="form-label">Password env var</span><div><input type="text" id="envPasswordEnv" value="${esc(f.password_env)}" placeholder="e.g. SB_RENDER_PASSWORD" style="width:260px"><div class="muted small">Name of an environment variable set on the engine host that holds the real password — the password itself is never stored here. Leave blank if sign-in needs none.</div></div></div>
     <div class="form-row"><span class="form-label">Safety policy</span><div style="display:flex;flex-wrap:wrap;gap:12px">${SAFETY_CATEGORIES.map(safetyRow).join('')}</div></div>
+    <div class="form-row"><span class="form-label">Lifecycle</span><div><select id="envInfraDriver"><option value=""${inf.driver?'':' selected'}>Always on — never deployed or torn down from here</option><option value="compose"${inf.driver==='compose'?' selected':''}>Local Docker stack — deployed and torn down by the infra agent</option></select><div class="muted small">A managed stack runs only while it is being tested: deployed on request or when a run needs it, torn down after the run, when idle, or when up too long (Configuration › Infrastructure).</div></div></div>
+    <div class="form-row"><span class="form-label">Deploy script</span><input type="text" id="envInfraScript" value="${esc(inf.script)}" placeholder="deploy/staging/deploy.mjs" style="width:min(420px,100%)"></div>
+    <div class="form-row"><span class="form-label">Compose project</span><input type="text" id="envInfraProject" value="${esc(inf.compose_project)}" placeholder="sand-bench-staging"></div>
+    <div class="form-row"><span class="form-label">Default ref</span><input type="text" id="envInfraRef" value="${esc(inf.default_ref)}" placeholder="main"></div>
+    <div class="form-row"><span class="form-label">Teardown hours</span><div><input type="number" id="envInfraIdle" value="${esc(inf.idle_teardown_hours)}" placeholder="policy" min="0" style="width:90px"> idle · <input type="number" id="envInfraMax" value="${esc(inf.max_uptime_hours)}" placeholder="policy" min="0" style="width:90px"> up <span class="muted small">(blank = the lifecycle policy's values)</span></div></div>
     <div class="form-row"><span></span><div><button class="btn primary" data-action="env-save">Save</button> <button class="btn" data-action="env-new">Cancel</button><div id="envError" class="field-error" hidden></div></div></div>
   </div>`;
 }
+const EMPTY_INFRA_FORM={driver:'',script:'',compose_project:'',default_ref:'',idle_teardown_hours:'',max_uptime_hours:''};
 function openEnvForm(env){
   state.envFormOpen=true;
   if(!env){
-    state.envForm={id:null,key:'',name:'',env_type:'remote',base_url:'',applications:'',api:'',dbviewer:'',testhub:'',tenant:'',username:'',password_env:'',safety:{...SAFETY_DEFAULT}};
+    state.envForm={id:null,key:'',name:'',env_type:'remote',base_url:'',applications:'',api:'',dbviewer:'',testhub:'',tenant:'',username:'',password_env:'',safety:{...SAFETY_DEFAULT},infra:{...EMPTY_INFRA_FORM}};
   }else{
     const v=(env.config&&env.config.vars)||{};
     const se=(env.config&&env.config.secret_env)||{};
     const apps=(env.config&&env.config.applications)||[];
     const sp=env.safety_policy||{};
+    const inf=env.infra||(env.config&&env.config.infra)||{};
     state.envForm={
       id:env.id,key:env.key,name:env.name,env_type:env.env_type||'remote',base_url:env.base_url||'',
       applications:apps.join(', '),
       api:v.api||'',dbviewer:v.dbviewer||'',testhub:v.testhub||'',tenant:v.tenant||'',username:v.username||'',
       password_env:se.password||'',
       safety:Object.fromEntries(SAFETY_CATEGORIES.map(c=>[c,sp[c]||SAFETY_DEFAULT[c]])),
+      infra:{driver:inf.driver==='compose'?'compose':'',script:inf.script||'',compose_project:inf.compose_project||'',default_ref:inf.default_ref||'',idle_teardown_hours:inf.idle_teardown_hours??'',max_uptime_hours:inf.max_uptime_hours??''},
     };
   }
   renderCurrentView();
@@ -907,8 +925,8 @@ function renderConfigEnvsView(){
   const list=state.environments||[];
   let h=`<div class="group-head first"><h2>Environments</h2><div class="hp-actions"><button class="btn primary" data-action="env-new">${state.envFormOpen?'Cancel':'+ New environment'}</button></div></div>`;
   if(state.envFormOpen)h+=envFormHtml();
-  const rows=list.map(e=>`<tr><td>${esc(e.key)}</td><td>${esc(e.name)}</td><td class="muted small">${esc(e.env_type||'—')}</td><td>${e.base_url?`<a href="${esc(e.base_url)}" target="_blank" rel="noopener">${esc(e.base_url)}</a>`:'—'}</td><td class="muted small">${esc(e.status||'active')}</td><td class="nowrap">${envStatusHtml(e.id)}</td><td class="nowrap"><button class="btn small-btn" style="margin-top:0" data-action="env-edit" data-id="${esc(e.id)}">Edit</button></td></tr>`).join('');
-  h+=`<div class="card"><div class="card-head"><h2>Registered environments</h2><span class="muted small">${plural(list.length,'environment')}</span></div><div class="table-wrap"><table><thead><tr><th>Key</th><th>Name</th><th>Type</th><th>Web URL</th><th>Status</th><th>Live check</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="empty">No environments yet.</td></tr>'}</tbody></table></div></div>`;
+  const rows=list.map(e=>`<tr><td>${esc(e.key)}</td><td>${esc(e.name)}</td><td class="muted small">${esc(e.env_type||'—')}</td><td>${e.base_url?`<a href="${esc(e.base_url)}" target="_blank" rel="noopener">${esc(e.base_url)}</a>`:'—'}</td><td class="muted small">${esc(e.status||'active')}</td><td class="nowrap">${e.infra?stackChipHtml(e,'Managed Docker stack — see Configuration › Infrastructure'):'<span class="muted small">always on</span>'}</td><td class="nowrap">${envStatusHtml(e.id)}</td><td class="nowrap"><button class="btn small-btn" style="margin-top:0" data-action="env-edit" data-id="${esc(e.id)}">Edit</button></td></tr>`).join('');
+  h+=`<div class="card"><div class="card-head"><h2>Registered environments</h2><span class="muted small">${plural(list.length,'environment')}</span></div><div class="table-wrap"><table><thead><tr><th>Key</th><th>Name</th><th>Type</th><th>Web URL</th><th>Status</th><th>Stack</th><th>Live check</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">No environments yet.</td></tr>'}</tbody></table></div></div>`;
   el('content').innerHTML=h;
 }
 async function saveEnvironment(btn){
@@ -934,6 +952,15 @@ async function saveEnvironment(btn){
   if(appsRaw)config.applications=appsRaw.split(',').map(s=>s.trim()).filter(Boolean);
   if(Object.keys(vars).length)config.vars=vars;
   if(passwordEnv)config.secret_env={password:passwordEnv};
+  const driver=el('envInfraDriver')?el('envInfraDriver').value:'';
+  if(driver==='compose'){
+    const script=el('envInfraScript').value.trim();
+    if(!/^deploy\/[\w.-]+\/deploy\.mjs$/.test(script))return formError('envError','Deploy script must look like deploy/<name>/deploy.mjs (a script in this repository).');
+    const hours=id=>{const v=el(id).value.trim();return v===''?null:Number(v);};
+    config.infra={driver:'compose',script,compose_project:el('envInfraProject').value.trim()||null,default_ref:el('envInfraRef').value.trim()||null,idle_teardown_hours:hours('envInfraIdle'),max_uptime_hours:hours('envInfraMax')};
+  }else if(f.id&&f.infra&&f.infra.driver){
+    config.infra=null; // was managed, no longer: the stack is left as it is and never touched again
+  }
   const safety_policy={};
   for(const c of SAFETY_CATEGORIES){const sel=el('envSafety_'+c);if(sel)safety_policy[c]=sel.value;}
 
@@ -1221,6 +1248,7 @@ function renderCurrentView(){
   else if(v==='config-retention')renderConfigView();
   else if(v==='config-apps')renderConfigAppsView();
   else if(v==='config-envs')renderConfigEnvsView();
+  else if(v==='config-infra')renderInfraView();
   else if(v==='schedules')renderSchedulesView();
   else if(v==='reports')renderReportsView();
   else if(v==='insights')renderInsightsView();   // insights.js
@@ -1292,8 +1320,8 @@ async function queueExecution(body,label){
     pollLive();
   }catch(e){toast('Run failed: '+e.message);}
 }
-function runCases(ids,label,environmentId){if(ids.length)queueExecution({test_case_ids:ids,...(environmentId?{environment_id:environmentId}:{})},label);}
-function runSuite(suiteId,ids,label){queueExecution({test_suite_id:suiteId,test_case_ids:ids},label||'suite');}
+function runCases(ids,label,environmentId){if(ids.length&&!stackDownGuard(environmentId))queueExecution({test_case_ids:ids,...(environmentId?{environment_id:environmentId}:{})},label);}
+function runSuite(suiteId,ids,label){if(!stackDownGuard())queueExecution({test_suite_id:suiteId,test_case_ids:ids},label||'suite');}
 async function cancelRun(id){
   try{await api('/api/v1/executions/'+encodeURIComponent(id)+'/cancel',{method:'POST'});toast('Cancelled run');}
   catch(e){toast('Cancel failed: '+e.message);}
@@ -1380,6 +1408,14 @@ function handleAction(action,node){
   else if(action==='env-edit'){const e=state.environments.find(x=>x.id===node.dataset.id);if(e)openEnvForm(e);}
   else if(action==='env-save')saveEnvironment(node);
   else if(action==='env-check')checkEnvStatus(node);
+  else if(action==='infra-refresh')loadInfra();
+  else if(action==='infra-deploy')infraDeploy(node);
+  else if(action==='infra-teardown')infraTeardown(node);
+  else if(action==='infra-prune')infraPrune(false);
+  else if(action==='infra-prune-preview')infraPrune(true);
+  else if(action==='infra-cancel-job')infraCancelJob(node.dataset.id);
+  else if(action==='infra-save-policy')saveInfraPolicy(node);
+  else if(action==='infra-job-log'){state.infraOpenJob=state.infraOpenJob===node.dataset.id?null:node.dataset.id;renderCurrentView();}
 }
 // "Schedule" next to a Run button: same selection, run later instead of now.
 function scheduleFrom(node){
@@ -1483,53 +1519,242 @@ async function runEverything(btn){
   try{
     const res=await postJson('/api/v1/executions/run-all',{application_key:state.appKey,environment_id:state.envId});
     const d=res.data||{};
+    if(d.deployment){
+      // The stack was down: the engine deploys it first, the run follows, and it comes down again afterwards.
+      state.deploy=d.deployment;
+      toast(res.message||(envName()+' was down — deploying first; the run starts when the deploy succeeds'),'#/config-infra');
+      if(res.warning)toast(res.warning,'#/config-infra');
+      loadSummary().then(renderCurrentView);
+      pollDeployment();
+      return;
+    }
     toast(res.message||('Queued '+(d.executions||[]).length+' suite runs ('+(d.total_cases||0)+' cases)'),'#/history');
     pollLive();
   }catch(e){toast('Run everything failed: '+e.message);}
   finally{if(btn)btn.disabled=false;}
 }
 
-// Deploy main to the selected environment, then optionally queue a run once it succeeds.
+// Deploy to the selected environment, then optionally run once it succeeds and tear the stack down after that run.
 let deployPollTimer=null;
 function deployStatusHtml(){
   const d=state.deploy;if(!d)return'';
+  const pending=d.status==='queued'||d.status==='deploying';
   const tone=d.status==='succeeded'?'pass':d.status==='failed'?'fail':'warn';
-  const label=d.status==='succeeded'?'Deployed'+(d.commit?' '+esc(String(d.commit).slice(0,8)):''):d.status==='failed'?'Deploy failed':d.status==='deploying'?'Deploying main…':'Queued…';
-  const pulse=(d.status==='queued'||d.status==='deploying')?'<span class="pulse"></span> ':'';
-  const runLink=d.run_id?` <a href="#/run/${encodeURIComponent(d.run_id)}">View run →</a>`:'';
-  const err=d.status==='failed'&&d.error?`<div class="muted small" style="color:var(--red)">${esc(d.error)}</div>`:'';
-  return `<div class="muted small" style="margin:-4px 0 12px">${pulse}<span class="chip chip-${tone}">${esc(label)}</span>${runLink}</div>${err}`;
+  const label=d.status==='succeeded'?'Deployed'+(d.commit?' '+esc(String(d.commit).slice(0,8)):'')
+    :d.status==='failed'?'Deploy failed'
+    :d.status==='deploying'?'Deploying '+esc(d.ref||'main')+'…'
+    :d.agent_online===false?'Waiting for an infra agent (none online)':'Queued for the infra agent…';
+  const pulse=pending?'<span class="pulse'+(d.status==='queued'?' queued':'')+'"></span> ':'';
+  const runLink=d.run_id?` <a href="#/history">View run →</a>`:(d.status==='succeeded'&&d.mode==='deploy_and_run'?' <span class="muted">no run queued</span>':'');
+  let after='';
+  if(d.status==='succeeded'&&d.teardown_after_run){
+    const td=d.teardown;
+    if(!td)after=' <span class="chip" title="The stack comes down once every execution of the run has finished">tears down after the run</span>';
+    else if(td.status==='queued'||td.status==='running')after=' <span class="pulse"></span> <span class="chip chip-warn">Tearing down…</span>';
+    else if(td.status==='succeeded')after=' <span class="chip">Torn down</span>';
+    else after=` <span class="chip chip-fail">Teardown ${esc(td.status)}</span>`;
+  }
+  const err=d.error?`<div class="muted small" style="color:var(--red)">${esc(d.error)}</div>`:'';
+  const log=pending&&d.job&&d.job.log_tail?`<pre class="muted small" style="white-space:pre-wrap;max-height:110px;overflow:auto;margin:4px 0 0;padding:6px 10px;background:var(--panel2);border-radius:6px">${esc(String(d.job.log_tail).trim().split('\n').slice(-4).join('\n'))}</pre>`:'';
+  return `<div class="muted small" style="margin:-4px 0 12px">${pulse}<span class="chip chip-${tone}">${label}</span>${runLink}${after}${err}${log}</div>`;
 }
 async function deployMain(btn){
   if(!state.envId){toast('No environment available.');return;}
-  const mode=(el('deployMode')&&el('deployMode').value)==='deploy_and_run'?'deploy_and_run':'deploy_only';
+  const sel=el('deployMode');
+  const choice=(sel&&sel.value)||state.deployMode||'deploy_run_teardown';
+  state.deployMode=choice;
+  const body={environment_id:state.envId,application:state.appKey,mode:choice==='deploy_only'?'deploy_only':'deploy_and_run',teardown_after_run:choice==='deploy_run_teardown'};
   if(btn)btn.disabled=true;
   try{
-    const res=await postJson('/api/v1/deployments',{environment_id:state.envId,application:state.appKey,mode});
+    const res=await postJson('/api/v1/deployments',body);
     state.deploy=res.data;
     renderCurrentView();
+    if(res.warning)toast(res.warning,'#/config-infra');
     if(state.deploy&&state.deploy.status==='failed')toast('Deploy failed: '+(state.deploy.error||'unknown error'));
-    else pollDeployment();
+    else{pollDeployment();loadSummary().then(renderCurrentView);}
   }catch(e){toast('Deploy failed: '+e.message);}
   finally{if(btn)btn.disabled=false;}
 }
+const deploySig=d=>JSON.stringify([d.status,d.run_id,d.error,d.teardown&&d.teardown.status,d.job&&d.job.log_tail]);
 async function pollDeployment(){
   if(deployPollTimer)clearTimeout(deployPollTimer);
   const d=state.deploy;
   if(!d||!d.id)return;
+  const before=deploySig(d),wasDone=d.status==='succeeded'||d.status==='failed';
   try{
     const res=await api('/api/v1/deployments/'+encodeURIComponent(d.id));
     state.deploy=res.data;
-    renderCurrentView();
+    if(deploySig(state.deploy)!==before&&!FORM_VIEWS.has(state.view))renderCurrentView();
   }catch(e){/* transient — keep last known state and retry */}
-  const terminal=state.deploy&&(state.deploy.status==='succeeded'||state.deploy.status==='failed');
-  if(!terminal){deployPollTimer=setTimeout(pollDeployment,3000);return;}
-  if(state.deploy.status==='succeeded'){
-    toast(state.deploy.run_id?'Deploy succeeded — run queued':'Deploy succeeded','#/history');
-    pollLive();
-  }else{
-    toast('Deploy failed: '+(state.deploy.error||'unknown error'));
+  const s=state.deploy;
+  const done=s.status==='succeeded'||s.status==='failed';
+  if(!done){deployPollTimer=setTimeout(pollDeployment,3000);return;}
+  if(!wasDone){
+    if(s.status==='succeeded'){toast(s.run_id?'Deploy succeeded — run queued':'Deploy succeeded','#/history');pollLive();}
+    else toast('Deploy failed: '+(s.error||'unknown error'));
+    loadSummary().then(renderCurrentView);
   }
+  // A deploy that tears down after its run is followed until that teardown has finished.
+  const td=s.teardown;
+  if(s.status==='succeeded'&&s.teardown_after_run&&(!td||td.status==='queued'||td.status==='running')){deployPollTimer=setTimeout(pollDeployment,15000);return;}
+  if(td&&td.status==='succeeded'&&!(d.teardown&&d.teardown.status==='succeeded')){toast(envName()+' torn down after the run','#/config-infra');loadSummary().then(renderCurrentView);}
+}
+
+// ---------------------------------------------------------------------------
+// Configuration · Infrastructure — managed Docker stacks: up/down, deploy, tear down, housekeeping
+// ---------------------------------------------------------------------------
+const STACK_STATE={up:['pass','Up'],down:['','Down'],deploying:['warn','Deploying…'],tearing_down:['warn','Tearing down…'],failed:['fail','Deploy failed'],unknown:['','Unknown']};
+function stackState(env){const d=env&&env.deployment,s=d&&d.state;if(STACK_STATE[s])return s;return d&&d.deployed_at?'up':'unknown';}
+function stackChipHtml(env,title){if(!env||!env.infra)return'';const s=stackState(env);const [tone,label]=STACK_STATE[s];const pulse=(s==='deploying'||s==='tearing_down')?'<span class="pulse"></span> ':'';return `${pulse}<span class="chip${tone?' chip-'+tone:''}" title="${esc(title||'')}">${esc(label)}</span>`;}
+// A single case or suite run goes straight to the queue; on a stack that is down it would only fail.
+function stackDownGuard(envId){
+  const e=state.environments.find(x=>x.id===(envId||state.envId));
+  if(!e||!e.infra)return false;
+  const s=stackState(e);
+  if(s!=='down'&&s!=='tearing_down'&&s!=='failed')return false;
+  toast((e.name||e.key)+' is '+STACK_STATE[s][1].toLowerCase().replace('…','')+' — use Deploy, or Run everything (it deploys first).','#/config-infra');
+  return true;
+}
+function infraNavDot(){const d=state.infra;if(!d||!d.environments)return null;if(d.jobs&&d.jobs.some(j=>j.status==='running'||j.status==='queued'))return 'amber pulse-dot';if(!d.agent_online&&d.environments.length)return 'red';return null;}
+function infraFormFocused(){const a=document.activeElement;return !!(a&&a.closest&&a.closest('#infraPolicy'));}
+function fromNow(t){const s=(ms(t)-serverNow())/1000;return s<=0?'now':'in '+dur(s*1000);}
+const INFRA_NUM=['idle_teardown_hours','max_uptime_hours','prune_every_hours','prune_build_cache_hours','job_timeout_minutes'];
+const INFRA_BOOL=['teardown_after_run_default','remove_images_on_teardown','remove_volumes_on_teardown','auto_deploy_when_down'];
+async function loadInfra(quiet){
+  if(!quiet&&!(state.infra&&state.infra.environments)){state.infra={loading:true};if(state.view==='config-infra')renderCurrentView();}
+  try{
+    const d=(await api('/api/v1/infra')).data||{};
+    const sig=JSON.stringify([d.agent_online,d.environments,(d.jobs||[]).map(j=>[j.id,j.status,j.updated_at]),d.last_prune&&d.last_prune.id]);
+    const changed=sig!==state.infraSig;
+    state.infraSig=sig;
+    state.infra={...d,loading:false,error:null,policyDraft:(state.infra&&state.infra.policyDraft)||null};
+    if((changed||!quiet)&&state.view==='config-infra'&&!infraFormFocused()){renderSideNav();renderCurrentView();}
+  }catch(e){
+    state.infra={...(state.infra||{}),loading:false,error:e.message};
+    if(state.view==='config-infra'&&!quiet)renderCurrentView();
+  }
+}
+function readInfraPolicyForm(){
+  const d=state.infra;if(!d)return;
+  const draft={};
+  for(const k of INFRA_NUM){const i=el('ip_'+k);if(i)draft[k]=i.value;}
+  for(const k of INFRA_BOOL){const i=el('ip_'+k);if(i)draft[k]=i.checked;}
+  d.policyDraft=draft;
+}
+async function saveInfraPolicy(btn){
+  readInfraPolicyForm();
+  const draft=(state.infra&&state.infra.policyDraft)||{},body={};
+  for(const k of INFRA_NUM)if(draft[k]!==undefined&&draft[k]!=='')body[k]=Number(draft[k]);
+  for(const k of INFRA_BOOL)if(draft[k]!==undefined)body[k]=!!draft[k];
+  formError('infraPolicyError','');
+  btn.disabled=true;
+  try{
+    const res=await api('/api/v1/infra/policy',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    state.infra.policy=res.data;state.infra.policyDraft=null;
+    toast('Lifecycle policy saved');
+    await loadInfra(true);renderCurrentView();
+  }catch(e){formError('infraPolicyError','Save failed: '+e.message);}
+  finally{btn.disabled=false;}
+}
+async function infraDeploy(node){
+  const env=((state.infra&&state.infra.environments)||[]).find(e=>e.id===node.dataset.id);
+  if(!env)return;
+  node.disabled=true;
+  try{
+    const res=await postJson('/api/v1/deployments',{environment_id:env.id,application:(env.applications&&env.applications[0])||state.appKey,mode:'deploy_only'});
+    toast(res.warning||('Deploy of '+env.name+' queued — the stack stays up afterwards'));
+  }catch(e){toast('Deploy failed: '+e.message);}
+  await loadInfra(true);renderCurrentView();
+}
+async function infraTeardown(node){
+  const name=node.dataset.name,active=Number(node.dataset.active)||0;
+  const policy=(state.infra&&state.infra.policy)||{};
+  const what='Containers'+(policy.remove_images_on_teardown===false?'':' and images')+(policy.remove_volumes_on_teardown?' and data volumes':'');
+  if(!confirm('Tear down '+name+' now?'+(active?' It has '+plural(active,'run')+' in progress — they will fail.':'')+'\n\n'+what+' are removed. It is deployed again on the next deploy or run.'))return;
+  node.disabled=true;
+  try{
+    const res=await postJson('/api/v1/infra/jobs',{kind:'teardown',environment_id:node.dataset.id,force:active>0});
+    toast(res.message||('Teardown of '+name+' queued'),'#/config-infra');
+  }catch(e){toast('Teardown failed: '+e.message);}
+  await loadInfra(true);
+  loadSummary().then(renderCurrentView);
+}
+async function infraPrune(dry){
+  try{
+    const res=await postJson('/api/v1/infra/jobs',{kind:'prune',dry_run:!!dry});
+    toast(res.message||(dry?'Housekeeping preview queued — see Recent jobs for what it would remove':'Docker housekeeping queued'));
+  }catch(e){toast('Housekeeping failed: '+e.message);}
+  await loadInfra(true);renderCurrentView();
+}
+async function infraCancelJob(id){
+  try{await postJson('/api/v1/infra/jobs/'+encodeURIComponent(id)+'/cancel',{});toast('Job cancelled');}
+  catch(e){toast('Cancel failed: '+e.message);}
+  await loadInfra(true);renderCurrentView();
+}
+function renderInfraView(){
+  el('viewTitle').textContent='Configuration · Infrastructure';
+  const d=state.infra;
+  if(!d||(d.loading&&!d.environments)){el('content').innerHTML=skeletonHtml();return;}
+  if(d.error&&!d.environments){el('content').innerHTML=`<div class="card empty">Could not load infrastructure: ${esc(d.error)}</div>`;return;}
+  const p={...(d.policy||{}),...(d.policyDraft||{})};
+  const agents=d.agents||[],online=agents.filter(a=>a.online);
+  const envs=d.environments||[],jobs=d.jobs||[];
+  const gb=b=>b!=null?(b/1e9).toFixed(1)+' GB':'—';
+  let h=`<div class="group-head first"><h2>Infrastructure</h2><div class="hp-actions"><button class="btn" data-action="infra-refresh">Refresh</button><button class="btn" data-action="infra-prune-preview" title="Report what housekeeping would remove, without removing anything">Preview housekeeping</button><button class="btn primary" data-action="infra-prune" title="Remove stopped containers and unused images of the managed stacks, dangling images and old build cache now">Prune Docker now</button></div></div>`;
+  h+=online.length
+    ?`<div class="muted small" style="margin:-4px 0 12px">Infra agent ${online.map(a=>`<span class="chip chip-pass">${esc(a.name)}</span> on ${esc(a.host||'?')} · heartbeat ${ago(a.last_heartbeat)}`).join(' · ')}</div>`
+    :`<div class="banner" style="margin:0 0 12px">No infrastructure agent is online — deploys, teardowns and housekeeping wait in the queue. Start one on the Docker host: <code>npm run start:infra-agent</code>${agents.length?' (last seen: '+esc(agents[0].name)+' '+ago(agents[0].last_heartbeat)+')':''}</div>`;
+  const up=envs.filter(e=>e.state==='up').length,pending=jobs.filter(j=>j.status==='queued'||j.status==='running').length;
+  const lp=d.last_prune,lr=lp&&lp.result||{},after=lr.after||{};
+  h+='<div class="kpi-grid">'+
+    kpi('Managed stacks',envs.length,up+' up · '+envs.filter(e=>e.state==='down').length+' down')+
+    kpi('Jobs pending',pending,pending?'queued or running':'nothing to do',pending?'amber':'')+
+    kpi('Last housekeeping',lp?ago(lp.finished_at):'—',lp?(lr.dry_run?'preview only':lp.status==='failed'?'failed':'reclaimed '+gb(lr.reclaimed_bytes)):'not yet run','sm'+(lp&&lp.status==='failed'?' red':''))+
+    kpi('Docker images',after.images?after.images.total:'—',after.images?gb(after.images.size_bytes)+' · '+esc(after.images.reclaimable)+' reclaimable':'known after housekeeping','sm')+
+    kpi('Build cache',after.build_cache?gb(after.build_cache.size_bytes):'—',after.build_cache?esc(after.build_cache.reclaimable)+' reclaimable':'known after housekeeping','sm')+
+  '</div>';
+  const rows=envs.map(e=>{
+    const [tone,label]=STACK_STATE[e.state]||STACK_STATE.unknown;
+    const pulse=(e.state==='deploying'||e.state==='tearing_down')?'<span class="pulse"></span> ':'';
+    const dep=e.deployed||{};
+    const deployed=dep.commit?`${esc(String(dep.commit).slice(0,10))}${dep.ref?' <span class="muted">('+esc(dep.ref)+')</span>':''}<div class="muted small">${e.state==='down'?'torn down '+ago(dep.torn_down_at):'deployed '+ago(dep.deployed_at)}</div>`:'<span class="muted">never deployed from here</span>';
+    const next=e.next_teardown?`${e.next_teardown.reason==='idle'?'Idle':'Up too long'} → tear down ${fromNow(e.next_teardown.at)}${e.next_teardown.blocked_by_active_runs?' <span class="muted">(after the run)</span>':''}`:(e.state==='down'?'<span class="muted">stays down until a deploy or a run</span>':'<span class="muted">no rule applies</span>');
+    const job=e.pending_job?`<div class="muted small">${esc(e.pending_job.kind)} ${esc(e.pending_job.status)}${e.pending_job.reason?' · '+esc(e.pending_job.reason.replace(/_/g,' ')):''}</div>`:'';
+    const busy=e.state==='deploying'||e.state==='tearing_down'||!!e.pending_job;
+    const canTear=!busy&&e.state!=='down';
+    return `<tr><td><strong>${esc(e.name)}</strong><div class="muted small">${esc(e.key)}${e.compose_project?' · '+esc(e.compose_project):''}</div></td><td class="nowrap">${pulse}<span class="chip${tone?' chip-'+tone:''}">${esc(label)}</span>${job}</td><td>${deployed}</td><td class="muted small">${e.active_runs?plural(e.active_runs,'active run'):(e.last_run_at?'last run '+ago(e.last_run_at):'never run')}</td><td class="small">${next}</td><td class="nowrap"><button class="btn small-btn" style="margin-top:0" data-action="infra-deploy" data-id="${esc(e.id)}"${busy?' disabled':''} title="Deploy ${esc(e.default_ref||'main')} and keep the stack up (nothing is run)">Deploy ${esc(e.default_ref||'main')}</button> <button class="btn small-btn" style="margin-top:0" data-action="infra-teardown" data-id="${esc(e.id)}" data-name="${esc(e.name)}" data-active="${e.active_runs||0}"${canTear?'':' disabled'}>Tear down</button></td></tr>`;
+  }).join('');
+  h+=`<div class="card"><div class="card-head"><div><h2>Managed stacks</h2><div class="muted small">Local Docker stacks the engine deploys and tears down itself — they run only while they are being tested. Everything else on this machine is left alone.</div></div></div><div class="table-wrap"><table><thead><tr><th>Environment</th><th>State</th><th>Deployed</th><th>Usage</th><th>Next automatic action</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No managed stacks. Set Lifecycle to “Local Docker stack” on an environment (Configuration › Environments), or run deploy/staging/deploy.mjs deploy — it registers the environment as managed.</td></tr>'}</tbody></table></div></div>`;
+  const num=(k,label,hint)=>`<div class="form-row"><span class="form-label">${esc(label)}</span><div><input type="number" id="ip_${k}" min="0" step="1" value="${esc(p[k])}" style="width:110px"> <span class="muted small">${esc(hint)}</span></div></div>`;
+  const bool=(k,label,hint)=>`<div class="form-row"><span class="form-label">${esc(label)}</span><div><label class="type-check"><input type="checkbox" id="ip_${k}"${p[k]?' checked':''}> <span class="muted small">${esc(hint)}</span></label></div></div>`;
+  h+=`<div class="card" id="infraPolicy"><div class="card-head"><div><h2>Lifecycle policy</h2><div class="muted small">When stacks come down on their own, and how Docker is kept clean</div></div></div><div class="hp-body">
+    ${num('idle_teardown_hours','Tear down when idle for','hours without a run since the deploy or the last run (0 = never)')}
+    ${num('max_uptime_hours','Tear down when up for','hours since the deploy, as soon as no run is active (0 = never)')}
+    ${num('prune_every_hours','Housekeeping every','hours (0 = never): stopped containers and unused images of the managed stacks, dangling images, old build cache')}
+    ${num('prune_build_cache_hours','Remove build cache unused for','hours (0 = keep all build cache)')}
+    ${num('job_timeout_minutes','Fail a job after','minutes')}
+    ${bool('teardown_after_run_default','Tear down after a run','“Deploy and run” takes the stack down once the run has finished, whatever the result')}
+    ${bool('remove_images_on_teardown','Remove images on teardown','the stack’s images go with its containers; the next deploy rebuilds from cache')}
+    ${bool('remove_volumes_on_teardown','Remove data volumes on teardown','the stack’s database starts empty on the next deploy')}
+    ${bool('auto_deploy_when_down','Deploy first when a run finds the stack down','Run everything, schedules and POST /api/v1/runs deploy, run, then tear down')}
+    <div class="form-row"><span></span><div><button class="btn primary" data-action="infra-save-policy">Save policy</button><div id="infraPolicyError" class="field-error" hidden></div></div></div>
+  </div></div>`;
+  const jrows=jobs.map(j=>{
+    const tone=j.status==='succeeded'?'pass':j.status==='failed'?'fail':(j.status==='running'||j.status==='queued')?'warn':'';
+    const prm=j.params||{},res=j.result||{},rm=res.removed||{};
+    const what=j.kind==='prune'?'Housekeeping'+(prm.dry_run?' (preview)':''):j.kind==='deploy'?'Deploy '+esc(prm.ref||''):'Tear down';
+    let detail='';
+    if(j.kind==='prune'&&j.status==='succeeded')detail=`${(rm.containers||[]).length} containers, ${(rm.images||[]).length} images, ${rm.dangling_images||0} dangling${rm.build_cache?', build cache '+esc(rm.build_cache):''}${res.reclaimed_bytes!=null?' · reclaimed '+gb(res.reclaimed_bytes):''}`;
+    else if(j.kind==='deploy'&&j.status==='succeeded')detail=(res.commit?'commit '+esc(String(res.commit).slice(0,10)):'')+(j.run_id?' · <a href="#/history">run →</a>':'');
+    else if(j.kind==='teardown'&&j.status==='succeeded'&&res.swept)detail=`${res.swept.containers} containers, ${res.swept.images} images swept${res.script_error?' <span class="muted">(script reported an error; sweep finished the job)</span>':''}`;
+    if(j.error)detail+=(detail?' · ':'')+`<span style="color:var(--red)">${esc(String(j.error).split('\n')[0]).slice(0,200)}</span>`;
+    const took=j.started_at?dur((j.finished_at?ms(j.finished_at):serverNow())-ms(j.started_at)):'—';
+    const open=state.infraOpenJob===j.id;
+    const live=j.status==='running'||j.status==='queued';
+    return `<tr><td class="nowrap">${live?'<span class="pulse'+(j.status==='queued'?' queued':'')+'"></span> ':''}<span class="chip${tone?' chip-'+tone:''}">${esc(j.status)}</span></td><td>${what}<div class="muted small">${esc((j.reason||'').replace(/_/g,' '))}${j.agent_id?' · '+esc(j.agent_id):''}</div></td><td>${esc(j.environment_name||(j.kind==='prune'?'all managed stacks':'—'))}</td><td class="muted small nowrap">${when(j.created_at)}<div>${took}</div></td><td class="small">${detail||'<span class="muted">—</span>'}</td><td class="nowrap">${j.log_tail?`<button class="btn small-btn" style="margin-top:0" data-action="infra-job-log" data-id="${esc(j.id)}">${open?'Hide log':'Log'}</button>`:''}${j.status==='queued'?` <button class="btn small-btn" style="margin-top:0" data-action="infra-cancel-job" data-id="${esc(j.id)}">Cancel</button>`:''}</td></tr>${open?`<tr><td colspan="6"><pre class="small" style="white-space:pre-wrap;max-height:320px;overflow:auto;margin:0;background:var(--panel2);padding:10px;border-radius:6px">${esc(j.log_tail)}</pre></td></tr>`:''}`;
+  }).join('');
+  h+=`<div class="card"><div class="card-head"><h2>Recent jobs</h2><span class="muted small">${plural(jobs.length,'job')}</span></div><div class="table-wrap"><table><thead><tr><th>Status</th><th>Job</th><th>Stack</th><th>When</th><th>Result</th><th></th></tr></thead><tbody>${jrows||'<tr><td colspan="6" class="empty">No jobs yet. They appear here when a deploy, teardown or housekeeping is queued.</td></tr>'}</tbody></table></div></div>`;
+  el('content').innerHTML=h;
 }
 
 // ---------------------------------------------------------------------------
@@ -1545,7 +1770,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='schedules'||v==='reports'||v==='insights')state.view=v;
+  else if(v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
@@ -1554,6 +1779,7 @@ async function onRoute(){
   if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
   if(state.view==='config-retention'&&state.settings===null)loadSettings();
   if(state.view==='schedules')loadSchedules();
+  if(state.view==='config-infra')loadInfra();
   if(state.view==='history'&&!state.runsList.loaded){if(!state.runsFilter.environment_id)state.runsFilter.environment_id=state.envId||'';loadRunsList(true);}
   renderCurrentView();
   window.scrollTo(0,0);
@@ -1588,6 +1814,8 @@ content.addEventListener('click',e=>{
 });
 content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
 content.addEventListener('change',e=>{
+  if(e.target.id==='deployMode'){state.deployMode=e.target.value;return;}
+  if(e.target.closest('#infraPolicy')){readInfraPolicyForm();return;}
   const form=e.target.closest('[data-form]');
   if(form){
     if(form.dataset.form==='sched')readSchedForm();else readReportForm();

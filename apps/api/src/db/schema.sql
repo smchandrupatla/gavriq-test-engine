@@ -247,6 +247,43 @@ CREATE INDEX IF NOT EXISTS idx_test_cases_lifecycle ON test_cases(lifecycle);
 CREATE INDEX IF NOT EXISTS idx_test_cases_type ON test_cases(test_type);
 CREATE INDEX IF NOT EXISTS idx_test_cases_tags ON test_cases USING GIN(tags);
 
+-- ---------------------------------------------------------------------------
+-- Test bench representation (adopted from Sand Bench's Test cases screen):
+-- what the case is for in plain words, who owns it, where it runs, how long it
+-- takes, the links and notes around it, and the triage/collaboration state.
+-- Steps (JSONB above) carry the same shape per entry: {text, expected, testData,
+-- attachments} for people, plus the runner fields (action, url, ...) for workers.
+-- ---------------------------------------------------------------------------
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS objective TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS component TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS environment TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS estimated_duration TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'Team';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS automation_link TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS test_data TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS flakiness_notes TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS known_workarounds TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS common_failure_causes TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS triage_status TEXT NOT NULL DEFAULT 'None';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS assignee TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS linked_issue_url TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS notes JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS watchers JSONB NOT NULL DEFAULT '[]';
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_visibility_check CHECK (visibility IN ('Public','Team','Private'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_estimated_duration_check
+    CHECK (estimated_duration IS NULL OR estimated_duration IN ('Under 1m','1-5m','5-15m','15-60m','60m+'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_triage_status_check
+    CHECK (triage_status IN ('None','Investigating','Assigned','Issue linked','Resolved'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_test_cases_triage ON test_cases(triage_status);
+CREATE INDEX IF NOT EXISTS idx_test_cases_component ON test_cases(component);
+
 CREATE TABLE IF NOT EXISTS test_case_suites (
   test_case_id  UUID NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
   test_suite_id UUID NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE,
@@ -365,6 +402,53 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment_id);
 CREATE INDEX IF NOT EXISTS idx_deployments_created ON deployments(created_at DESC);
 
+-- Lifecycle (apps/api/src/infra.ts): a deploy may ask for the environment to be
+-- torn down once the run it queued has finished, whatever the verdict. The run
+-- request a deploy was made for (a run that found its environment down) is kept
+-- so the post-deploy run has the same scope the caller asked for.
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_after_run BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_job_id UUID;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS run_request JSONB;
+
+-- Infrastructure jobs: work for the host-side infra agent (apps/infra-agent),
+-- which has git and docker where the compose stacks live. The control plane
+-- decides when (after a run, idle, too long up, housekeeping cadence, a person);
+-- the agent claims the oldest queued job, does it and reports back.
+--   deploy    params {script, ref}                → the environment's deploy script
+--   teardown  params {script, remove_images, remove_volumes}
+--   prune     params {projects, image_prefixes, build_cache_hours, dry_run}
+CREATE TABLE IF NOT EXISTS infra_jobs (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind            TEXT NOT NULL CHECK (kind IN ('deploy', 'teardown', 'prune')),
+  environment_id  UUID REFERENCES environments(id) ON DELETE CASCADE,
+  deployment_id   UUID REFERENCES deployments(id) ON DELETE SET NULL,
+  status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  reason          TEXT,                         -- requested | after_run | idle | max_uptime | housekeeping | run_on_down_environment
+  params          JSONB NOT NULL DEFAULT '{}',
+  result          JSONB NOT NULL DEFAULT '{}',
+  log             TEXT,
+  error           TEXT,
+  agent_id        TEXT,
+  requested_by    TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_infra_jobs_status ON infra_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_infra_jobs_env ON infra_jobs(environment_id, created_at DESC);
+
+-- The agents themselves: one row per host process, kept alive by heartbeats.
+CREATE TABLE IF NOT EXISTS infra_agents (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  host            TEXT,
+  version         TEXT,
+  metadata        JSONB NOT NULL DEFAULT '{}',
+  last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  registered_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS execution_results (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   execution_id        UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
@@ -379,6 +463,12 @@ CREATE TABLE IF NOT EXISTS execution_results (
   metrics             JSONB NOT NULL DEFAULT '{}',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Remarks: what happened, in plain words. On a result they come from the worker
+-- (one line per step, then the outcome); on an execution they are added by people
+-- reviewing the run ({author, text, at}). Both are shown on the run screen.
+ALTER TABLE execution_results ADD COLUMN IF NOT EXISTS remarks JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS remarks JSONB NOT NULL DEFAULT '[]';
 
 CREATE INDEX IF NOT EXISTS idx_execution_results_exec ON execution_results(execution_id);
 CREATE INDEX IF NOT EXISTS idx_execution_results_case ON execution_results(test_case_id);
@@ -517,6 +607,9 @@ INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS test_type_timeout_minutes JSONB NOT NULL DEFAULT '{}';
 -- Stop a run after this many test cases in a row fail (anywhere in the run, including its start).
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS consecutive_failure_limit INT NOT NULL DEFAULT 20;
+-- Infrastructure policy (idle/max-uptime teardown, housekeeping cadence, teardown defaults);
+-- keys absent here take the defaults in apps/api/src/infra.ts.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS infra_policy JSONB NOT NULL DEFAULT '{}';
 
 -- ---------------------------------------------------------------------------
 -- Quality Insights: versioned reviews of an application's test quality.

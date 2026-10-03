@@ -16,6 +16,7 @@
  *   - the console is served without anti-framing or nosniff headers
  */
 import type { CaseDef } from './types.js';
+import { describeTarget } from './plain-language.js';
 import {
   ARCHIVE, ARCHIVE_CLEANUP, ARTEFACT, DELETE, FIX, FIXTURE_APP, FIXTURE_ENV, FIXTURES, GET, GHOST_WORKER, ISO, ISOLATED, ISOLATED_DATA, NO_DATA, PATCH, POST, PRE, PUT,
   QUEUE_AND_CLAIM, RUN_ONE_PASS, SANDBOX_DATA, UNIQ, UPLOAD, complete, result, suiteFactory, type Step,
@@ -40,13 +41,19 @@ const C: CaseDef[] = [];
 /* ------------------------------------------------------------------------ */
 
 function perfCase(opts: {
-  key: string; name: string; path: string; requests: number; concurrency: number; p95: number; errPct: number;
+  key: string; name: string; objective?: string; path: string; requests: number; concurrency: number; p95: number; errPct: number;
   soak?: boolean; severity?: CaseDef['severity']; timeout?: number; durationSeconds?: number; description: string;
 }): CaseDef {
   const load = opts.durationSeconds ? `${opts.durationSeconds} seconds of requests` : `${opts.requests} requests`;
+  const target = describeTarget(`{{engine}}${opts.path}`);
+  const limit = `95 out of 100 answers arrive within ${opts.p95 >= 1000 ? opts.p95 / 1000 + ' seconds' : opts.p95 + ' ms'} and no more than ${opts.errPct}% fail`;
+  const stream = opts.durationSeconds ? `a steady stream of requests for ${opts.durationSeconds} seconds` : `a steady stream of ${opts.requests} requests`;
   return {
     key: opts.key,
     name: opts.name,
+    objective: opts.objective || (opts.soak
+      ? `Keep ${stream} (${opts.concurrency} at a time) flowing to ${target} and confirm the engine stays responsive the whole time: ${limit}.`
+      : `Measure how quickly ${target} answers under a burst of ${opts.requests} requests, ${opts.concurrency} at a time: ${limit}.`),
     description: `${opts.description} Profile: ${load} at concurrency ${opts.concurrency} against {{engine}}${opts.path}. SLA: p95 <= ${opts.p95}ms, error rate <= ${opts.errPct}%. The runner records min/avg/p50/p95/p99 latency, throughput and error rate as metrics on the result.`,
     suiteKey: opts.soak ? 'te-endurance' : 'te-performance', testType: 'performance', method: 'performance',
     severity: opts.severity || 'high', priority: 'p1',
@@ -91,6 +98,7 @@ C.push(
   {
     key: 'TE-END-POST-SOAK-HEALTH',
     name: 'Engine health and read surfaces respond',
+    objective: 'Confirm the control plane, its database reads, the console data and the SIT console all answer, independently of any soak.',
     description: 'Independently verifies the control plane, database reads, console read model and SIT console without depending on any other case.',
     suiteKey: 'te-endurance', testType: 'performance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Test Engine API and embedded SIT console are reachable.',
@@ -116,12 +124,14 @@ const upgrade = suiteFactory({ suiteKey: 'te-rolling-upgrade', testType: 'deploy
 C.push(
   upgrade({
     key: 'TE-RU-FEATURE-DETECTION', name: 'Capability flags older clients check are still published',
+    objective: 'Guard that every capability flag an older client may check is still published and true.',
     description: 'A client built against an earlier engine feature-detects through /api/v1/meta.capabilities. Every flag it may check must still be present and true.',
     severity: 'critical', priority: 'p0',
     steps: [GET('/api/v1/meta', { expect_json: ['repository', 'executions', 'workers', 'schedules', 'build_status', 'release_readiness', 'sit_catalog', 'sit_runs', 'dashboard'].map((flag) => ({ path: `capabilities.${flag}`, equals: true })), description: 'capability flags' })],
   }),
   upgrade({
     key: 'TE-RU-VERSION-CONSISTENT', name: 'Both version endpoints report the same version',
+    objective: 'Guard that both places that report the engine version agree, and the database schema name is unchanged.',
     description: 'During a rolling upgrade an orchestrator compares /health.version with what clients read from /api/v1/meta. They must agree, and the database schema name must be the one every earlier release used.',
     steps: [
       GET('/health', { save: { version: 'version' }, expect_json: [{ path: 'schema', equals: 'test_engine' }], description: 'health version' }),
@@ -130,6 +140,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-CASE-ADDRESSING', name: 'Cases resolve by key and by id',
+    objective: 'Guard that a case can be opened both by its human key and by its internal id, returning the same case.',
     description: 'Older scripts address a case by its human key, newer ones by uuid. Both must return the same case.',
     steps: [
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { save: { case_id: 'data.id' }, expect_json: [{ path: 'data.key', equals: 'TE-SMOKE-HEALTH' }], description: 'by key' }),
@@ -138,6 +149,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-ENVIRONMENT-ADDRESSING', name: 'Environments resolve by key and by id',
+    objective: 'Guard that an environment can be opened both by key and by id for its detail, policy and policy check.',
     description: 'Schedules and pipelines reference environments by key; the console by id. Detail, policy and policy check must accept both.',
     steps: [
       GET('/api/v1/environments/engine-local', { save: { env_id: 'data.id' }, expect_json: [{ path: 'data.key', equals: 'engine-local' }], description: 'by key' }),
@@ -149,6 +161,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-STABLE-KEYS', name: 'Application and environment keys pipelines depend on still exist',
+    objective: 'Guard that the application and environment keys pipelines are configured with still exist.',
     description: 'Deploy pipelines and schedules are configured with these keys. A release that renamed one would break every caller silently.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -159,6 +172,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-DEFAULT-APPLICATION', name: 'Read models default to Sand Bench when no application is named',
+    objective: 'Guard that console builds that name no application still get Sand Bench by default.',
     description: 'Console builds from before multi-application support never send application_key. The summary, test-status and build-results reads must still default to Sand Bench for them.',
     steps: [
       GET('/api/v1/ui/summary', { expect_json: [{ path: 'data.application.key', equals: 'sand-bench' }], description: 'summary' }),
@@ -169,6 +183,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-LEGACY-RUN-ALL', name: 'The pre-trigger "run all" API still plans',
+    objective: 'Guard that the older run-everything call still returns a plan, by application key or id.',
     description: 'POST /api/v1/executions/run-all predates /api/v1/runs and older consoles still call it, by application key or by application id. Both forms must return a plan.',
     steps: [
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { save: { app_id: 'data.application_id' }, description: 'resolve the application id' }),
@@ -179,12 +194,14 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-LEGACY-CONSOLE-SCRIPTS', name: 'Scripts of the earlier console are still served',
+    objective: 'Guard that the previous console\'s script files are still served for browsers holding the old page in cache.',
     description: 'A browser holding the previous shell in cache asks for /console.js, /console-ui.js and /console-pages.js. They must still be served as JavaScript until that shell is retired.',
     severity: 'medium',
     steps: ['/console.js', '/console-ui.js', '/console-pages.js'].map((p) => GET(p, { expect_headers: [{ name: 'content-type', contains: 'javascript' }, { name: 'etag', exists: true }], description: p })),
   }),
   upgrade({
     key: 'TE-RU-UNKNOWN-FIELDS', name: 'Requests with fields this version does not know are accepted',
+    objective: 'Guard that a run request carrying fields this version does not know is accepted, not rejected.',
     description: 'A newer client may send fields an older engine has never heard of. The run trigger must ignore them rather than reject the request.',
     severity: 'medium',
     steps: [POST('/api/v1/runs', { body: { application: 'gavriq-test-engine', environment: 'engine-local', dry_run: true, future_option: { anything: true }, priority_hint: 7 }, expect_json: [{ path: 'data.total_cases', min: 1 }], description: 'plan with unknown fields' })],
@@ -192,6 +209,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-RUN-ADDRESSING', name: 'A plain execution reads as a run, by key and by id',
+    objective: 'Guard that an execution queued the old way still reads as a run by key and by id.',
     description: 'Runs were introduced after executions. An execution queued the old way must still resolve through the run API — by its key and by its id — and through the execution API by either.',
     preconditions: PRE.isolated,
     steps: [
@@ -206,6 +224,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-MINIMAL-WORKER', name: 'A worker sending only the original fields still completes a run',
+    objective: 'Guard that a worker speaking only the original minimal protocol can still carry an execution to passed.',
     description: 'The first workers claimed with a capabilities list, reported a result with no verdict, timing or message, and completed with an empty body. That minimal protocol must still carry an execution to "passed".',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -221,6 +240,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-WORKER-REGISTRATION', name: 'A worker re-registering after an upgrade updates its row',
+    objective: 'Guard that a worker re-registering after an upgrade updates its existing row rather than being rejected or duplicated.',
     description: 'When a worker restarts on a new version it registers again under the same id. The registry must update that row — new name, new capabilities, online again — not reject it or add a second one. It is drained at the end so it does not count as a live worker.',
     preconditions: PRE.isolated,
     steps: [
@@ -238,6 +258,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-LEGACY-BUILD-REPORT', name: 'Build reports with the older field names are accepted',
+    objective: 'Guard that build reports using the older field names are still accepted and keyed correctly.',
     description: 'Earlier CI reporters send each result as {id, name, status} rather than {test_key, test_name}. They must still be ingested, keyed by id, and default to the in-container location.',
     preconditions: PRE.sandbox,
     steps: [
@@ -249,6 +270,7 @@ C.push(
   }),
   upgrade({
     key: 'TE-RU-LEGACY-SCHEDULE', name: 'Schedules that target case ids instead of an application still work',
+    objective: 'Guard that a schedule naming cases directly (the older form) still fires one execution of exactly those cases.',
     description: 'Before application schedules, a schedule named its cases directly. That form must still be accepted and fire one execution of exactly those cases.',
     preconditions: PRE.isolated,
     steps: [
@@ -276,6 +298,7 @@ const NOT_A_500 = [400, 404, 422];
 C.push(
   robust({
     key: 'TE-NF-MALFORMED-JSON', name: 'Malformed and missing JSON bodies are refused with 400',
+    objective: 'Send broken, non-structured and empty request bodies and confirm each is refused cleanly and the engine keeps serving.',
     description: 'A truncated JSON body, a body that is not JSON at all and a JSON content type with no body must each be answered 400 with a parser error code — and the engine keeps serving afterwards.',
     severity: 'high',
     steps: [
@@ -290,6 +313,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-WRONG-METHOD', name: 'Methods a resource does not support are 404, and change nothing',
+    objective: 'Try actions a resource does not support and confirm each is refused and nothing is changed.',
     description: 'There is no DELETE for a test case, no PUT for an environment and no POST on /health. Each must answer 404 — and the case a DELETE was aimed at must still be there.',
     severity: 'high',
     steps: [
@@ -305,6 +329,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-NOT-FOUND-FAMILY', name: 'Every lookup of something missing is a 404 with a reason',
+    objective: 'Look up a missing case, environment, execution, run, worker, schedule and proposal and confirm each is a readable not-found.',
     description: 'Missing case, environment, execution, run, worker, schedule and proposal: each must answer 404 with an {error} a person can read, never an empty 200.',
     steps: [
       GET('/api/v1/test-cases/TE-NO-SUCH', { expected_status: 404, expect_json: [{ path: 'error', equals: 'Test case not found' }], description: 'case' }),
@@ -320,6 +345,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-INVALID-RESULT-ID', name: 'A malformed result id is refused, not a server error',
+    objective: 'Ask for evidence with a malformed result id and confirm a clean refusal (currently a known defect: it fails internally).',
     description: 'GET /api/v1/execution-results/not-a-uuid/evidence must answer 4xx (or an empty list). Probed 2026-09-30: it answers 500 with the database\'s "invalid input syntax for type uuid" — this case stays red until ids are validated.',
     steps: [
       GET('/api/v1/execution-results/not-a-uuid/evidence', { expected_status: [200, ...NOT_A_500], description: 'evidence of a malformed result id' }),
@@ -329,6 +355,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-INVALID-SCHEDULE-ID', name: 'A malformed schedule id is refused, not a server error',
+    objective: 'Delete, edit and run a schedule with a malformed id and confirm clean refusals (currently a known defect: they fail internally).',
     description: 'Delete, edit and run of /api/v1/schedules/not-a-uuid must answer 4xx. Probed 2026-09-30: all three answer 500 — this case stays red until ids are validated.',
     steps: [
       DELETE('/api/v1/schedules/not-a-uuid', { body: {}, expected_status: NOT_A_500, description: 'delete' }),
@@ -339,6 +366,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-INVALID-FILTER-VALUES', name: 'Filter values outside their enum are refused, not a server error',
+    objective: 'Filter lists by values that are not valid and confirm a clean refusal or an empty page (currently a known defect: they fail internally).',
     description: 'A repository or execution list filtered by a value that is not a valid type, lifecycle, status or id must answer 400 or an empty page. Probed 2026-09-30: each answers 500 — this case stays red until filters are validated.',
     severity: 'high',
     steps: [
@@ -352,6 +380,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-NEGATIVE-PAGING', name: 'Negative limit and offset are refused or clamped, not a server error',
+    objective: 'Ask for a negative page size and offset and confirm they are refused or clamped (currently a known defect: they fail internally).',
     description: 'limit=-5 and offset=-1 must be clamped to a sane page or answered 400. Probed 2026-09-30: both reach the database and answer 500 ("LIMIT must not be negative") — this case stays red until paging is validated.',
     steps: [
       GET('/api/v1/test-cases?limit=-5', { expected_status: [200, 400], description: 'limit=-5' }),
@@ -361,6 +390,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-PAGING-DEFAULTS', name: 'Unparseable paging falls back to the defaults',
+    objective: 'Confirm unreadable page sizes fall back to the default and an offset past the end is an empty page that still reports the total.',
     description: 'limit=abc and limit=0 must behave like the default page of 50; an offset past the end is an empty page that still reports the total.',
     steps: [
       GET('/api/v1/test-cases?limit=abc', { expect_json: [{ path: 'data', min_length: 1 }, { path: 'data', max_length: 50 }], description: 'limit=abc' }),
@@ -373,6 +403,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-SEARCH-HOSTILE-INPUT', name: 'Search survives wildcards, quotes and very long terms',
+    objective: 'Search with wildcards, quotes and a 1,500-character term and confirm each returns a normal result set.',
     description: 'LIKE wildcards, quote characters and a 1500-character term must each return a normal 200 result set.',
     steps: [
       GET('/api/v1/search?q=%25%5F', { expect_json: [{ path: 'data.test_cases', max_length: 20 }], description: 'wildcards % and _' }),
@@ -384,6 +415,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-UNICODE-ROUNDTRIP', name: 'Non-ASCII text survives a write and a read unchanged',
+    objective: 'Create a case whose text holds accents, Chinese characters, an emoji, quotes and a line break, and confirm it reads back unchanged.',
     description: 'Create a case whose name and description hold accented letters, CJK, an emoji, quotes and a newline; reading it back must return exactly what was written.',
     preconditions: PRE.sandbox,
     steps: [
@@ -399,6 +431,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-DUPLICATE-KEY', name: 'A duplicate case key is a conflict, not a server error',
+    objective: 'Create a case under a key that already exists and confirm a clean conflict answer (currently a known defect: it fails internally).',
     description: 'Creating a case under a key that exists must answer 409 (or another 4xx) and say why. Probed 2026-09-30: it answers 500 with the raw unique-constraint message — this case stays red until the conflict is handled.',
     preconditions: PRE.sandbox,
     steps: [
@@ -409,6 +442,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-COMPRESSION', name: 'Large JSON responses are compressed, small ones are not',
+    objective: 'Confirm large answers are compressed and tiny ones are sent as is.',
     description: 'A 50-case page must be gzip-encoded with Vary: accept-encoding; the 140-byte health payload must be sent as is.',
     steps: [
       GET('/api/v1/test-cases?limit=50', { expect_headers: [{ name: 'content-encoding', contains: 'gzip' }, { name: 'vary', contains: 'accept-encoding' }], expect_json: [{ path: 'data', min_length: 1 }], description: 'large payload' }),
@@ -417,11 +451,13 @@ C.push(
   }),
   robust({
     key: 'TE-NF-STATIC-CACHING', name: 'Console assets carry revalidation headers',
+    objective: 'Confirm the console files carry revalidation headers so a browser does not run a stale console after a deploy.',
     description: 'The shell and its scripts must be served with an ETag and cache-control: no-cache, so a browser revalidates instead of running a stale console after a deploy.',
     steps: ['/', '/catalog/app.js', '/catalog/charts.js'].map((p) => GET(p, { expect_headers: [{ name: 'etag', exists: true }, { name: 'cache-control', contains: 'no-cache' }], description: p })),
   }),
   robust({
     key: 'TE-NF-CONTENT-TYPES', name: 'Every surface declares its content type',
+    objective: 'Confirm every surface says what kind of content it serves — the console page, its scripts and the structured data answers, including error answers.',
     description: 'HTML for the shell, JavaScript for the bundles, UTF-8 JSON for the API — including its error answers.',
     steps: [
       GET('/', { expect_headers: [{ name: 'content-type', contains: 'text/html; charset=utf-8' }], description: 'shell' }),
@@ -433,6 +469,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-PREFLIGHT-BOUNDED', name: 'Preflight of a silent target returns within its timeouts',
+    objective: 'Point the target preflight at an address that never answers and confirm it comes back blocked well within a minute.',
     description: 'Preflight probes four paths of a target with a five-second limit each. Against an address that never answers it must come back "blocked" in well under a minute instead of hanging the request.',
     timeoutSeconds: 45,
     steps: [GET('/api/v1/preflight?base_url=http%3A%2F%2F203.0.113.1%3A81', { expect_json: [{ path: 'data.reachable', equals: false }, { path: 'data.recommendation', equals: 'blocked' }, { path: 'data.probes', min_length: 4 }, { path: 'data.probes.0.ok', equals: false }], description: 'preflight of a non-routable address (TEST-NET-3)' })],
@@ -441,6 +478,7 @@ C.push(
   }),
   robust({
     key: 'TE-NF-INVALID-RESULT-STATUS', name: 'A result with an unknown status is refused, not a server error',
+    objective: 'Report a result with a made-up status and confirm it is refused (currently a known defect: it fails internally).',
     description: 'A worker reporting status "banana" must be answered 400. Probed 2026-09-30: it answers 500 with the enum error — this case stays red until the status is validated. The execution is cancelled afterwards.',
     preconditions: PRE.isolated,
     steps: [
@@ -462,6 +500,7 @@ const probe404 = (path: string, mustNot: string, description = path): Step => GE
 C.push(
   vuln({
     key: 'TE-VS-SECRET-FILES', name: 'Deployment files are not served',
+    objective: 'Make sure deployment files (environment templates, compose file, Dockerfile, manifests) cannot be read over the web.',
     description: 'The image holds .env templates, the compose file, the Dockerfile and package manifests. None may be reachable over HTTP.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -474,6 +513,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-STATIC-TRAVERSAL', name: 'The static file route cannot be walked out of its folder',
+    objective: 'Make sure the console file route cannot be tricked into serving files outside its folder.',
     description: '/catalog/* serves files from one folder. Encoded dot-segments, doubled dots and backslashes must not reach package.json two levels up.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -489,6 +529,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-EVIDENCE-TRAVERSAL', name: 'The evidence file route cannot be walked out of the store',
+    objective: 'Make sure the evidence file route cannot be tricked into serving files outside the evidence store.',
     description: 'GET /api/v1/evidence/file resolves a storage key inside the evidence store. Keys with dot-segments, absolute paths or extra depth must be answered 404 and echo only a file name.',
     severity: 'critical', priority: 'p0',
     steps: ['../../etc/passwd', 'evidence/../../../etc/passwd', '/etc/passwd', 'evidence/_probe/../../../app/package.json', 'evidence/a/b/c/d', 'evidence/..', '..%2F..%2Fetc%2Fpasswd'].map((key) =>
@@ -499,6 +540,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-EVIDENCE-NOT-RENDERED', name: 'Captured HTML is served as text, never rendered',
+    objective: 'Make sure a captured web page stored as evidence is served as plain text, so any script in it can never run in the console.',
     description: 'Evidence can contain a captured page with script in it. Stored under a .html name it must come back as text/plain with nosniff, so opening an evidence link cannot run that script in the console\'s origin.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -510,6 +552,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-SERVER-FINGERPRINT', name: 'Responses do not advertise the server software',
+    objective: 'Make sure no answer advertises the server software.',
     description: 'No Server or X-Powered-By header on the API, the shell or an error answer.',
     severity: 'medium',
     steps: [
@@ -520,6 +563,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-CONSOLE-SECURITY-HEADERS', name: 'The console is served with anti-framing and nosniff headers',
+    objective: 'Make sure the console is served with the headers that stop framing and content sniffing (currently a known defect: they are missing).',
     description: 'The console can queue and cancel runs with one click, so it must not be frameable by another site: X-Frame-Options (or a frame-ancestors policy) and X-Content-Type-Options: nosniff are expected on the shell. Probed 2026-09-30: neither header is sent — this case stays red until they are.',
     severity: 'medium',
     steps: [GET('/', { expect_headers: [{ name: 'x-content-type-options', contains: 'nosniff' }, { name: 'x-frame-options', exists: true }], description: 'shell response headers' })],
@@ -527,6 +571,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-ERRORS-HIDE-INTERNALS', name: 'Error answers carry no stack traces or file paths',
+    objective: 'Make sure error answers never include stack traces, library paths or source file names.',
     description: 'Parser errors, unknown routes and missing records must not include a stack trace, a node_modules path or a source file name.',
     steps: [
       POST('/api/v1/executions', { body_raw: '{"broken', expected_status: 400, expected_body_not_contains: 'node_modules', description: 'parser error' }),
@@ -538,6 +583,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-ERRORS-HIDE-DATABASE', name: 'Error answers do not relay database error text',
+    objective: 'Make sure error answers never relay the database\'s own error text (currently a known defect: they do).',
     description: 'Whatever status an invalid filter ends in, the body must not carry the database\'s own message or SQLSTATE code — that tells a caller the schema. Probed 2026-09-30: /api/v1/executions?status=bogus answers with "invalid input value for enum execution_status" and code 22P02 — this case stays red until errors are mapped.',
     steps: [
       GET('/api/v1/executions?status=bogus', { expected_status: [200, 400, 500], expected_body_not_contains: 'execution_status', description: 'enum name in the body' }),
@@ -548,6 +594,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-SQL-INJECTION', name: 'Injection strings are treated as data',
+    objective: 'Send classic database-attack strings through search, filters and ids and confirm they are treated as plain text with the repository intact.',
     description: 'Classic injection payloads in the search term, the repository filter and path parameters must be bound as values: no error, no extra rows, and the repository is intact afterwards.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -566,6 +613,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-REFLECTED-INPUT', name: 'Input echoed in an error is never served as HTML',
+    objective: 'Make sure a not-found answer that repeats the requested path stays structured data even when the path contains markup.',
     description: 'The 404 of an unknown route repeats the requested path. With markup in the path, the answer must still be JSON, so a browser does not interpret it.',
     steps: [
       GET(`/api/v1/${encodeURIComponent('<script>alert(1)</script>')}`, { expected_status: 404, expect_headers: [{ name: 'content-type', contains: 'application/json' }, { name: 'content-type', not_contains: 'html' }], description: 'markup in an unknown route' }),
@@ -576,6 +624,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-CROSS-ORIGIN', name: 'No cross-origin access is granted',
+    objective: 'Make sure a request from a foreign website is not granted cross-origin access.',
     description: 'The API is meant for its own console and for server-side callers. A request carrying a foreign Origin must not be answered with an Access-Control-Allow-Origin header.',
     steps: [
       GET('/api/v1/applications', { headers: { origin: 'https://attacker.example' }, expect_headers: [{ name: 'access-control-allow-origin', exists: false }, { name: 'access-control-allow-credentials', exists: false }], description: 'API read with a foreign origin' }),
@@ -585,6 +634,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-DEBUG-SURFACES', name: 'No debug, metrics or documentation surface is exposed',
+    objective: 'Make sure no debug, metrics, admin or documentation pages are exposed.',
     description: 'Paths scanners look for first — /debug, /metrics, /admin, /swagger, /docs, /graphql, /actuator — must not exist.',
     severity: 'medium',
     steps: ['/debug', '/metrics', '/admin', '/swagger', '/docs', '/graphql', '/actuator/health', '/api/v1/debug', '/server-status', '/evidence/', '/api/v1/evidence'].map((p) => GET(p, { expected_status: 404, description: p })),
@@ -592,6 +642,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-CONFIG-DISCLOSURE', name: 'Public payloads disclose no connection strings or secrets',
+    objective: 'Make sure publicly readable answers never include a database address, a secret value or the demo password.',
     description: 'Health, the capability map and the environment registry are readable without credentials. None may include a database URL, a secret\'s value or the documented demo password.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -614,6 +665,7 @@ const FORGED_RUN_VERDICT: Step = GET('/api/v1/runs/{{exec_key}}', { expect_json:
 C.push(
   pen({
     key: 'TE-PEN-FORGED-PASS', name: 'A pass reported without evidence is not counted',
+    objective: 'Have a worker claim a pass with no evidence and confirm the engine records it as unproven and the execution ends failed.',
     description: 'A rogue or broken worker claims a case passed and sends no evidence. The engine must record the result as error / inconclusive with the claim noted, and the execution must end failed whatever the worker says on completion.',
     severity: 'critical', priority: 'p0', preconditions: GATE_ENFORCED_PRE,
     steps: [
@@ -627,6 +679,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-FORGED-EVIDENCE-KEY', name: 'A pass citing evidence that was never uploaded is not counted',
+    objective: 'Have a worker cite evidence files that were never uploaded and confirm the pass is not counted and the keys are listed as unverified.',
     description: 'The worker cites storage keys that do not exist — one invented, one pointing at /etc/passwd. Neither verifies; the result is recorded as error and both keys are listed as unverified.',
     severity: 'critical', priority: 'p0', preconditions: GATE_ENFORCED_PRE,
     steps: [
@@ -641,6 +694,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-WRONG-EVIDENCE-TYPE', name: 'A pass must be proven by the evidence its runner produces',
+    objective: 'Have a worker prove an HTTP pass with a file labelled as a screenshot and confirm the pass is not accepted.',
     description: 'An HTTP case passes on a transcript of the exchange. A worker that uploads a real file but labels it a screenshot has not proven an HTTP pass: the result must be recorded as error with the reason.',
     preconditions: GATE_ENFORCED_PRE,
     steps: [
@@ -653,6 +707,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-COMPLETE-WITHOUT-RESULTS', name: 'An execution cannot be completed as passed with nothing reported',
+    objective: 'Have a worker complete an execution as passed without reporting any case and confirm it ends failed.',
     description: 'The worker claims the job and immediately completes it as "passed" without reporting any case. The execution must end failed, with the exit criteria recording that no case was reported.',
     severity: 'critical', priority: 'p0', preconditions: GATE_ENFORCED_PRE,
     steps: [
@@ -665,6 +720,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-EVIDENCE-OF-ANOTHER-RUN', name: 'Evidence must belong to the execution it proves',
+    objective: 'Have a worker cite a real file from another run as evidence and confirm the pass is not counted (currently a known defect: it is accepted).',
     description: 'A worker cites a file that really exists in the evidence store but was never uploaded for this execution — here a preflight probe file. That proves nothing about this case, so the pass must not be counted. Probed 2026-09-30: the gate only checks that the file exists and accepts the pass — this case stays red until evidence is bound to its execution.',
     severity: 'critical', priority: 'p0', preconditions: GATE_ENFORCED_PRE,
     steps: [
@@ -681,6 +737,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-UNKNOWN-EXECUTION', name: 'Results, completion and uploads for an unknown execution are refused',
+    objective: 'Confirm results, completion, cancel and uploads for an execution that does not exist are all refused.',
     description: 'A worker cannot write into an execution that does not exist: result, completion, cancel and evidence upload each answer 404 and store nothing.',
     steps: [
       POST('/api/v1/executions/exec-no-such/results', { body: { test_case_id: '00000000-0000-4000-8000-000000000000', status: 'passed' }, expected_status: 404, description: 'result' }),
@@ -694,6 +751,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-UPLOAD-NAMES', name: 'Evidence file names cannot escape the store',
+    objective: 'Confirm evidence file names with folder paths are reduced to the file name, and dot-only, hidden or overlong names are refused.',
     description: 'Upload names with path segments are reduced to their file name inside the target folder; names that are only dots, hidden files, or longer than the limit are refused.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -710,6 +768,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-CORRUPT-UPLOAD-REFUSED', name: 'An upload whose hash does not match is refused',
+    objective: 'Upload a file whose bytes do not match the declared hash and confirm it is refused with both hashes.',
     description: 'The worker sends the SHA-256 of what it meant to upload. When the received bytes hash differently the upload must be answered 422 with both hashes.',
     steps: [POST('/api/v1/evidence/upload', { body: { probe: true, name: 'selftest-hash.txt', content_base64: 'aGk=', sha256: '0000000000000000000000000000000000000000000000000000000000000000' }, expected_status: 422, expect_json: [{ path: 'error', contains: 'sha256 mismatch' }, { path: 'expected', matches: '^0{64}$' }, { path: 'actual', equals: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4' }], description: 'upload with a wrong hash' })],
     dataProfile: HOSTILE('A 2-byte upload declared with an all-zero SHA-256.'),
@@ -717,6 +776,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-CORRUPT-UPLOAD-NOT-KEPT', name: 'A refused upload is not kept in the store',
+    objective: 'After a refused upload, confirm the rejected bytes cannot be retrieved (currently a known defect: they are kept).',
     description: 'After a 422 for a hash mismatch the rejected bytes must not be retrievable. Probed 2026-09-30: the file is written before the hash is compared and stays servable under its key — this case stays red until the write is rolled back. Each run uses its own file name so an old leftover cannot decide the verdict.',
     severity: 'medium',
     steps: [
@@ -729,6 +789,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-MASS-ASSIGNMENT', name: 'Server-owned fields cannot be set by the caller',
+    objective: 'Create a case while trying to set its id, version and creation time, and confirm the engine uses its own values.',
     description: 'A create request that also sends id, version and created_at must get the engine\'s own values for them: a generated id, version 1 and the current time.',
     preconditions: PRE.sandbox,
     steps: [
@@ -743,6 +804,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-PROTOTYPE-POLLUTION', name: 'Prototype-pollution payloads are rejected by the parser',
+    objective: 'Send prototype-pollution payloads and confirm they are refused before they can change behaviour.',
     description: 'JSON carrying __proto__ or constructor.prototype must be refused before it reaches a handler — it must not switch a real trigger into a dry run, or anything else.',
     steps: [
       POST('/api/v1/runs', { body_raw: '{"__proto__":{"dry_run":true},"application":"gavriq-test-engine","environment":"engine-local"}', expected_status: 400, description: '__proto__' }),
@@ -754,6 +816,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-PREFLIGHT-SSRF', name: 'Preflight cannot be used to read what it reaches',
+    objective: 'Confirm the target preflight reports only reachability and never relays content or reads local files.',
     description: 'Preflight makes the engine request a URL the caller chooses. It may report status codes, but must never relay response content, and must not read local files. Pointed at the engine\'s own internal API port it reports reachability only.',
     timeoutSeconds: 45,
     steps: [
@@ -765,6 +828,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-EVENT-TRIGGER', name: 'An event name cannot be used as a wildcard',
+    objective: 'Confirm an event name cannot act as a wildcard: a percent sign or an unknown name starts nothing.',
     description: 'POST /api/v1/schedules/trigger fires the schedules bound to exactly that event. "%" and an unknown name must start nothing.',
     steps: [
       POST('/api/v1/schedules/trigger', { body: { event: `no-such-event-${UNIQ}` }, expected_status: 202, expect_json: [{ path: 'data.executions_started', equals: 0 }, { path: 'data.executions', max_length: 0 }], description: 'unknown event' }),
@@ -776,6 +840,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-POLICY-BYPASS', name: 'A prohibited category cannot be queued by not naming it',
+    objective: 'Try to queue a prohibited chaos case directly, bypassing the planner, and confirm it is refused (currently a known defect: it is queued).',
     description: 'The fixture environment prohibits chaos. Queueing the chaos-tagged fixture case directly must be refused like it is through the run planner. Probed 2026-09-30: POST /api/v1/executions only applies the policy when the caller sends safety_category itself, so the execution is queued — this case stays red until the policy is applied to every queue path. The console queues through this route.',
     severity: 'critical', priority: 'p0', preconditions: PRE.sandbox,
     steps: [
@@ -801,6 +866,7 @@ const chaos = suiteFactory({ suiteKey: 'te-chaos', testType: 'resilience', preco
 C.push(
   chaos({
     key: 'TE-CHAOS-ERROR-FLOOD', name: 'A flood of bad requests leaves the engine healthy',
+    objective: 'Send twelve requests that each fail in a different way and confirm the engine answers normally afterwards.',
     description: 'Twelve requests in a row that each fail differently — bad JSON, unknown routes, missing records, refused uploads — and then the control plane, its database reads and the console read model must answer as before.',
     preconditions: PRE.readOnly,
     steps: [
@@ -827,6 +893,7 @@ C.push(
   {
     key: 'TE-CHAOS-READ-STORM',
     name: 'A burst of console boots is served without errors',
+    objective: 'Open the equivalent of twelve consoles at once and confirm no boot request is answered with an error.',
     description: 'Twelve consoles opening at once: 60 boot requests for the largest catalogue at concurrency 12. Each boot runs six queries against a ten-connection pool, so requests must queue — none may be answered with an error. Profile: 60 requests at concurrency 12 against {{engine}}/api/v1/ui/summary?application_key=sand-bench. SLA: error rate 0%, p95 <= 20000ms.',
     suiteKey: 'te-chaos', testType: 'resilience', method: 'performance', severity: 'high', priority: 'p1',
     preconditions: 'Target engine reachable; worker has a network path to it.',
@@ -838,6 +905,7 @@ C.push(
   },
   chaos({
     key: 'TE-CHAOS-POST-STORM-HEALTH', name: 'Worker-critical read endpoints are available',
+    objective: 'Confirm the reads workers depend on (case lookup, environment lookup, worker registry, console poll) all answer.',
     description: 'Independently verifies the case lookup, environment lookup, worker registry and console poll that workers rely on.',
     preconditions: 'Test Engine API is reachable.',
     steps: [
@@ -851,6 +919,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-DUPLICATE-RESULT', name: 'A result reported twice is counted once',
+    objective: 'Report the same result twice and confirm the run counts the case once and still meets its exit criteria.',
     description: 'A worker that times out waiting for the answer reports the same result again. The run must count the case once — one reported, one passed — and still meet its exit criteria.',
     steps: [
       ...ISOLATED, ...QUEUE_AND_CLAIM, UPLOAD,
@@ -865,6 +934,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-DOUBLE-COMPLETE', name: 'Completing an execution twice is harmless',
+    objective: 'Complete an execution twice and confirm the second completion is harmless.',
     description: 'A retried completion call must answer 200 again with the same final status and leave the verdict as it was.',
     steps: [
       ...ISOLATED, ...RUN_ONE_PASS,
@@ -877,6 +947,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-PARTIAL-REPORT', name: 'A worker that stops half way cannot produce a pass',
+    objective: 'Have a worker report only one of two cases and complete as passed; the execution must end failed with the missing case visible.',
     description: 'An execution of two cases where the worker reports only the first and then completes as "passed". The execution must end failed and the run inconclusive, with the missing case visible in the totals.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -893,6 +964,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-STRAY-RESULT', name: 'A result for a case that was not asked for does not satisfy the run',
+    objective: 'Have a worker report a pass for a case the execution did not ask for and confirm the execution still ends failed.',
     description: 'The worker reports a pass for a different case than the execution holds. The expected case is still unreported, so the execution must end failed.',
     steps: [
       ...ISOLATED,
@@ -906,6 +978,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-BLOCKED-RUN', name: 'A run the worker could not start is recorded as blocked, not failed',
+    objective: 'Confirm a run the worker could not start is recorded as blocked (not failed) and its verdict is inconclusive.',
     description: 'When a worker cannot store evidence it does not execute: it reports every case "blocked" and completes as "blocked". The engine must keep that status — it says why the run stopped — and the run verdict is inconclusive, not fail.',
     steps: [
       ...ISOLATED, ...QUEUE_AND_CLAIM,
@@ -918,6 +991,7 @@ C.push(
   }),
   chaos({
     key: 'TE-CHAOS-INTERLEAVED-RUNS', name: 'Two executions in flight do not leak into each other',
+    objective: 'Have two workers report two executions out of order and confirm each ends with its own verdict.',
     description: 'Two workers each hold an execution and report out of order — the second finishes first and passes, the first fails. Each execution must end with its own verdict.',
     steps: [
       ...ISOLATED,
@@ -946,6 +1020,7 @@ const compliance = suiteFactory({ suiteKey: 'te-compliance', testType: 'other' }
 C.push(
   compliance({
     key: 'TE-COMP-GATE-ENFORCED', name: 'The evidence gate is enforced on this deployment',
+    objective: 'Confirm the evidence gate is in enforce mode on this deployment, so a result without evidence is never counted.',
     description: 'A deployment used for release decisions must run with the evidence gate in "enforce" mode: a result without evidence is never counted. The run plan discloses the mode.',
     severity: 'critical', priority: 'p0',
     steps: [POST('/api/v1/runs', { body: { application: 'gavriq-test-engine', environment: 'engine-local', dry_run: true }, expect_json: [{ path: 'data.evidence_gate', equals: 'enforce' }], description: 'gate mode in the run plan' })],
@@ -954,6 +1029,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-GATE-DECISION-RECORDED', name: 'The gate\'s decision is stored with every result',
+    objective: 'Confirm every result records how its evidence was judged, so a verdict can be re-examined later.',
     description: 'For each result the engine records how it judged the evidence — mode, method, which evidence types were acceptable, how many items verified — so a verdict can be re-examined later.',
     preconditions: PRE.isolated,
     steps: [
@@ -965,6 +1041,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-EXIT-CRITERIA-RECORDED', name: 'Exit criteria are evaluated and stored at completion',
+    objective: 'Confirm completing an execution stores what was expected, what was reported, whether evidence was complete and when it was judged.',
     description: 'When an execution completes, the engine writes what it expected, what was reported, whether evidence was complete, what the worker claimed and when it was evaluated. That record is the basis of the verdict.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -976,6 +1053,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-AUDIT-EXECUTIONS', name: 'Queueing and cancelling a run are audited with the actor',
+    objective: 'Queue and cancel an execution as a named person and confirm both actions appear in the audit trail with that person.',
     description: 'Queue an execution as a named actor and cancel it. The audit trail must hold an execution.queue event with the execution key and that actor, and an execution.cancel event for the same execution.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -989,6 +1067,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-AUDIT-RUN-TRIGGER', name: 'A triggered run is audited with its scope',
+    objective: 'Trigger a run and confirm the audit trail records it with its run id, environment and case counts.',
     description: 'A run started through the trigger API must leave a run.trigger event carrying the run id, the environment, and how many cases and executions it queued.',
     preconditions: PRE.isolated,
     steps: [
@@ -1002,6 +1081,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-AUDIT-CONFIG-CHANGES', name: 'Changes to environments and schedules are audited',
+    objective: 'Change an environment policy and create and delete a schedule, and confirm each change is audited.',
     description: 'A change to an environment\'s safety policy and the creation and deletion of a schedule must each leave an audit event naming what changed.',
     preconditions: PRE.sandbox,
     steps: [
@@ -1017,6 +1097,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-AUDIT-APPEND-ONLY', name: 'The audit trail offers no delete or edit',
+    objective: 'Confirm there is no way to delete or edit audit events.',
     description: 'There must be no route that removes or rewrites audit events: DELETE, PUT and PATCH on /api/v1/audit answer 404.',
     steps: [
       DELETE('/api/v1/audit', { body: {}, expected_status: 404, description: 'DELETE' }),
@@ -1029,6 +1110,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-SAFETY-GATE', name: 'A prohibited or unknown safety category is refused at the queue',
+    objective: 'Confirm queueing with a prohibited or unknown safety category is refused with the decision and nothing is queued.',
     description: 'Queueing with a safety category the environment prohibits — or one it does not define — must be answered 403 with the decision, and nothing is queued.',
     severity: 'critical', priority: 'p0', preconditions: PRE.sandbox,
     steps: [
@@ -1042,11 +1124,13 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-DESTRUCTIVE-PROHIBITED', name: 'Destructive database work is prohibited on every seeded environment',
+    objective: 'Confirm every seeded development environment prohibits destructive database work and puts stress tests behind approval.',
     description: 'The development targets of both applications must prohibit destructive_db and put stress behind approval.',
     steps: ['sand-bench-local', 'engine-local'].map((env) => GET(`/api/v1/environments/${env}/policy`, { expect_json: [{ path: 'data.safety_policy.destructive_db', equals: 'prohibited' }, { path: 'data.safety_policy.stress', equals: 'approval_required' }], description: env })),
   }),
   compliance({
     key: 'TE-COMP-SECRETS-BY-REFERENCE', name: 'Environments hold secret references, not secrets',
+    objective: 'Confirm environments store only the name of the variable holding a secret, never the secret itself.',
     description: 'An environment stores the NAME of the worker environment variable that carries a secret, never its value: secret_env entries look like variable names and the password variable itself is empty.',
     severity: 'critical', priority: 'p0',
     steps: [GET('/api/v1/environments/sand-bench-local', { expect_json: [{ path: 'data.config.secret_env.password', matches: '^[A-Z][A-Z0-9_]+$' }, { path: 'data.config.vars.password', equals: '' }], expected_body_not_contains: 'DemoOnly!', description: 'secret reference and empty password variable' })],
@@ -1054,6 +1138,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-VERSIONED-CHANGES', name: 'Every change to a case definition is attributed and summarized',
+    objective: 'Update a case with an author and change summary and confirm both appear in its version history.',
     description: 'An update made with an author and a change summary must appear in the version history with both, above the initial version.',
     preconditions: PRE.sandbox,
     steps: [
@@ -1069,6 +1154,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-RESULT-TRACEABILITY', name: 'A result traces to who asked, what ran it and when',
+    objective: 'From a finished execution\'s report, confirm who requested it, how it was triggered, which worker ran it and which case each result belongs to.',
     description: 'From a finished execution\'s report: who requested it, how it was triggered, which worker ran it, which case each result belongs to and when it finished.',
     preconditions: PRE.isolated,
     steps: [
@@ -1079,6 +1165,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-FINISHED-RUN-IMMUTABLE', name: 'A finished execution no longer accepts results',
+    objective: 'Confirm a finished execution refuses late results, so a failed run cannot be turned into a pass afterwards (currently a known defect: it accepts them).',
     description: 'Once an execution has completed and its verdict was read, a late result must be refused; otherwise a failed run can be turned into a pass after the fact. Probed 2026-09-30: the engine stores the late result (201) and a second completion re-derives the status from it — this case stays red until finished executions are closed.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -1093,6 +1180,7 @@ C.push(
   }),
   compliance({
     key: 'TE-COMP-RETENTION-SETTING', name: 'Run retention is configured within its allowed range',
+    objective: 'Confirm the run retention setting is present, within 1 to 365 days, and records when it was last changed.',
     description: 'Runs and their evidence are deleted after the configured number of days. The setting must be present, between 1 and 365, and carry when it was last changed.',
     severity: 'medium',
     steps: [GET('/api/v1/settings', { expect_json: [{ path: 'data.run_retention_days', min: 1 }, { path: 'data.run_retention_days', max: 365 }, { path: 'data.updated_at', matches: ISO }], description: 'settings' })],
@@ -1108,6 +1196,7 @@ const dr = suiteFactory({ suiteKey: 'te-dr', testType: 'resilience' }, 'drRecove
 C.push(
   dr({
     key: 'TE-DR-ABANDONED-RUN', name: 'A run whose worker died is recovered, not left running',
+    objective: 'Have a worker claim an execution and vanish; confirm that after three silent minutes the engine marks the run as abandoned instead of running forever.',
     description: 'A worker claims an execution and disappears. Three minutes without its heartbeat later, the next worker asking for work must make the engine mark that execution as error with the reason — otherwise the run screen shows "running" forever. The case claims, keeps asking for work for a little over three minutes, then reads the execution back.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated, timeoutSeconds: 30,
     steps: [
@@ -1121,6 +1210,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-STALE-WORKER', name: 'A worker that stops heartbeating drops out of the live count',
+    objective: 'Register a worker that then stops heartbeating and confirm it drops out of the live count within a minute.',
     description: 'Register a worker and stop talking to the engine. Within 60 seconds of its last heartbeat it must no longer be counted as live, so a run triggered then is reported as having no worker instead of waiting on a dead one.',
     preconditions: PRE.isolated, timeoutSeconds: 30,
     steps: [
@@ -1135,6 +1225,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-QUEUE-DURABLE', name: 'A queued run is visible on every read path until it ends',
+    objective: 'Confirm a queued execution shows on every read path (queue list, live poll, run view) and shows as cancelled on all of them once cancelled.',
     description: 'A queued execution is state that must survive until a worker takes it. It must show in the queue list, in the console\'s live poll and as a run that is waiting for a worker — and as cancelled on all three once it is cancelled.',
     preconditions: PRE.isolated,
     steps: [
@@ -1153,6 +1244,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-MULTI-PATH-READ', name: 'One case reads the same on every path',
+    objective: 'Confirm five different ways of reading one case all return the same key and name.',
     description: 'The repository detail, the filtered list, the global search, the console summary and the combined status each read the same case with their own query. All must return the same key and name.',
     steps: [
       GET('/api/v1/test-cases/TE-API-META', { expect_json: [{ path: 'data.name', equals: 'Capability map is published' }], save: { case_id: 'data.id' }, description: 'detail' }),
@@ -1165,6 +1257,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-WRITE-VISIBLE-EVERYWHERE', name: 'A new case is readable on every path at once',
+    objective: 'Create a case and confirm it is immediately visible through the detail, list, search, console summary and combined status.',
     description: 'Create a case and read it straight back through the detail, the list, the search, the console summary and the combined status. A write that one path cannot see yet would make the console disagree with itself.',
     preconditions: PRE.sandbox,
     steps: [
@@ -1184,6 +1277,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-IDEMPOTENT-BUILD-REPORT', name: 'A build reported twice is stored once, with the latest status',
+    objective: 'Post the same build twice and confirm it is stored once, with the latest status winning.',
     description: 'CI retries its report. Posting the same build a second time must update the rows rather than add to them, and a changed status must win.',
     preconditions: PRE.sandbox,
     steps: [
@@ -1197,6 +1291,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-REPEATED-READS-STABLE', name: 'Repeated reads return the same state',
+    objective: 'Read the repository total and catalogue signature twice with nothing written in between and confirm they do not change.',
     description: 'Nothing is written between these reads, so the repository total and the catalogue signature the console watches for changes must not move.',
     severity: 'medium',
     steps: [
@@ -1210,6 +1305,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-EVIDENCE-DURABLE', name: 'Evidence stays retrievable after its run is finished',
+    objective: 'Confirm an evidence file serves the same content while its run is running, after it completes and after the verdict is read.',
     description: 'The artefact must be served with the same content while the execution is running, after it completed and after its verdict was read — evidence outlives the worker that produced it.',
     severity: 'critical', priority: 'p0', preconditions: PRE.isolated,
     steps: [
@@ -1225,6 +1321,7 @@ C.push(
   }),
   dr({
     key: 'TE-DR-SETTINGS-DURABLE', name: 'A saved setting reads back as saved',
+    objective: 'Save the run retention with the value it already has and confirm it reads back unchanged with a fresh change time.',
     description: 'Read the run retention, save the same value, and read it again: the value must be unchanged and the change time must be current. Writes the value it read, so the configuration is not altered.',
     severity: 'medium', preconditions: PRE.sandbox,
     steps: [

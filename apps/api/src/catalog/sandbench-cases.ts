@@ -23,7 +23,8 @@
  * CONSOLE_SIGNIN helpers still duplicated in the sandbench-usecase-flow-cases
  * batch files are a known follow-up, not yet updated.
  */
-import type { CaseDef, SuiteDef, TypeMeta } from './types.js';
+import { tagSource, type CaseDef, type SuiteDef, type TypeMeta } from './types.js';
+import { describeTarget } from './plain-language.js';
 import { SANDBENCH_UPLOAD_CASES, SANDBENCH_UPLOAD_SUITE } from './sandbench-upload-cases.js';
 import { SANDBENCH_UPLOAD_SELENIUM_CASES, SANDBENCH_UPLOAD_SELENIUM_SUITE } from './sandbench-upload-selenium-cases.js';
 import { SANDBENCH_USECASE_FLOW_CASES_BATCH1 } from './sandbench-usecase-flow-cases-batch1.js';
@@ -104,6 +105,7 @@ C.push(
   {
     key: 'SB-SMOKE-API-HEALTH',
     name: 'API health endpoint answers with its role',
+    objective: 'Confirm the application\'s main service is up: when asked how it is, it answers that it is healthy, says it is the API and names the kind of deployment it is running as.',
     description: 'GET {{api}}/health must return 200 with the API\'s own health contract: status "ok", role "api" and a deployment classification. Confirms the application API container is up and serving.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Sand Bench API container deployed and reachable from the worker.',
@@ -115,6 +117,7 @@ C.push(
   {
     key: 'SB-SMOKE-API-READY',
     name: 'API readiness probe reports ready',
+    objective: 'Confirm the application reports itself ready to take traffic, which means its database is in place and reachable.',
     description: 'GET {{api}}/ready must return 200 {"status":"ready"} — the application considers its database migrated and reachable.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API container up; its Postgres reachable and migrated.',
@@ -126,6 +129,7 @@ C.push(
   {
     key: 'SB-SMOKE-TESTHUB-HEALTH',
     name: 'Test hub simulator is healthy and decoupled',
+    objective: 'Confirm the test hub (the stand-in for the outside systems the application talks to) is running and reports that it is independent of the application.',
     description: 'GET {{testhub}}/health must report the external-system simulator (file/HTTP/MQ/Kafka mimic) healthy and architecturally decoupled from the application.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p0',
     preconditions: 'Testhub container deployed.',
@@ -137,6 +141,7 @@ C.push(
   {
     key: 'SB-SMOKE-DBVIEWER-HEALTH',
     name: 'DB viewer is healthy and sees registered apps',
+    objective: 'Confirm the database viewer (the separate read-only window into the application\'s database) is running and sees at least one registered database.',
     description: 'GET {{dbviewer}}/health must return role "dbviewer" and report at least one registered application database — the independent read path used by data-quality cross-checks.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p0',
     preconditions: 'DB viewer container deployed with database registrations.',
@@ -148,6 +153,7 @@ C.push(
   {
     key: 'SB-SMOKE-WEB-INDEX',
     name: 'Web front end serves the portal login page',
+    objective: 'Confirm the web front end serves the sign-in page, so a visitor is asked to sign in before reaching the console.',
     description: 'GET {{web}}/index.html must return the portal login page with its sign-in prompt, proving the deployed web bundle presents authentication before the console.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web container deployed.',
@@ -159,6 +165,7 @@ C.push(
   {
     key: 'SB-SMOKE-CHANNEL-TARGETS',
     name: 'All four delivery channels are published',
+    objective: 'Confirm the application lists all four ways it can deliver messages: file, API, MQ and Kafka.',
     description: 'GET {{api}}/api/v1/channel-targets must list the file, api, mq and kafka channels — the delivery surface the rest of the suite exercises.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API container up.',
@@ -170,6 +177,7 @@ C.push(
   {
     key: 'SB-SMOKE-CAPABILITIES',
     name: 'API publishes its capabilities contract',
+    objective: 'Confirm the application publishes its list of capabilities and its API version, which other systems read before using it.',
     description: 'GET {{api}}/api/v1/capabilities must return 200 with apiVersion "1.0.0" and a non-empty modules list — the contract clients probe before calling anything else. Verified live.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API container up.',
@@ -181,6 +189,7 @@ C.push(
   {
     key: 'SB-SMOKE-RESILIENCE-POSTURE',
     name: 'Resilience posture endpoint answers',
+    objective: 'Confirm the application publishes an honest statement of how resilient it is, including whether its DORA reporting is available.',
     description: 'GET {{api}}/api/v1/resilience must publish the bench\'s own resilience posture (posture + dora.available fields) — verified live: {"posture":"bench-not-production","dora":{"available":true,...}}.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API container up.',
@@ -192,6 +201,7 @@ C.push(
   {
     key: 'SB-SMOKE-SECURITY-HEALTH',
     name: 'Security/encryption subsystem is healthy',
+    objective: 'Confirm the security and encryption subsystem, which protects every masked field, reports itself healthy.',
     description: 'GET {{api}}/api/v1/security/health must report overall "HEALTHY" — the vault-backed encryption subsystem every masked field depends on. Verified live: {"overall":"HEALTHY","vault":"HEALTHY",...}.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API + vault-transit backing configured.',
@@ -203,6 +213,7 @@ C.push(
   {
     key: 'SB-SMOKE-EXTERNAL-SYSTEMS-PUBLIC',
     name: 'Public external-systems catalogue is populated',
+    objective: 'Confirm the public list of external systems contains the seeded stand-in systems (sanctions, core banking, fraud and so on) that the integration tests deliver to.',
     description: 'GET {{api}}/api/v1/external-systems/public must list the seeded dummy external systems (sanctions/core/fraud/reporting/registry) that the whole integration suite dispatches against. Verified live: >= 3 entries.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo external systems seeded.',
@@ -214,6 +225,7 @@ C.push(
   {
     key: 'SB-SMOKE-EVENTS-CATALOG',
     name: 'Domain event catalogue is published',
+    objective: 'Confirm the catalogue of business events is published and includes the sign-in event, which the eventing screens and the audit checks depend on.',
     description: 'GET {{api}}/api/v1/events/catalog must publish the domain event taxonomy (>= 10 event codes at last verification, including biz.session.login.success) — the console\'s eventing configuration screen and this suite\'s audit checks both depend on it existing.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API container up.',
@@ -225,6 +237,7 @@ C.push(
   {
     key: 'SB-SMOKE-WEB-ROOT',
     name: 'Web root path serves the portal login page',
+    objective: 'Confirm the plain web address (without a page name) also lands on the sign-in page.',
     description: 'GET {{web}}/ (root, not /index.html) must resolve to the portal login page with its sign-in prompt — proving nginx\'s root document sends visitors to authentication.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web container deployed.',
@@ -236,6 +249,7 @@ C.push(
   {
     key: 'SB-SMOKE-DBVIEWER-TABLES',
     name: 'DB viewer enumerates the application schema',
+    objective: 'Confirm the database viewer can list the application\'s tables, which every data-quality check reads from.',
     description: 'GET {{dbviewer}}/api/tables must list the registered application\'s tables (>= 20 at last verification, spanning transactional/application/configuration classes) — the schema every data-quality case in this suite reads from.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'DB viewer registered.',
@@ -247,6 +261,7 @@ C.push(
   {
     key: 'SB-SMOKE-SESSION-ROUNDTRIP',
     name: 'Login issues a session that resolves back to the same user',
+    objective: 'Confirm a sign-in really works end to end: after signing in as the demo operator, asking who is signed in returns that same operator.',
     description: 'Sign in as the demo operator, then GET /api/v1/session/me with the returned token: userId and username must be present and username must equal {{username}} — the minimum proof the auth round trip actually works end to end, not just that login returns 200. The product is single-tenant (no tenantSlug in this response any more).',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled.',
@@ -258,6 +273,7 @@ C.push(
   {
     key: 'SB-SMOKE-MESSAGE-TYPES-CATALOG',
     name: 'Message-type catalogue answers for an authenticated operator',
+    objective: 'Confirm a signed-in operator can read the catalogue of message types, the first list the Message Designer and run screens load.',
     description: 'GET {{api}}/api/v1/message-types must return the tenant\'s catalogue (>= 1 entry) — the list every message-designer and run screen loads first.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled; at least one message type seeded.',
@@ -269,6 +285,7 @@ C.push(
   {
     key: 'SB-SMOKE-NAMING-CONVENTIONS',
     name: 'Naming-convention catalogue answers',
+    objective: 'Confirm the naming conventions for rules, datasets and test cases are published, including the pattern for rule names.',
     description: 'GET {{api}}/api/v1/naming-conventions must publish the artefact naming patterns (rule/dataset/test_case/…) the console\'s create-forms suggest from. Verified live: includes a "rule" pattern entry.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -284,13 +301,14 @@ C.push(
 /* ------------------------------------------------------------------------ */
 
 function unitCase(opts: {
-  key: string; name: string; description: string; fieldJson: Record<string, unknown>;
+  key: string; name: string; objective: string; description: string; fieldJson: Record<string, unknown>;
   profile: string; data: string; severity?: CaseDef['severity'];
 }): CaseDef {
   const msgId = `TE-${opts.key.replace(/^SB-/, '')}-{{ts}}-{{rand}}`;
   return {
     key: opts.key,
     name: opts.name,
+    objective: opts.objective,
     description: `${opts.description} The payload is delivered through the test hub's external-system mimic (POST {{testhub}}/hub/to-app, channel "api") and then independently read back from the application's inbound event feed (GET {{api}}/api/v1/inbound/events) — the assertion is on what the application recorded, not on what the sender claims.`,
     suiteKey: 'sb-unit', testType: 'unit', method: 'http', severity: opts.severity || 'high', priority: 'p1',
     preconditions: 'Testhub and API containers up; testhub can reach the application over the deployment network; demo operator identity enabled (the inbound feed is session-protected).',
@@ -320,6 +338,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-NAME-MAXLEN',
     name: 'Debtor name at maxLength 70 survives intact',
+    objective: 'Check a debtor name of exactly the maximum allowed length (70 characters) is stored in full, with nothing cut off.',
     description: 'Boundary check: a debtor name of exactly 70 characters (the pacs.008 DbtrNm maxLength) must be recorded without truncation.',
     fieldJson: { DbtrNm: 'A'.repeat(35) + 'B'.repeat(34) + 'Z' },
     profile: 'boundary',
@@ -328,6 +347,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-NAME-OVERLEN',
     name: 'Debtor name at maxLength+1 is recorded, not silently corrupted',
+    objective: 'Check a debtor name one character over the limit (71) is recorded exactly as it arrived, rather than silently shortened or corrupted.',
     description: 'Boundary+1 check: a 71-character debtor name must not be silently truncated or corrupted by the gateway — whatever validation later rejects it, the recorded event must carry the bytes that arrived.',
     fieldJson: { DbtrNm: 'X'.repeat(71) },
     profile: 'boundary+1',
@@ -336,6 +356,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-IBAN-FORMAT',
     name: 'Creditor IBAN is preserved character-exact',
+    objective: 'Check a valid IBAN is stored character for character, with no spaces removed, no letters changed and no checksum tampering.',
     description: 'A syntactically valid German IBAN in CdtrAcct must be recorded character-exact (no whitespace normalisation, case folding or checksum mangling).',
     fieldJson: { CdtrAcct: { IBAN: 'DE89370400440532013000' } },
     profile: 'format-valid',
@@ -344,6 +365,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-AMOUNT-PRECISION',
     name: 'Instructed amount keeps its decimal precision',
+    objective: 'Check an amount with two decimal places keeps its exact value and is not rounded on the way in.',
     description: 'A string amount with two decimal places ("10000.55") must be recorded with precision intact — a classic float-rounding regression trap.',
     fieldJson: { InstdAmt: '10000.55', Ccy: 'USD' },
     profile: 'precision',
@@ -352,6 +374,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-CCY-CODE',
     name: 'ISO 4217 currency code passes through uppercase',
+    objective: 'Check a three-letter currency code is kept exactly as sent, in upper case.',
     description: 'The three-letter currency code "AUD" must be preserved exactly as sent.',
     fieldJson: { InstdAmt: '250.00', Ccy: 'AUD' },
     profile: 'format-valid',
@@ -361,6 +384,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-UNICODE-NAME',
     name: 'Unicode names (diacritics + CJK) survive unmangled',
+    objective: 'Check a name mixing accented letters, Chinese characters and the euro sign comes back unchanged, proving special characters survive the whole journey.',
     description: 'A creditor name mixing Latin diacritics, CJK and the euro sign must round-trip without mojibake — proving UTF-8 is preserved end to end through hub, transport and event store.',
     fieldJson: { CdtrNm: 'Åsa Ö. Nguyễn 商店 €' },
     profile: 'unicode',
@@ -369,6 +393,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-BIC-FORMAT',
     name: 'Debtor agent BIC11 is preserved character-exact',
+    objective: 'Check an 11-character bank identifier (BIC) is kept exactly, with no change of case and not shortened to 8 characters.',
     description: 'A syntactically valid 11-character BIC (bank + branch code, DEUTDEFFXXX) in DbtrAgt.FinInstnId.BICFI must be recorded exactly — no case-folding, no truncation to BIC8.',
     fieldJson: { DbtrAgt: { FinInstnId: { BICFI: 'DEUTDEFFXXX' } } },
     profile: 'format-valid',
@@ -377,6 +402,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-ADDRESS-LINES-ARRAY',
     name: 'Structured postal address lines survive as an array',
+    objective: 'Check two address lines are stored as two separate lines, in order, rather than merged into one.',
     description: 'PstlAdr.AdrLine is an array field (two address lines); the recorded event must keep both entries, in order, as separate array elements — not flattened or concatenated into one string.',
     fieldJson: { PstlAdr: { AdrLine: ['Level 12, 1 Collins Street', 'Melbourne VIC 3000'] } },
     profile: 'structured',
@@ -385,6 +411,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-ZERO-AMOUNT',
     name: 'Zero-value instructed amount is recorded, not dropped',
+    objective: 'Check an amount of zero (0.00) is recorded as zero and not dropped as if it were missing.',
     description: 'Boundary check: InstdAmt "0.00" is a legitimate (if unusual) instructed amount; a naive falsy-value check would drop or null it. Must be recorded exactly as "0.00".',
     fieldJson: { InstdAmt: '0.00', Ccy: 'EUR' },
     profile: 'boundary-zero',
@@ -393,6 +420,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-NEGATIVE-AMOUNT-SIGN',
     name: 'Negative-signed amount string keeps its sign character',
+    objective: 'Check a negative amount keeps its minus sign through the pipeline.',
     description: 'A deliberately negative-signed amount string ("-100.00", e.g. a reversal/credit adjustment payload) must keep its leading "-" intact through the pipeline — a common sign-stripping bug trap.',
     fieldJson: { InstdAmt: '-100.00', Ccy: 'USD' },
     profile: 'boundary-negative',
@@ -401,6 +429,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-LARGE-AMOUNT',
     name: 'Large nine-figure amount keeps full precision',
+    objective: 'Check a very large nine-figure amount keeps every digit and is not rounded.',
     description: 'A near-maximum instructed amount ("999999999.99", just under the ISO 20022 18-digit decimal cap) must not be rounded, truncated or coerced to a lossy float representation.',
     fieldJson: { InstdAmt: '999999999.99', Ccy: 'GBP' },
     profile: 'boundary-large',
@@ -409,6 +438,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-EMPTY-STRING-FIELD',
     name: 'Empty-string remittance info is preserved, not nulled',
+    objective: 'Check a remittance field sent as deliberately empty text stays empty text, rather than being turned into a missing value.',
     description: 'RmtInf.Ustrd sent as an explicit empty string ("") must be recorded as an empty string, not silently converted to null or omitted from the payload — the console\'s field-presence checks depend on this distinction.',
     fieldJson: { RmtInf: { Ustrd: '' } },
     profile: 'boundary-empty',
@@ -418,6 +448,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-WHITESPACE-PADDING',
     name: 'Leading/trailing whitespace in a name is not trimmed',
+    objective: 'Check a name with spaces at the start and end keeps those spaces; nothing trims them away.',
     description: 'A creditor name with deliberate leading and trailing spaces ("  Padded Name  ") must round-trip byte-exact — silent trimming would corrupt names that legitimately start/end with spaces in some source systems.',
     fieldJson: { CdtrNm: '  Padded Name  ' },
     profile: 'boundary-whitespace',
@@ -427,6 +458,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-PURPOSE-CODE',
     name: 'ISO 20022 purpose code passes through unchanged',
+    objective: 'Check the payment purpose code (for example SALA for salary) passes through unchanged, because rules match on that exact code.',
     description: 'The four-letter external purpose code "SALA" (salary payment) in Purp.Cd must be recorded exactly — downstream rule matching (e.g. payroll detection rules) keys off this literal code.',
     fieldJson: { Purp: { Cd: 'SALA' } },
     profile: 'format-valid',
@@ -436,6 +468,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-SPECIAL-CHARS-REMITTANCE',
     name: 'Reserved/special characters in remittance text are not mangled',
+    objective: 'Check remittance text full of awkward characters (hash, slash, ampersand, angle brackets, quotes) is stored exactly as written, with nothing escaped or stripped.',
     description: 'Unstructured remittance text containing characters that are special in HTML, JSON, SQL and shell contexts ("Invoice #123/45 & Co. <Ref> \'quoted\'") must be recorded byte-exact — proving no layer double-escapes, strips or interprets them.',
     fieldJson: { RmtInf: { Ustrd: "Invoice #123/45 & Co. <Ref> 'quoted'" } },
     profile: 'special-chars',
@@ -444,6 +477,7 @@ C.push(
   unitCase({
     key: 'SB-UNIT-DEBTOR-COUNTRY-CODE',
     name: 'Two-letter debtor country code is preserved',
+    objective: 'Check a two-letter country code is kept as is, not expanded to a country name or changed in case.',
     description: 'Dbtr.PstlAdr.Ctry as a two-letter ISO 3166-1 alpha-2 country code ("AU") must be recorded exactly as sent — no expansion to a full country name, no case change.',
     fieldJson: { Dbtr: { PstlAdr: { Ctry: 'AU' } } },
     profile: 'format-valid',
@@ -461,6 +495,7 @@ function inboundCase(channel: string, label: string): CaseDef {
   return {
     key: `SB-INT-${channel.toUpperCase()}-INBOUND`,
     name: `External ${label} delivery is received and recorded`,
+    objective: `Have an outside system deliver a message over the ${label} channel (through the test hub) and confirm the application records it with the right channel and reference number.`,
     description: `An external system delivers a message over the ${label} channel via the test hub mimic; the application must record the inbound event with the channel and correlation id intact. This is the inbound half of the ${label} integration contract.`,
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: `Testhub and API up; the deployment's ${label} transport path between them configured; demo operator identity enabled (inbound feed is session-protected).`,
@@ -490,6 +525,7 @@ function outboundCase(channel: string, label: string): CaseDef {
   return {
     key: `SB-INT-${channel.toUpperCase()}-OUTBOUND`,
     name: `Application dispatches over ${label} (simulated — bench design)`,
+    objective: `As a signed-in operator, start a message run over the ${label} channel and confirm the application reports the delivery as simulated (this bench never claims a real delivery unless a real ${label} target is connected).`,
     description: `An authenticated operator triggers a generation run over the ${label} channel (POST {{api}}/api/v1/runs) with no connectionId. Verified live against source (apps/api/src/modules/delivery.ts): this bench intentionally never marks a delivery "sent" unless a real broker/endpoint is reachable — with only the seeded dummy stubs configured (no live MQ/Kafka/HTTP target), every channel reports delivery.simulated=1, sent=0. That is the correct, honest contract for a non-production bench (its own /api/v1/resilience posture says exactly this: "Optional companions may fail. The bench stays up."), not a defect — a prior version of this case asserted sent=1, which never holds here and was fixed after live verification. Signs in as the documented demo operator ({{username}}/{{password}}).`,
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: `Demo operator identity enabled ({{username}}/{{password}}); ${label} adapter configured to reach the test hub.`,
@@ -528,6 +564,7 @@ C.push(
   {
     key: 'SB-INT-RUN-DELIVERIES-RECORDED',
     name: 'A multi-message run persists one delivery row per message',
+    objective: 'Check that a run which generates three messages records exactly three delivery entries, one per message.',
     description: 'POST /api/v1/runs with count:3 must generate exactly 3 messages, and GET /api/v1/runs/:id/deliveries must then return exactly 3 delivery rows (total=3, data.length=3) — the join the run-detail screen and this engine\'s reporting depend on. Verified live.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -553,6 +590,7 @@ C.push(
   {
     key: 'SB-INT-RUN-GENERATED-COUNT-EXACT',
     name: 'Requested count and generated count match exactly',
+    objective: 'Check that asking for five messages produces exactly five, no more and no fewer.',
     description: 'A run requesting count:5 must generate exactly 5 messages (generated=5) — off-by-one generation is a classic loop bug this pins down.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -565,6 +603,7 @@ C.push(
   {
     key: 'SB-INT-DUPLICATE-MSGID-BOTH-RECORDED',
     name: 'Two deliveries with the same MsgId are both recorded, not deduplicated',
+    objective: 'Document that delivering the same message identifier twice records both deliveries; the application does not quietly discard the second one as a duplicate.',
     description: 'The same correlation MsgId delivered twice through the hub is accepted both times (202, 202) and both events appear in the inbound feed — verified live: the application does not silently drop the second delivery as a duplicate. Documents real observed idempotency behavior (none at this layer) so downstream reconciliation logic is not built on a false assumption.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub and API up.',
@@ -582,6 +621,7 @@ C.push(
   {
     key: 'SB-INT-DIRECT-INBOUND-POST',
     name: 'Application accepts inbound events posted directly (no testhub hop)',
+    objective: 'Check a signed-in operator can hand an inbound event straight to the application, without going through the test hub, the way a real external system would.',
     description: 'An authenticated operator can POST directly to {{api}}/api/v1/inbound/events (bypassing the testhub mimic entirely) and get 202 {accepted:true} — proving the application\'s own ingestion endpoint is independently callable, the path a real external system would use in production.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up; demo operator identity enabled.',
@@ -593,6 +633,7 @@ C.push(
   {
     key: 'SB-INT-KAFKA-CONNECTIVITY-CHECK-DEGRADES-CLEANLY',
     name: 'Kafka connectivity check reports its own unconfigured state honestly',
+    objective: 'Check the Kafka connection test answers honestly when no Kafka broker is configured, instead of hanging or crashing.',
     description: 'POST /api/v1/external-systems/kafka/connectivity-check must answer 200 with a correlationId and a "produced" boolean, even when SBE_REDPANDA_PROXY is not configured (verified live: produced=false, reason="SBE_REDPANDA_PROXY is not configured -- no broker to check connectivity against"). It must never hang, time out with a 5xx, or crash the request.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -604,6 +645,7 @@ C.push(
   {
     key: 'SB-INT-EXTERNAL-SYSTEM-DUMMY-PING',
     name: 'Dummy external-system ping reaches the test hub stub',
+    objective: 'Check the Test connection action for the seeded sanctions-list system reaches its stand-in in the test hub and reports success.',
     description: 'POST /api/v1/external-systems/ext_sanctions/dummy must forward a synthetic payload to the testhub\'s matching stub and report ok:true — the console\'s "Test connection" button path for the seeded sanctions-list system.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub reachable from the API container; ext_sanctions seeded.',
@@ -615,6 +657,7 @@ C.push(
   {
     key: 'SB-INT-EVENTS-EMIT-DIRECT',
     name: 'Direct event emission produces a full domain event envelope',
+    objective: 'Check that sending a test event by its catalogue code produces a complete event record with an id, class, time and actor.',
     description: 'POST /api/v1/events/emit with a known catalogue code (biz.session.login.success) must synthesize and accept a full domain event with eventId, class, occurredAt and actor populated — used by the eventing configuration screen\'s "send test event" action.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled; event code published in the catalogue.',
@@ -626,6 +669,7 @@ C.push(
   {
     key: 'SB-INT-CHANNEL-FIELD-MATCHES-DELIVERY',
     name: 'Inbound event channel field matches the delivery channel used',
+    objective: 'Check a message delivered over the MQ channel is recorded as an MQ message, not mislabelled as another channel.',
     description: 'A message delivered on the "mq" channel must be recorded with channel="mq" in the inbound feed — not defaulted or mislabelled to another channel. Cross-checks the channel tag survives the hub-to-app hop unchanged.',
     suiteKey: 'sb-integration', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub and API up.',
@@ -651,6 +695,9 @@ function staticScreen(key: string, page: string, title: string, mustText: string
   return {
     key,
     name: loginLanding ? 'Portal landing page displays the login form' : `Static page ${page} renders its real content`,
+    objective: loginLanding
+      ? 'Open the sign-in page in a real browser and confirm the sign-in form is shown before anything else.'
+      : `Open the "${titleFragment}" page in a real browser and confirm its own title and content appear, not merely that the address answers.`,
     description: loginLanding
       ? 'Open {{web}}/index.html and verify the landing page presents the sign-in form before the console.'
       : `Open {{web}}${page} in a real browser and assert the page's own title ("${title}") and a verified content fragment render — not just an HTTP 200.`,
@@ -704,6 +751,7 @@ C.push(
   {
     key: 'SB-SCR-CONSOLE-MOUNT',
     name: 'Operator signs in and the console mounts',
+    objective: 'Open the console in a real browser, sign in as the demo operator through the sign-in gate, and confirm the console appears with its side menu.',
     description: 'Open {{web}}/, sign in through the real gate form as the demo operator, and wait for the console\'s mount signal (#gate gains "hidden"); then the sidebar must render its .opsc-navitem entries. Exercises the same path a person takes on this build.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'critical', priority: 'p0',
     preconditions: 'Web + API containers up; demo operator identity enabled.',
@@ -719,6 +767,7 @@ C.push(
   {
     key: 'SB-SCR-OVERVIEW-HERO',
     name: 'Overview page shows its real hero heading',
+    objective: 'After signing in, confirm the Overview page shows its headline, Good rules survive bad data, so the right landing content is being served.',
     description: 'After signing in and mounting, the Overview hero must read exactly "Good rules survive bad data." — copied verbatim from the deployed page module. Catches a console that mounts but renders the wrong landing content.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
@@ -734,6 +783,7 @@ C.push(
   {
     key: 'SB-SCR-NAV-SECTIONS',
     name: 'Sidebar exposes the core modules',
+    objective: 'After signing in, confirm the side menu offers the Rule Bench, Message Designer and Test Runs modules that every operator workflow starts from.',
     description: 'The mounted console\'s sidebar must contain the Rule Bench, Message Designer and Test Runs modules — the three modules every operator workflow starts from.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
@@ -768,6 +818,7 @@ C.push(
   {
     key: 'SB-UC-CATALOG-PUBLISHED',
     name: 'Use-case catalogue is published and substantial',
+    objective: 'Confirm the full catalogue of use cases is published (well over a hundred), which the use-case editor and this engine\'s traceability links rely on.',
     description: 'GET {{api}}/api/v1/use-cases must be enabled and publish the full catalogue (>= 100 use cases at last verification: 148). This is the contract the use-case editor and the traceability links in this engine depend on.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up with use-case publishing enabled.',
@@ -779,6 +830,7 @@ C.push(
   {
     key: 'SB-UC-OVERVIEW-DEF',
     name: 'UC-overview use case carries actor and goal',
+    objective: 'Confirm the Overview use case definition names its screen, its actor and its goal, so a reviewer can trace the screen back to what it is for.',
     description: 'The published UC-overview definition must include its page binding, actor and goal fields — the minimum a reviewer needs to trace the Overview screen back to its acceptance definition.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Use-case catalogue published.',
@@ -790,6 +842,7 @@ C.push(
   {
     key: 'SB-UC-FIRST-RUN-STRIP',
     name: 'First-run walkthrough strip is published',
+    objective: 'Confirm the first-run walkthrough is published with its lead line and exactly four steps, as the Overview page shows them.',
     description: 'GET {{api}}/api/v1/ux/first-run must publish the operator onboarding strip with its verified lead line ("Good rules survive bad data.") and exactly 4 steps — the walkthrough the Overview page renders.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -801,6 +854,7 @@ C.push(
   {
     key: 'SB-UC-N2-DEMO-SCRIPT',
     name: '90-second N-2 demo script contract holds',
+    objective: 'Confirm the 90-second demo script keeps its promised length and default channel, which the demo page and older clients rely on.',
     description: 'GET {{api}}/api/v1/ux/demo/n2 must keep the 90-second demo walk contract: seconds=90 and default run channel "mq". The demo page and older clients script against these values.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -812,6 +866,7 @@ C.push(
   {
     key: 'SB-UC-GHERKIN-ATTACHED',
     name: 'Use cases publish acceptance structures',
+    objective: 'Confirm published use cases carry their acceptance criteria, main flow and scenario text, so the catalogue can serve as an executable specification.',
     description: 'Published use cases must carry their acceptance scaffolding (acceptanceCriteria, main flow, gherkin fields present on the first entry) so the catalogue is usable as an executable-specification source.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Use-case catalogue published.',
@@ -823,6 +878,7 @@ C.push(
   {
     key: 'SB-UC-ISO-FAMILIES-PUBLISHED',
     name: 'ISO 20022 family catalogue is published with counts',
+    objective: 'Confirm the imported ISO 20022 message families are published with their message and field counts.',
     description: 'GET {{api}}/api/v1/catalog/iso/families must publish the imported message families (pacs at minimum, per the seeded XSD imports) with messageCount and fieldCount per family — the catalogue the schema-import use case and Message Designer both read.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one ISO 20022 XSD family imported (the upload suite seeds pacs).',
@@ -834,6 +890,7 @@ C.push(
   {
     key: 'SB-UC-DESIGNER-TYPES-CATALOGUE',
     name: 'Message Designer type catalogue is populated',
+    objective: 'Confirm the Message Designer has at least one imported message type to offer, each with a code, family and key.',
     description: 'GET {{api}}/api/v1/catalog/designer-types must return the imported message types available to the Message Designer screen (each with code/family/key) — the use case "author a message from an imported schema" depends on this list being non-empty.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one schema imported.',
@@ -845,6 +902,7 @@ C.push(
   {
     key: 'SB-UC-FOUNDATION-COMPANION-HONEST',
     name: 'Optional foundation-catalog companion reports its own state honestly',
+    objective: 'Confirm the optional Foundation Catalog companion describes its own state honestly (not configured, optional) instead of failing or pretending to be fine.',
     description: 'GET {{api}}/api/v1/foundation/status must return 200 and explicitly say whether the optional Foundation Catalog companion is configured (verified live: available=false, configured=false, optional=true, reason="Foundation catalog is optional and not enabled.") — proving optional companions degrade to an honest self-description, not a silent 500 or a misleading "ok".',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -856,6 +914,7 @@ C.push(
   {
     key: 'SB-UC-SESSION-FEATURES-PROFILE',
     name: 'Operator session carries a resolved feature-access profile',
+    objective: 'Confirm a signed-in operator is given a resolved feature-access profile listing the pages they may open.',
     description: 'GET {{api}}/api/v1/session/features must resolve the signed-in operator\'s access profile (maxLevel + a pages list of >= 5 entries) — the contract the console\'s navigation and page-guards read to decide what to show. Verified live: profile "full-use".',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -867,6 +926,7 @@ C.push(
   {
     key: 'SB-UC-FEATURES-PAGES-CATALOGUE',
     name: 'Feature-access page catalogue includes Overview',
+    objective: 'Confirm the catalogue of pages and feature levels is published and includes the Overview page.',
     description: 'GET {{api}}/api/v1/features/pages must publish the full page/feature-level catalogue the admin "Feature access" screen edits, and it must include the "overview" page — the landing use case every operator starts from.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -878,6 +938,7 @@ C.push(
   {
     key: 'SB-UC-LIST-BOXES-PUBLISHED',
     name: 'Reference list-boxes (dropdown source data) are published',
+    objective: 'Confirm the shared dropdown lists (such as source format) that forms are filled from are published.',
     description: 'GET {{api}}/api/v1/list-boxes must publish the shared dropdown/reference lists (e.g. sourceFormat) that schema-import and other forms populate their selects from.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -889,6 +950,7 @@ C.push(
   {
     key: 'SB-UC-ASSURANCE-CHAIN-SHAPE',
     name: 'Assurance-chain traceability contract exposes its stages',
+    objective: 'Confirm the assurance chain publishes its stages from schema through message, dataset, case, suite and run to report.',
     description: 'GET {{api}}/api/v1/assurance/chain must return a data.stages array (schema → message → dataset → case → suite → run → report) — the traceability spine the "Assurance loop" use case (linking a schema all the way to a compliance report) is built on.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -900,6 +962,7 @@ C.push(
   {
     key: 'SB-UC-EVENTS-HEADERS-CONTRACT',
     name: 'Eventing header contract documents the origin/actor headers',
+    objective: 'Confirm the documented request-tracing headers (at least the origin header) are published for external systems to set.',
     description: 'GET {{api}}/api/v1/events/headers must publish the correlation header fields (x-sandbench-origin at minimum) that the "trace a request across gui/api/mq/kafka" use case relies on external systems setting. Verified live: >= 2 documented header fields.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -911,6 +974,7 @@ C.push(
   {
     key: 'SB-UC-SIGNATURE-CAPABILITIES-PUBLISHED',
     name: 'Message-signing capability catalogue is published',
+    objective: 'Confirm the supported message-signing modes and the default mode are published before the screens offer signing.',
     description: 'GET {{api}}/api/v1/catalog/signatures must publish the supported signing modes (verified live: none/xmldsig-bah/jws-detached/hmac) and a default — the "sign a generated message" use case reads this before offering signing options in the UI.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -922,6 +986,7 @@ C.push(
   {
     key: 'SB-UC-DATASETS-CATALOGUE-FOR-TEST-DESIGN',
     name: 'Dataset catalogue is populated for test-design use cases',
+    objective: 'Confirm at least one dataset exists for an operator to pick when building a rule or a run.',
     description: 'GET {{api}}/api/v1/datasets must return >= 1 dataset — the "build a rule/run from a curated dataset" use case depends on at least one dataset existing to pick from.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one dataset seeded.',
@@ -940,6 +1005,7 @@ C.push(
   {
     key: 'SB-REG-HEALTH-CONTRACT',
     name: 'Health contract fields never drift',
+    objective: 'Guard that the health answer keeps its three fields (status, role, classification), which monitoring and this engine key off.',
     description: 'The /health response must keep its three contract fields (status, role, classification) — monitoring, SIT and this engine all key off them.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -951,6 +1017,7 @@ C.push(
   {
     key: 'SB-REG-ERROR-ENVELOPE',
     name: 'Error envelope keeps code + requestId shape',
+    objective: 'Guard that a refused request is answered with the standard error envelope (an error code and a request id), never a raw error dump.',
     description: 'An unauthenticated request to a protected route ({{api}}/api/v1/message-types) must return the standard error envelope: HTTP 401 with error.code and error.requestId, never a raw stack or bare string. Verified live: {"error":{"code":"unauthorized",...,"requestId":"req-…"}}.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -962,6 +1029,7 @@ C.push(
   {
     key: 'SB-REG-CHANNELS-STABLE',
     name: 'Channel catalogue keeps file/api/mq/kafka',
+    objective: 'Guard that the four delivery channels (file, API, MQ, Kafka) all remain available; removing one would break existing run configurations.',
     description: 'The channel-targets catalogue must continue to include all four historical channels; removing one silently breaks existing run configurations.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -973,6 +1041,7 @@ C.push(
   {
     key: 'SB-REG-INBOUND-FEED-SHAPE',
     name: 'Inbound event feed keeps its row shape',
+    objective: 'Guard that rows in the inbound event feed keep their fields (id, time, direction, channel, payload) that the console and other tests read.',
     description: 'Rows in /api/v1/inbound/events must keep the verified shape (id, at, direction, channel, payload) that the console\'s eventing view and this engine\'s round-trip cases parse.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one inbound event exists (any unit/integration case creates one).',
@@ -999,6 +1068,7 @@ C.push(
   {
     key: 'SB-REG-UX-COPY',
     name: 'Operator onboarding copy is unchanged',
+    objective: 'Guard that the onboarding lead line stays exactly Good rules survive bad data, because documentation and demos quote it.',
     description: 'The first-run lead line is product copy that appears in documentation and demos; a silent change is a regression. Must remain exactly "Good rules survive bad data.".',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'API up.',
@@ -1010,6 +1080,7 @@ C.push(
   {
     key: 'SB-REG-CAPABILITIES-MODULES-STABLE',
     name: 'Capabilities module list keeps its core entries',
+    objective: 'Guard that the capability list keeps its core modules (identity, audit, runs, catalogue, rules, schedules) that clients check for.',
     description: 'Clients feature-detect against /api/v1/capabilities\' modules array; removing a module silently breaks them. Must continue to include identity, audit, runs, catalogue, rules and schedules.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1021,6 +1092,7 @@ C.push(
   {
     key: 'SB-REG-MESSAGE-TYPE-ROW-SHAPE',
     name: 'Message-type rows keep their public shape',
+    objective: 'Guard that each message type row keeps its code, family, version, status and field count.',
     description: 'Each /api/v1/message-types row must keep code, family_code, version, status and field_count — the fields the Message Designer\'s list view and this engine\'s own catalogue-driven cases bind to.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one message type exists.',
@@ -1032,6 +1104,7 @@ C.push(
   {
     key: 'SB-REG-SESSION-ME-SHAPE',
     name: 'Session/me identity payload keeps its shape',
+    objective: 'Guard that the signed-in identity answer keeps the fields the console header reads (user id, username, display name, email, admin flag).',
     description: 'GET /api/v1/session/me must keep userId, username, displayName, email and admin — the console\'s header/identity chip and the Configuration > Users admin-only gate both bind to these exact field names. tenantId/tenantSlug/tenantName/isMasterTenant/portal were removed from this response when the product collapsed to one hidden tenant (2026-10-02) and are no longer asserted.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -1043,6 +1116,7 @@ C.push(
   {
     key: 'SB-REG-RUN-RESPONSE-SHAPE',
     name: 'Run-creation response keeps its full shape',
+    objective: 'Guard that starting a run keeps answering with its full set of fields (accepted, status, run id, generated count, delivery and report).',
     description: 'POST /api/v1/runs must keep accepted, status, runId, generated, delivery and report top-level fields — dashboards, this engine\'s run-integration cases, and the console\'s run-detail screen all destructure this exact shape.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -1054,6 +1128,7 @@ C.push(
   {
     key: 'SB-REG-AUDIT-ROW-SHAPE',
     name: 'Audit rows keep actor/action/resource fields',
+    objective: 'Guard that audit rows keep their id, tenant, actor, action and resource type fields.',
     description: 'Audit rows read via /api/v1/audit must keep id, tenant_id, actor_user_id, action and resource_type — the fields the compliance suite\'s audit checks parse.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one audited action has occurred (login does).',
@@ -1065,6 +1140,7 @@ C.push(
   {
     key: 'SB-REG-EVENT-CATALOG-ENTRY-SHAPE',
     name: 'Event catalogue entries keep code/class/action/entity/title',
+    objective: 'Guard that each event catalogue entry keeps its code, class, action, entity and title.',
     description: 'Each entry in /api/v1/events/catalog must keep code, class, action, entity and title — the eventing configuration screen renders directly from these fields.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1076,6 +1152,7 @@ C.push(
   {
     key: 'SB-REG-DATASET-ROW-SHAPE',
     name: 'Dataset rows keep name/message_type_code/row_count',
+    objective: 'Guard that dataset rows keep their id, name, message type, row count and status.',
     description: 'Dataset rows from /api/v1/datasets must keep id, name, message_type_code, row_count and status — the fields the dataset picker on Rule Bench / Test Runs screens binds to.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one dataset seeded.',
@@ -1087,6 +1164,7 @@ C.push(
   {
     key: 'SB-REG-ERROR-ENVELOPE-CONSISTENT-ACROSS-ROUTES',
     name: 'Error envelope shape is identical across unrelated protected routes',
+    objective: 'Guard that three unrelated protected pages, each asked without signing in, refuse with exactly the same error shape, proving one shared sign-in check.',
     description: 'Three unrelated protected routes (message-types, datasets, audit), each hit without a token, must all return the exact same envelope shape (error.code="unauthorized", error.requestId present) — proving the auth guard is one shared middleware, not three divergent implementations.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1102,6 +1180,7 @@ C.push(
   {
     key: 'SB-REG-SCHEMA-ROW-SHAPE',
     name: 'Schema rows keep their public shape',
+    objective: 'Guard that schema rows keep their name, file name, format and status.',
     description: 'Each /api/v1/schemas row must keep name, file_name, format and status — the Import Scheme screen\'s list view and this engine\'s upload suite both bind to this exact shape.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one schema imported.',
@@ -1113,6 +1192,7 @@ C.push(
   {
     key: 'SB-REG-FAMILIES-ROW-SHAPE',
     name: 'Message-family rows keep code/label/description',
+    objective: 'Guard that message family rows keep their code, label and description.',
     description: 'Each /api/v1/families row must keep code, label and description — the family filter on the Message Designer and catalogue screens binds to this exact shape.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'API up.',
@@ -1131,6 +1211,7 @@ C.push(
   {
     key: 'SB-DQ-AUDIT-TRAIL',
     name: 'Audit trail rows are independently visible',
+    objective: 'Look at the audit trail directly in the database (not through the application) and confirm rows exist with an action recorded.',
     description: 'Read audit_events through the DB viewer (not the application\'s own API): rows must exist and expose an action column — proof the application actually writes its audit trail to the database.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'DB viewer registered against the application database.',
@@ -1142,6 +1223,7 @@ C.push(
   {
     key: 'SB-DQ-TESTRUNS-COLUMNS',
     name: 'test_runs table keeps its status column',
+    objective: 'Confirm, directly in the database, that the test runs table has its id and status columns.',
     description: 'The test_runs table read independently through the DB viewer must expose id and status columns — the columns the run-completion cross-check joins on.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'DB viewer registered.',
@@ -1153,6 +1235,7 @@ C.push(
   {
     key: 'SB-DQ-USERS-NORMALISED',
     name: 'User rows carry normalised emails',
+    objective: 'Confirm, directly in the database, that user rows carry a normalised email and a status, with at least one active user.',
     description: 'users read via the DB viewer must expose email_normalised and status columns with at least one active row — the invariant tenancy and login depend on.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo/seed identities imported.',
@@ -1164,6 +1247,7 @@ C.push(
   {
     key: 'SB-DQ-TENANT-PRESENT',
     name: 'The one hidden internal tenant exists and is active',
+    objective: 'Confirm the single hidden tenant that every sign-in belongs to exists in the database and is active.',
     description: 'The product collapsed to a single hidden tenant (db/migrations/046_single_tenant_identity.sql, tenant_default / slug "default") that every login resolves to -- it is never shown in the UI, but it must exist and be active or every authenticated case in this catalog fails to sign in at all. The tenants table must contain this configured slug ({{tenant}}), status active.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Identity migration applied.',
@@ -1175,6 +1259,7 @@ C.push(
   {
     key: 'SB-DQ-PAYLOAD-FIDELITY',
     name: 'Recorded payloads preserve unicode fidelity end-to-end',
+    objective: 'Send a message containing awkward characters (Greek, euro sign, Chinese) through the test hub and confirm the application\'s inbound feed shows exactly those characters.',
     description: 'Send a payload containing a deliberately hostile-to-encodings marker (Ω € 中文 + unique id) through the hub, then confirm the application\'s inbound feed returns those exact characters — a whole-pipeline character-encoding data-quality check.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Testhub and API up.',
@@ -1200,6 +1285,7 @@ C.push(
   {
     key: 'SB-DQ-MESSAGE-TYPES-CATALOGUE-QUALITY',
     name: 'message_types rows carry code, status and field_count',
+    objective: 'Confirm, directly in the database, that message types are real stored rows with a code, status and field count.',
     description: 'Read message_types independently via the DB viewer: rows must expose code/status/field_count columns and at least one row — proving the message-type catalogue is real persisted data, not an API-layer mock.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'DB viewer registered; at least one message type imported.',
@@ -1211,6 +1297,7 @@ C.push(
   {
     key: 'SB-DQ-SCHEMAS-CHECKSUM-PRESENT',
     name: 'schemas rows carry a content checksum',
+    objective: 'Confirm, directly in the database, that schema rows carry a content checksum, which the duplicate-upload check depends on.',
     description: 'Read schemas independently via the DB viewer: rows must expose checksum_sha256 — the field the upload flow\'s duplicate-content rejection depends on. A missing checksum means dedup silently stops working.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one schema imported.',
@@ -1222,6 +1309,7 @@ C.push(
   {
     key: 'SB-DQ-DETECTION-RULES-SEVERITY-SET',
     name: 'detection_rules carry a category and severity',
+    objective: 'Confirm, directly in the database, that detection rules carry a category and severity, with at least one fraud rule.',
     description: 'Read detection_rules independently via the DB viewer: rows must expose category and severity columns, with at least one row classified "fraud" — the field Rule Bench\'s severity badges and this engine\'s own rule-driven test generation would key off.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Detection rules seeded.',
@@ -1233,6 +1321,7 @@ C.push(
   {
     key: 'SB-DQ-DATASETS-ROW-COUNT-POSITIVE',
     name: 'Seeded datasets report a real row_count',
+    objective: 'Confirm, directly in the database, that at least one dataset has real rows behind it rather than being an empty placeholder.',
     description: 'Read datasets independently via the DB viewer: the row_count column must be present and at least one dataset must have row_count > 0 — proving datasets are backed by real generated rows, not empty placeholders.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one dataset seeded with rows.',
@@ -1244,6 +1333,7 @@ C.push(
   {
     key: 'SB-DQ-RUN-SCHEDULES-CADENCE-COLUMN',
     name: 'run_schedules carry a cadence and enabled flag',
+    objective: 'Confirm, directly in the database, that schedules carry a cadence and an enabled flag.',
     description: 'Read run_schedules independently via the DB viewer: rows must expose cadence and enabled columns — the fields the Schedules screen and any cron-triggered run depend on. Verified live: 63 seeded schedule rows.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Schedules seeded.',
@@ -1255,6 +1345,7 @@ C.push(
   {
     key: 'SB-DQ-DOMAIN-EVENT-OUTBOX-OUTCOME',
     name: 'Domain event outbox rows carry an outcome',
+    objective: 'Confirm, directly in the database, that the event outbox rows carry an event code and an outcome.',
     description: 'Read domain_event_outbox independently via the DB viewer: rows must expose event_code and outcome columns — the durable record behind every business/technical event this bench emits. Verified live: 119+ seeded outbox rows.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one domain event emitted (any authenticated request emits one).',
@@ -1266,6 +1357,7 @@ C.push(
   {
     key: 'SB-DQ-SCHEMA-MIGRATIONS-APPLIED',
     name: 'Every shipped schema migration has been applied',
+    objective: 'Confirm, directly in the database, that at least fifty schema migrations have been applied, so the deployment is not running on a half-migrated database.',
     description: 'Read schema_migrations independently via the DB viewer: at least 50 migration files must be recorded applied (verified live: 52) — the minimum evidence that this deployment\'s database is not running against a stale, partially-migrated schema.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'Database migrated at deploy time.',
@@ -1277,6 +1369,7 @@ C.push(
   {
     key: 'SB-DQ-JOBS-KIND-STATUS',
     name: 'Background jobs table carries kind and status',
+    objective: 'Confirm, directly in the database, that background jobs exist with a kind and a status.',
     description: 'Read jobs independently via the DB viewer: rows must expose kind and status columns with at least one row — the queue-backed jobs (e.g. sit.smoke probes) this deployment schedules.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one background job has run.',
@@ -1288,6 +1381,7 @@ C.push(
   {
     key: 'SB-DQ-TENANT-MEMBERSHIP-LINKED',
     name: 'Tenant memberships link users to their tenant',
+    objective: 'Confirm, directly in the database, that tenant memberships link users to their tenant with a status.',
     description: 'Read tenant_memberships independently via the DB viewer: rows must expose tenant_id and user_id and status — the join table every permission check in the application resolves through. Verified live: 17 seeded memberships.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo identities imported.',
@@ -1299,6 +1393,7 @@ C.push(
   {
     key: 'SB-DQ-DETECTION-RULES-CONDITION-JSON',
     name: 'detection_rules carry their evaluatable condition',
+    objective: 'Confirm, directly in the database, that detection rules carry their actual condition logic, not just a label.',
     description: 'Read detection_rules independently via the DB viewer: rows must expose condition_json — the actual evaluatable rule logic — alongside status. A rule row with a category/severity but no condition_json would be display-only, not a real executable rule.',
     suiteKey: 'sb-data-quality', testType: 'database', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Detection rules seeded.',
@@ -1318,6 +1413,9 @@ function seleniumStatic(key: string, page: string, mustText: string, name: strin
   return {
     key,
     name: loginLanding && key === 'TC-SB-SMOKE-HOME' ? 'Portal login page loads in Selenium' : name,
+    objective: loginLanding
+      ? 'Using the Selenium browser driver, open the sign-in page and confirm the sign-in prompt and its controls are visible.'
+      : `Using the Selenium browser driver, open the ${page} page and confirm the expected text "${mustText}" is shown.`,
     description: loginLanding
       ? `Selenium opens {{web}}${page} and verifies the portal sign-in prompt and visible login controls.`
       : `Selenium WebDriver (real Chrome) opens {{web}}${page} and asserts the verified content fragment "${mustText}" renders. Baseline coverage proving the Selenium runner + deployed web tier work together.`,
@@ -1349,6 +1447,7 @@ C.push(
   {
     key: 'TC-SB-CONSOLE-MOUNT',
     name: 'Baseline: operator signs in and console mounts under Selenium',
+    objective: 'Using the Selenium browser driver, open the console, sign in as the demo operator and confirm the side menu appears.',
     description: 'Selenium opens {{web}}/, signs in through the real gate form as the demo operator, waits for the mount signal (#gate hidden), then asserts the sidebar rendered nav items. The Selenium twin of SB-SCR-CONSOLE-MOUNT.',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'selenium', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled; Chrome available to worker.',
@@ -1364,6 +1463,7 @@ C.push(
   {
     key: 'TC-SB-NAV-MODULES',
     name: 'Baseline: core modules visible in Selenium',
+    objective: 'Using the Selenium browser driver, confirm the side menu shows the Rule Bench and Test Runs modules after signing in.',
     description: 'After signing in and mounting, the sidebar must show the Rule Bench and Test Runs modules (Selenium-read DOM text).',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'selenium', severity: 'high', priority: 'p1',
     preconditions: 'Web/API reachable; demo operator identity enabled. This case performs its own sign-in.',
@@ -1380,6 +1480,7 @@ C.push(
   {
     key: 'TC-SB-HEALTH',
     name: 'API: health endpoint (baseline)',
+    objective: 'Baseline check that the application\'s health check answers OK.',
     description: 'GET {{api}}/health returns 200 — the HTTP baseline case kept alongside the Selenium ones so the suite proves both runner families.',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -1399,6 +1500,7 @@ C.push(
   {
     key: 'TC-SB-CAPABILITIES',
     name: 'API: capabilities endpoint (baseline)',
+    objective: 'Baseline check that the application publishes its capabilities with a non-empty module list.',
     description: 'GET {{api}}/api/v1/capabilities returns 200 with a populated modules list — a second HTTP baseline alongside the Selenium checks, proving the API surface is up from this suite\'s own vantage point.',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1410,6 +1512,7 @@ C.push(
   {
     key: 'TC-SB-EXTERNAL-SYSTEMS-PUBLIC',
     name: 'API: public external systems (baseline)',
+    objective: 'Baseline check that the public list of external systems answers with the seeded stand-in systems.',
     description: 'GET {{api}}/api/v1/external-systems/public returns 200 with the seeded dummy systems — a third HTTP baseline proving the integration surface this suite\'s console checks sit alongside is reachable too.',
     suiteKey: 'sb-selenium-baseline', testType: 'selenium-baseline', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo external systems seeded.',
@@ -1425,12 +1528,18 @@ C.push(
 /* ------------------------------------------------------------------------ */
 
 function perfCase(opts: {
-  key: string; name: string; urlVar: string; requests: number; concurrency: number;
+  key: string; name: string; objective?: string; urlVar: string; requests: number; concurrency: number;
   p95: number; errPct: number; suite?: string; severity?: CaseDef['severity']; timeout?: number; description: string;
 }): CaseDef {
+  const soak = (opts.suite || 'sb-performance') === 'sb-endurance';
+  const target = describeTarget(opts.urlVar);
+  const limit = `95 out of 100 answers arrive within ${opts.p95 >= 1000 ? opts.p95 / 1000 + ' seconds' : opts.p95 + ' ms'} and no more than ${opts.errPct}% fail`;
   return {
     key: opts.key,
     name: opts.name,
+    objective: opts.objective || (soak
+      ? `Keep a steady stream of ${opts.requests} requests (${opts.concurrency} at a time) flowing to ${target} and confirm the deployment stays responsive the whole time: ${limit}.`
+      : `Measure how quickly ${target} answers under a burst of ${opts.requests} requests, ${opts.concurrency} at a time: ${limit}.`),
     description: `${opts.description} Profile: ${opts.requests} requests at concurrency ${opts.concurrency} against ${opts.urlVar}. SLA: p95 <= ${opts.p95}ms, error rate <= ${opts.errPct}%. The runner records min/avg/p50/p95/p99 latency, throughput and error rate as metrics on the result.`,
     suiteKey: opts.suite || 'sb-performance', testType: 'performance', method: 'performance',
     severity: opts.severity || 'high', priority: 'p1',
@@ -1458,6 +1567,7 @@ C.push(
   {
     key: 'SB-END-POST-SOAK-HEALTH',
     name: 'Deployment health and portal availability',
+    objective: 'Confirm the health checks and the sign-in page all answer, as a stand-alone check of deployment availability.',
     description: 'Independently verifies health endpoints and portal availability without depending on other cases in the endurance suite.',
     suiteKey: 'sb-endurance', testType: 'performance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API, testhub, DB viewer and web portal targets are reachable.',
@@ -1493,6 +1603,7 @@ C.push(
   {
     key: 'SB-END-EXTENDED-SURFACES-HEALTHY',
     name: 'Extended API surfaces are healthy',
+    objective: 'Confirm the capability list, resilience posture and security health all answer, independently of any other test.',
     description: 'Independently verifies the API capabilities, resilience posture and security health contracts; no soak or other case must run first.',
     suiteKey: 'sb-endurance', testType: 'performance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench API is reachable and its security subsystem is configured.',
@@ -1515,6 +1626,7 @@ C.push(
   {
     key: 'SB-RU-CLASSIFICATION-PUBLISHED',
     name: 'Deployment classification is machine-readable',
+    objective: 'Guard that the health answer always names the deployment classification, because upgrade tooling decides its guardrails from it.',
     description: 'Upgrade tooling decides guardrails from /health\'s classification field; it must exist and be non-empty on every version.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1526,6 +1638,7 @@ C.push(
   {
     key: 'SB-RU-N2-WALK-COMPAT',
     name: 'N-2 demo walk still scriptable',
+    objective: 'Guard that the 90-second demo walk keeps the contract an older client scripts against.',
     description: 'The /api/v1/ux/demo/n2 contract (90 seconds, default channel mq) is what an N-2 client scripts against; it must hold across upgrades.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1537,6 +1650,7 @@ C.push(
   {
     key: 'SB-RU-LEGACY-FILE-CHANNEL',
     name: 'Legacy file channel not dropped by upgrade',
+    objective: 'Guard that the oldest delivery channel, file, is never dropped by an upgrade.',
     description: 'The oldest integration channel ("file") must remain in channel-targets — removing it breaks pre-API clients mid-upgrade.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1548,6 +1662,7 @@ C.push(
   {
     key: 'SB-RU-TIERS-CONSISTENT',
     name: 'API and web tiers deployed consistently',
+    objective: 'Guard that both halves of the deployment, the API and the web tier, answer at the same time, as a torn upgrade would leave one behind.',
     description: 'Both halves of the deployment must answer at once (API health + web login page) — a torn rolling upgrade leaves one tier down or serving a stale page.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Both containers deployed.',
@@ -1562,6 +1677,7 @@ C.push(
   {
     key: 'SB-RU-ETAG-CONFLICT-CODE-STABLE',
     name: 'Published ETag-conflict status code is stable',
+    objective: 'Guard that the published code for an editing conflict stays the same, so older clients keep handling conflicts correctly.',
     description: 'capabilities.etagConflicts documents which HTTP status old clients should treat as an optimistic-concurrency conflict; it must remain 412 — a silent change would break every client\'s conflict-retry logic without a version bump.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1573,6 +1689,7 @@ C.push(
   {
     key: 'SB-RU-AUTH-METHODS-BACKWARD-COMPATIBLE',
     name: 'bearer-jwt auth method is never dropped',
+    objective: 'Guard that bearer-token sign-in remains supported, as every older client authenticates that way.',
     description: 'capabilities.authMethods must continue to list "bearer-jwt" — every N-2 client authenticates this way; dropping it mid-upgrade would lock out anything not yet updated to a newer auth scheme.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -1584,6 +1701,7 @@ C.push(
   {
     key: 'SB-RU-FEATURES-OVERVIEW-PAGE-STABLE',
     name: 'Overview page id is never renamed',
+    objective: 'Guard that the Overview page keeps its identifier, which older console builds have hard-coded as the landing page.',
     description: 'The features/pages catalogue must keep the page id "overview" — an N-2 console build\'s hardcoded landing-page id would silently break navigation if this were renamed without a migration path.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -1595,6 +1713,7 @@ C.push(
   {
     key: 'SB-RU-NAMING-PATTERN-RULE-STABLE',
     name: 'Rule naming-convention pattern is unchanged',
+    objective: 'Guard that the rule naming pattern is unchanged, as client-side id generators depend on it.',
     description: 'The naming-conventions entry for artefact "rule" must still be pattern "RUL-{family}-{purpose}-{seq}" — client-side ID generators and any external system that pre-validates rule IDs depend on this exact pattern string.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -1606,6 +1725,7 @@ C.push(
   {
     key: 'SB-RU-LOGIN-EVENT-CODE-STABLE',
     name: 'Login success event code is never renamed',
+    objective: 'Guard that the sign-in success event keeps its code, as external monitoring is configured against it.',
     description: 'events/catalog must keep the code "biz.session.login.success" — any external SIEM/eventing integration configured against this literal code would silently stop matching if it were renamed.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1617,6 +1737,7 @@ C.push(
   {
     key: 'SB-RU-SENSITIVE-DATA-POLICY-NAME-STABLE',
     name: 'Sensitive-data masking policy name is unchanged',
+    objective: 'Guard that the sensitive-data masking policy keeps its name, which compliance tooling references.',
     description: 'security/policies must keep the policy named "SAND_BENCH_SENSITIVE_DATA" — compliance tooling and this engine\'s own masking-evidence case reference it by exact name.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -1628,6 +1749,7 @@ C.push(
   {
     key: 'SB-RU-SOURCE-FORMAT-LISTBOX-STABLE',
     name: 'Import source-format list-box key is unchanged',
+    objective: 'Guard that the source-format dropdown list keeps its key, which the Import Schema screen depends on.',
     description: 'list-boxes must keep a "sourceFormat" entry — the Import Schema screen\'s format dropdown (and this engine\'s upload suite) both depend on this exact key.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -1639,6 +1761,7 @@ C.push(
   {
     key: 'SB-RU-EXTERNAL-SYSTEMS-PUBLIC-SHAPE-STABLE',
     name: 'Public external-systems row shape is unchanged',
+    objective: 'Guard that each public external-system row keeps its id, name and channel, which older integration clients parse.',
     description: 'Each external-systems/public row must keep id, name and channel — an N-2 integration client parses exactly these three fields to route dummy connectivity tests.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1650,6 +1773,7 @@ C.push(
   {
     key: 'SB-RU-MESSAGE-TYPE-FIELDS-ENDPOINT-STABLE',
     name: 'Per-message-type field listing endpoint still resolves',
+    objective: 'Guard that the field listing for a message type still answers with field paths, as the Message Designer\'s field picker calls it.',
     description: 'GET /api/v1/message-types/pain.001.001.09/fields must keep resolving with xpath-bearing field rows — the Message Designer\'s field-picker and any pre-generated client-side form both call this exact path/shape.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'pain.001.001.09 message type present in the catalogue.',
@@ -1661,6 +1785,7 @@ C.push(
   {
     key: 'SB-RU-SCHEMAS-ENDPOINT-STABLE',
     name: 'Schema list endpoint still resolves for an N-2 client',
+    objective: 'Guard that the schema list still answers for an older Import Scheme screen build.',
     description: 'GET /api/v1/schemas must keep resolving with a data array — an older Import Scheme screen build that lists previously imported schemas by this exact path must keep working across an upgrade.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'At least one schema imported.',
@@ -1679,6 +1804,7 @@ C.push(
   {
     key: 'SB-NF-MALFORMED-JSON',
     name: 'Malformed JSON body fails cleanly (400, enveloped)',
+    objective: 'Send a broken request body to the sign-in and check it is rejected cleanly with an error envelope, never a crash or a hang.',
     description: 'POST a syntactically broken JSON body ("{not json") to the login route: the API must answer 400 with its error envelope (requestId present), never a 500 or a hang. Verified live: 400 with envelope.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1690,6 +1816,7 @@ C.push(
   {
     key: 'SB-NF-VALIDATION-ENVELOPE',
     name: 'Missing required fields produce a 422 validation envelope',
+    objective: 'Send an empty sign-in request and check it is refused with a validation message naming the missing fields.',
     description: 'POST an empty JSON object to login: the API must return 422 validation_failed naming the missing fields — verified live: {"error":{"code":"validation_failed","message":"username and password are required",...}}.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1701,6 +1828,7 @@ C.push(
   {
     key: 'SB-NF-METHOD-MISUSE',
     name: 'Unsupported method on health fails cleanly',
+    objective: 'Try to delete the health check and confirm the application refuses cleanly rather than failing internally.',
     description: 'DELETE {{api}}/health must be rejected with a clean 4xx (404/405 — verified live: 404), never a 500.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1712,6 +1840,7 @@ C.push(
   {
     key: 'SB-NF-LARGE-PAYLOAD',
     name: 'Oversized single payload handled without destabilising',
+    objective: 'Send one very large message (about 120 KB) and confirm it is either accepted or rejected cleanly, and the application stays healthy afterwards.',
     description: 'One ~120KB JSON payload through the hub: the pipeline must either accept (202) or reject cleanly (400/413) — and the API must remain healthy immediately afterwards. Single request, bounded size: robustness, not load testing.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub and API up.',
@@ -1731,6 +1860,7 @@ C.push(
   {
     key: 'SB-NF-UNKNOWN-ROUTE',
     name: 'Unknown API route returns enveloped 404',
+    objective: 'Ask for an address that does not exist and confirm the answer is a clean not-found in the standard format, not an error page.',
     description: 'GET a route that does not exist under /api/v1: must be a JSON 404, content-type application/json — no HTML error page, no stack trace.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1742,6 +1872,7 @@ C.push(
   {
     key: 'SB-NF-UNSUPPORTED-CONTENT-TYPE',
     name: 'Non-JSON content-type on a JSON route fails cleanly',
+    objective: 'Send the sign-in request as plain text instead of structured data and confirm it is refused with a clean validation message.',
     description: 'POST to login with Content-Type: text/plain (body not parsed as JSON) must still return a clean validation envelope (verified live: 422 validation_failed), never a 500 from an unhandled parse path.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1753,6 +1884,7 @@ C.push(
   {
     key: 'SB-NF-NEGATIVE-PAGE-SIZE-CLAMPED',
     name: 'Negative page_size is clamped, not crashed on',
+    objective: 'Ask the database viewer for a negative page size and confirm it quietly uses a sensible minimum instead of failing.',
     description: 'GET the DB viewer with page_size=-5 must not 500 or return a negative/zero-length page — verified live: clamped to page_size=1, 200 OK. Input sanitization at the query-param boundary.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'DB viewer up.',
@@ -1764,6 +1896,7 @@ C.push(
   {
     key: 'SB-NF-HUGE-QUERY-STRING',
     name: 'Oversized query-string parameter does not destabilise the API',
+    objective: 'Send a request with a 5,000-character parameter and confirm it is handled or refused cleanly, never hanging.',
     description: 'A GET with a single 5,000-character query-parameter value must be handled cleanly (200, verified live) or rejected with a clean 4xx — never a hang or 500. A cheap DoS-shaped input robustness check.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -1775,6 +1908,7 @@ C.push(
   {
     key: 'SB-NF-INSUFFICIENT-PERMISSION-403-NOT-500',
     name: 'Valid session with insufficient privilege gets a clean 403',
+    objective: 'Confirm a signed-in operator who is not an administrator is refused cleanly from the admin user list.',
     description: 'An authenticated operator (not an admin) calling GET /api/v1/admin/users must get a clean 403 forbidden — verified live — proving the permission check fails closed with a proper envelope rather than throwing unhandled.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled (non-admin role).',
@@ -1786,6 +1920,7 @@ C.push(
   {
     key: 'SB-NF-MALFORMED-BEARER-SCHEME',
     name: 'Authorization header missing the Bearer scheme is rejected cleanly',
+    objective: 'Send a token without the Bearer prefix and confirm it is refused as not signed in, rather than accepted or crashing.',
     description: 'A raw token sent without the "Bearer " prefix in the Authorization header must be rejected 401 — verified live — never treated as an implicit bearer token nor crash the header parser.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1797,6 +1932,7 @@ C.push(
   {
     key: 'SB-NF-ARRAY-BODY-INSTEAD-OF-OBJECT',
     name: 'JSON array body on an object-shaped route fails cleanly',
+    objective: 'Send a list where the sign-in expects a form and confirm it is refused with a clean validation message.',
     description: 'POST a JSON array ([1,2,3]) to login, which expects an object body: must return a clean validation envelope (verified live: 422 validation_failed, "username and password are required") — never a 500 from destructuring an array as an object.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1808,6 +1944,7 @@ C.push(
   {
     key: 'SB-NF-NONEXISTENT-RESOURCE-404',
     name: 'GET by a nonexistent resource id returns a clean 404',
+    objective: 'Ask for a schema by an id that does not exist and confirm the answer is a clean not-found.',
     description: 'GET /api/v1/schemas/does-not-exist-id must return a clean 404, never a 500 from an unhandled null-row lookup.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -1819,6 +1956,7 @@ C.push(
   {
     key: 'SB-NF-MISSING-IF-MATCH-PRECONDITION',
     name: 'PUT without the required If-Match header fails cleanly',
+    objective: 'Try to update a message type without the required version tag and confirm the update is refused with a clear precondition message.',
     description: 'PUT /api/v1/message-types/:code without an If-Match header must return a clean 412 precondition_failed envelope (verified live: {"error":{"code":"precondition_failed","message":"If-Match is required",...}}) — optimistic-concurrency enforcement fails closed with a proper error, not a silent overwrite or a 500.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -1830,6 +1968,7 @@ C.push(
   {
     key: 'SB-NF-UNSUPPORTED-METHOD-ON-COLLECTION',
     name: 'PUT on a collection-only route fails cleanly',
+    objective: 'Try an unsupported action on the datasets list and confirm it is refused cleanly.',
     description: 'PUT /api/v1/datasets (a route that only supports GET/POST, not a bare PUT on the collection) must return a clean 404/405, never a 500 from routing into an unhandled verb.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -1841,6 +1980,7 @@ C.push(
   {
     key: 'SB-NF-EMPTY-BEARER-TOKEN-VALUE',
     name: 'Empty bearer token value is rejected cleanly',
+    objective: 'Send an empty token and confirm it is refused as not signed in.',
     description: 'An Authorization header of "Bearer " with no token value after it must be rejected 401 — verified live — never treated as an empty-but-valid credential nor crash the token parser on an empty string.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1859,6 +1999,7 @@ C.push(
   {
     key: 'SB-VS-ENV-FILE',
     name: 'No environment file disclosure on web tier',
+    objective: 'Make sure the environment configuration file cannot be read through the web tier (no database addresses, passwords or secrets in the answer).',
     description: 'GET {{web}}/.env — whatever the router does with the path (the SPA serves its shell), the response must never contain environment-file markers (DATABASE_URL=, PASSWORD=, SECRET). Verified live: the SPA fallback serves index.html, so the assertion is on content, not status.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
@@ -1873,6 +2014,7 @@ C.push(
   {
     key: 'SB-VS-GIT-DIR',
     name: 'No git metadata disclosure on web tier',
+    objective: 'Make sure the source-control metadata folder cannot be read through the web tier.',
     description: 'GET {{web}}/.git/config must never return git config content ("[core]" / "repositoryformatversion").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
@@ -1884,6 +2026,7 @@ C.push(
   {
     key: 'SB-VS-TRAVERSAL',
     name: 'Encoded path traversal is rejected',
+    objective: 'Make sure a path-traversal attempt to read system files is rejected and never returns their content.',
     description: 'GET {{web}}/..%2f..%2f..%2fetc%2fpasswd must be rejected (verified live: 400) and must never contain passwd-file content ("root:").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
@@ -1895,6 +2038,7 @@ C.push(
   {
     key: 'SB-VS-SERVER-HEADER',
     name: 'API does not advertise server software/version',
+    objective: 'Make sure the application does not advertise its server software or version in its answers.',
     description: 'The API\'s responses must not carry a version-revealing Server header nor any X-Powered-By header (OWASP API8 security misconfiguration). Verified live: both absent.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1906,6 +2050,7 @@ C.push(
   {
     key: 'SB-VS-JSON-CONTENT-TYPE',
     name: 'API errors are typed application/json',
+    objective: 'Make sure error answers are labelled as structured data, so browsers cannot misinterpret them.',
     description: 'Error responses (401 on a protected route) must declare content-type application/json — an untyped error body invites content-sniffing issues.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1917,6 +2062,7 @@ C.push(
   {
     key: 'SB-VS-CORS-NOT-REFLECTED',
     name: 'API does not reflect an arbitrary Origin into CORS headers',
+    objective: 'Make sure the application does not grant a foreign website permission to read its answers.',
     description: 'A request with Origin: http://evil.example.com must not get that origin reflected back in Access-Control-Allow-Origin — verified live: the header is absent entirely. A permissive/reflective CORS policy would let any site read authenticated responses via a victim\'s browser.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -1928,6 +2074,7 @@ C.push(
   {
     key: 'SB-VS-NO-SESSION-COOKIE-ISSUED',
     name: 'Login does not set a session cookie',
+    objective: 'Make sure signing in does not set a browser cookie; the session is a token the client holds, which protects against cross-site request forgery.',
     description: 'POST /api/v1/session/login must not set a Set-Cookie header — verified live — the session is a bearer token the client stores itself, not an ambient cookie the browser auto-attaches to every request (which would be CSRF-exposed).',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1939,6 +2086,7 @@ C.push(
   {
     key: 'SB-VS-API-FRAME-OPTIONS-PRESENT',
     name: 'API responses carry X-Frame-Options',
+    objective: 'Make sure the API answers carry the header that stops them being embedded in another site\'s frame.',
     description: 'GET {{api}}/health must include X-Frame-Options (verified live: DENY) — clickjacking hardening on the API surface, not just the web console.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -1950,6 +2098,7 @@ C.push(
   {
     key: 'SB-VS-WEB-SECURITY-HEADERS-PRESENT',
     name: 'Web tier carries the core security header set',
+    objective: 'Make sure the web tier sends the basic security headers (no content sniffing, no framing by other sites, a referrer policy).',
     description: 'The web tier must serve X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN and Referrer-Policy — verified live on the root document — the baseline header set OWASP recommends for any HTML-serving surface.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
@@ -1961,6 +2110,7 @@ C.push(
   {
     key: 'SB-VS-PACKAGE-JSON-NOT-LEAKED',
     name: 'No package.json source disclosure on web tier',
+    objective: 'Make sure the dependency manifest cannot be read through the web tier.',
     description: 'GET {{web}}/package.json falls through to the SPA shell (verified live: 200 text/html, not the real manifest) — the response must never contain dependency-manifest markers ("dependencies", "\"name\":\"").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
@@ -1972,6 +2122,7 @@ C.push(
   {
     key: 'SB-VS-DOCKER-COMPOSE-NOT-LEAKED',
     name: 'No docker-compose source disclosure on web tier',
+    objective: 'Make sure the container deployment file cannot be read through the web tier.',
     description: 'GET {{web}}/docker-compose.yml must never return real compose-file content ("services:" mapping to container definitions) — infrastructure topology must not be disclosable through the web tier.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Web tier deployed.',
@@ -1983,6 +2134,7 @@ C.push(
   {
     key: 'SB-VS-BACKUP-FILE-NOT-LEAKED',
     name: 'No .bak backup-file disclosure on web tier',
+    objective: 'Make sure a backup copy of the home page is not served, as such copies can leak pre-build source.',
     description: 'GET {{web}}/index.html.bak must never return raw unminified source markers distinct from the real deployed shell — a common editor/deploy artefact that leaks pre-build source.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
@@ -1994,6 +2146,7 @@ C.push(
   {
     key: 'SB-VS-DBVIEWER-READ-ONLY-SURFACE',
     name: 'DB viewer exposes no write route',
+    objective: 'Make sure the database viewer has no way to write data; its only job is to read.',
     description: 'POST {{dbviewer}}/api/rows must not exist (verified live: 404 — no route registered) — the DB viewer is architecturally read-only, with no write endpoint to even authenticate against.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'DB viewer up.',
@@ -2005,6 +2158,7 @@ C.push(
   {
     key: 'SB-VS-KAFKA-DESK-CONNECTION-SECRET-NOT-LEAKED',
     name: 'External-system list does not leak connection secrets',
+    objective: 'Make sure the public list of external systems never includes passwords, secrets or keys.',
     description: 'GET /api/v1/external-systems/public must expose routing metadata (id/name/channel/queue/topic) but never a credential-shaped field ("password", "secret", "apiKey") — the public catalogue is meant for discovery, not credential distribution.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo external systems seeded.',
@@ -2016,6 +2170,7 @@ C.push(
   {
     key: 'SB-VS-DBVIEWER-CORS-NOT-REFLECTED',
     name: 'DB viewer does not reflect an arbitrary Origin either',
+    objective: 'Make sure the database viewer, too, does not grant a foreign website permission to read its answers.',
     description: 'The DB viewer surface must also not echo a hostile Origin into Access-Control-Allow-Origin — verified live: header absent — a read-only reporting tool with broad table access would be an especially high-value CORS-misconfiguration target.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'DB viewer up.',
@@ -2034,6 +2189,7 @@ C.push(
   {
     key: 'SB-PT-LOGIN-EMPTY',
     name: 'Login rejects missing credentials without a 500',
+    objective: 'Try to sign in with no details at all and confirm it is refused cleanly.',
     description: 'ASVS V6: an empty credential submission must be rejected with a 4xx validation envelope (verified live: 422), proving no unauthenticated path slips through and no server error leaks internals.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2045,6 +2201,7 @@ C.push(
   {
     key: 'SB-PT-LOGIN-WRONG-PASSWORD',
     name: 'Wrong password is rejected with 401',
+    objective: 'Try to sign in with the right username but a wrong password and confirm it is refused with the same generic message as any bad sign-in.',
     description: 'ASVS V6: a syntactically valid login for the documented demo operator with a deliberately wrong password must return 401 unauthorized — and the same generic envelope as an unknown user (no username oracle).',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2056,6 +2213,7 @@ C.push(
   {
     key: 'SB-PT-LOGIN-INJECTION',
     name: 'Injection-shaped username fails cleanly',
+    objective: 'Try to sign in with a username crafted like a database attack and confirm it is refused cleanly, with no sign the text reached the database.',
     description: 'ASVS V1/V5: a username shaped like a SQL injection probe ("\' OR 1=1 --") must be rejected with a clean 4xx envelope — a 500 here suggests the input reached an interpreter.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2067,6 +2225,7 @@ C.push(
   {
     key: 'SB-PT-SESSION-ME-TOKENLESS',
     name: 'Session introspection requires a bearer token',
+    objective: 'Ask who is signed in without a token and confirm the answer is a refusal.',
     description: 'ASVS V7: GET /api/v1/session/me without a token must be 401 — session state is never derivable without credentials.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2078,6 +2237,7 @@ C.push(
   {
     key: 'SB-PT-CATALOGUE-TOKENLESS',
     name: 'Protected catalogue rejects unauthenticated reads',
+    objective: 'Ask for the message type catalogue without signing in and confirm it is refused.',
     description: 'OWASP API1 (broken object level auth): /api/v1/message-types without a token must be 401 with the unauthorized envelope.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2089,6 +2249,7 @@ C.push(
   {
     key: 'SB-PT-BOGUS-TOKEN',
     name: 'Fabricated bearer token is rejected',
+    objective: 'Present a made-up token and confirm it is refused, proving tokens are really checked.',
     description: 'A syntactically bearer-shaped but fabricated token must be rejected with 401 — token validation is real, not presence-only.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2100,6 +2261,7 @@ C.push(
   {
     key: 'SB-PT-ADMIN-PRIVILEGE-ESCALATION-BLOCKED',
     name: 'Any authenticated operator reaches admin routes (roles removed, not a regression)',
+    objective: 'Record the current rule for admin pages: any signed-in operator may open them (roles were removed), but an unsigned-in request is still refused.',
     description: 'RETARGETED 2026-10-02: this case used to assert a non-admin demo operator got 403 from GET /api/v1/admin/users (ASVS V4 role check). Roles/permissions were deliberately removed from the product (apps/api/src/kernel/policy.ts): any active, authenticated session now holds every permission, so the same request correctly answers 200, not 403. The boundary this suite still enforces is authentication itself: unauthenticated admin reads must answer 401. Kept under sb-pen-auth (not moved to regression) so a future reintroduction of roles is forced to notice and update this assertion rather than silently leaving stale pen-test coverage.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2111,6 +2273,7 @@ C.push(
   {
     key: 'SB-PT-UNKNOWN-USERNAME-NO-ORACLE',
     name: 'Unknown username gives the same generic rejection as a wrong password',
+    objective: 'Try to sign in with a username that does not exist and confirm the refusal is identical to a wrong-password refusal, so nobody can discover which usernames exist.',
     description: 'ASVS V6 (no username enumeration oracle): logging in with a syntactically valid tenant but a username that does not exist must return the identical generic envelope (401 unauthorized, "Invalid credentials") as a wrong-password attempt on a real user — verified live — so an attacker cannot distinguish "wrong password" from "no such user".',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2122,6 +2285,7 @@ C.push(
   {
     key: 'SB-PT-LOGOUT-INVALIDATES-TOKEN',
     name: 'Logout actually invalidates the session token',
+    objective: 'Sign in, sign out, and confirm the old token no longer works.',
     description: 'ASVS V7 (session management): after POST /api/v1/session/logout returns 200, the same token must no longer work — verified live: a subsequent GET /api/v1/session/me with the logged-out token returns 401. A logout that leaves the token usable is a real session-fixation-adjacent defect.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled.',
@@ -2138,6 +2302,7 @@ C.push(
   {
     key: 'SB-PT-MALFORMED-JWT-STRUCTURE',
     name: 'A token that is not even JWT-shaped is rejected, not crashed on',
+    objective: 'Present a token that is not even the right shape and confirm it is refused rather than crashing the parser.',
     description: 'A bearer value with no dot-separated segments at all ("not-a-jwt") must be rejected 401 — verified live — proving the token parser fails closed on structurally invalid input rather than throwing an unhandled exception.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2149,6 +2314,7 @@ C.push(
   {
     key: 'SB-PT-JWT-ALG-NONE-REJECTED',
     name: 'JWT "alg":"none" attack is rejected',
+    objective: 'Present a forged token that claims to need no signature and confirm it is refused; accepting it would let anyone pose as an administrator.',
     description: 'ASVS V7: a classic alg-confusion probe — a JWT header claiming {"alg":"none"} with a plausible admin payload and an empty signature segment — must be rejected 401, verified live. If accepted, this would let an attacker mint arbitrary identities without knowing any secret.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2160,6 +2326,7 @@ C.push(
   {
     key: 'SB-PT-ADMIN-USERS-TOKENLESS',
     name: 'Admin user-management route rejects unauthenticated reads',
+    objective: 'Ask for the admin user list without signing in and confirm it is refused.',
     description: 'OWASP API1/API5 (broken object/function-level auth): GET /api/v1/admin/users without any token must be 401 — the baseline check that runs before the (separately tested) role check even applies.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2171,6 +2338,7 @@ C.push(
   {
     key: 'SB-PT-DEVTOOLS-RESEED-TOKENLESS',
     name: 'Destructive-shaped devtools route is never reachable unauthenticated',
+    objective: 'Confirm the developer tool that rewrites demo identities cannot be triggered without signing in (this test never actually triggers it).',
     description: 'POST /api/v1/devtools/reseed-demo-identities without a token must be 401 — verified live — this route can rewrite demo identity data, so it must be behind auth even in a non-production bench. This case only proves the tokenless call is rejected; it deliberately never sends a valid token, so it never actually triggers a reseed.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2182,6 +2350,7 @@ C.push(
   {
     key: 'SB-PT-SECURITY-SECRETS-TOKENLESS',
     name: 'Secrets endpoint rejects unauthenticated reads',
+    objective: 'Confirm the most sensitive read, secret material, is refused without signing in.',
     description: 'GET /api/v1/security/secrets/:path without a token must be 401 — the most sensitive read surface in the API (encryption key/secret material metadata) must never be reachable without authentication.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2193,6 +2362,7 @@ C.push(
   {
     key: 'SB-PT-CATALOGUE-BOGUS-TOKEN',
     name: 'Fabricated token is rejected on the message-type catalogue too',
+    objective: 'Present a made-up token to the message type catalogue and confirm it is refused there too, proving the check is shared by every page.',
     description: 'A fabricated bearer token must be rejected 401 on GET /api/v1/message-types, not just on session/me — proving token validation is enforced by shared middleware across routes, not re-implemented (and possibly forgotten) per endpoint.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2204,6 +2374,7 @@ C.push(
   {
     key: 'SB-PT-ADMIN-BOGUS-TOKEN',
     name: 'Fabricated token is rejected before the admin permission check runs',
+    objective: 'Present a made-up token to the admin user list and confirm it is refused as not signed in, before any permission check happens.',
     description: 'A fabricated bearer token on GET /api/v1/admin/users must be rejected 401 (authentication failure), not 403 (authorization failure) — proving token validation runs and fails closed before any role/permission logic is even reached.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2234,6 +2405,7 @@ C.push(
   {
     key: 'SB-ID-LOGIN-USERNAME-PASSWORD',
     name: 'Sign in with username and password only, no tenant field',
+    objective: 'Sign in with just a username and password (no tenant field) and confirm a token and the user\'s details come back.',
     description: 'POST {{api}}/api/v1/session/login with just {username, password} (no tenantSlug anywhere in the body) must return 200 with a token and the signed-in user\'s id/username/displayName/email — the product collapsed to one hidden tenant and the login contract no longer takes or needs a tenant.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo operator identity enabled.',
@@ -2245,6 +2417,7 @@ C.push(
   {
     key: 'SB-ID-ADMIN-CREATE-USER',
     name: 'Admin creates a user with a short password and a security question',
+    objective: 'As the administrator, create a user with a short password and a security question, and confirm the user is created with a password set.',
     description: 'POST {{api}}/api/v1/admin/tenants/tenant_default/users as the admin, with a password under the product\'s old 14-character minimum (removed 2026-10-02) plus securityQuestion/securityAnswer, must return 201 with the created user\'s id and hasPassword=true — proving there is no minimum length any more and the security Q&A is accepted at creation.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo admin identity enabled.',
@@ -2259,6 +2432,7 @@ C.push(
   {
     key: 'SB-ID-NEW-USER-SIGNS-IN',
     name: 'An admin-created user signs in with the password the admin set',
+    objective: 'Create a user as the administrator, then confirm that user can sign in straight away with the password that was set.',
     description: 'This case creates an admin-provisioned user with a password and security question, then verifies that user can sign in immediately with the exact password.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo admin identity enabled.',
@@ -2274,6 +2448,7 @@ C.push(
   {
     key: 'SB-ID-PASSWORD-RESET-HAPPY-PATH',
     name: 'Self-service reset: load the question, answer it, sign in with the new password',
+    objective: 'Walk the self-service password reset: look up the user\'s security question, answer it with a new password, then sign in with the new password.',
     description: 'For an admin-created user, GET {{api}}/api/v1/session/security-question?username=<u> must return the exact question set at creation; POST {{api}}/api/v1/session/password-reset with the correct answer and a new password must return 200; and the user must then be able to sign in with that new password — the full self-service reset loop, verified live end to end on 2026-10-02.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo admin identity enabled.',
@@ -2292,6 +2467,7 @@ C.push(
   {
     key: 'SB-ID-OLD-PASSWORD-REJECTED-AFTER-RESET',
     name: 'The password in effect before a reset no longer works after it',
+    objective: 'After a password reset, confirm the previous password no longer works.',
     description: 'Immediately after a successful self-service password reset, signing in with the password that was valid BEFORE the reset must now return 401 — a reset that leaves the old password usable is a real defect (password rotation must actually rotate).',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo admin identity enabled.',
@@ -2310,6 +2486,7 @@ C.push(
   {
     key: 'SB-PT-LOGIN-USERNAME-NO-PASSWORD',
     name: 'Login with a real username but no password field is refused, not defaulted',
+    objective: 'Try to sign in with a real username but no password at all and confirm it is refused as incomplete, never treated as an empty password.',
     description: 'POST {{api}}/api/v1/session/login with a syntactically valid, real username and no password key at all must return 422 validation_failed ("username and password are required") — proving a missing password can never be silently treated as an empty/optional one. Distinct from SB-PT-LOGIN-EMPTY (which posts {}): this probes the specific case of a present username with password omitted entirely.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2321,6 +2498,7 @@ C.push(
   {
     key: 'SB-PT-PASSWORD-RESET-WRONG-ANSWER',
     name: 'A wrong security answer is refused with the generic unauthorized envelope',
+    objective: 'Answer the security question wrongly during a password reset and confirm it is refused and the password is left unchanged.',
     description: 'POST {{api}}/api/v1/session/password-reset for a real, admin-created user but with the wrong security answer must return 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} — verified live on 2026-10-02 — and the password must be unchanged (sign-in with the original password still works).',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up; admin identity enabled.',
@@ -2338,6 +2516,7 @@ C.push(
   {
     key: 'SB-PT-PASSWORD-RESET-UNKNOWN-USERNAME-NO-ORACLE',
     name: 'An unknown username on password-reset answers identically to a wrong answer',
+    objective: 'Attempt a password reset for a username that does not exist and confirm the refusal looks exactly like a wrong answer, so the reset page cannot reveal which accounts exist.',
     description: 'ASVS V6 (no enumeration oracle): POST {{api}}/api/v1/session/password-reset for a username that does not exist must return the generic 401 {"error":{"code":"unauthorized","message":"Invalid credentials"}} envelope, so callers cannot learn whether an account exists by probing the reset endpoint.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2349,6 +2528,7 @@ C.push(
   {
     key: 'SB-PT-SECURITY-QUESTION-UNKNOWN-USERNAME-NO-ORACLE',
     name: 'Loading the security question for an unknown username does not 404',
+    objective: 'Look up the security question for a username that does not exist and confirm a generic question is shown, so the forgot-password screen cannot reveal which accounts exist.',
     description: 'ASVS V6: GET {{api}}/api/v1/session/security-question?username=<nonexistent> must still answer 200 with a generic fallback question — never 404 or a shape that differs from a real username\'s response — otherwise the forgot-password screen itself becomes an account-existence oracle before a reset is even attempted.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2360,6 +2540,7 @@ C.push(
   {
     key: 'SB-PT-PORTAL-SESSION-ROUTE-REMOVED',
     name: 'The password-less portal-session route no longer exists',
+    objective: 'Confirm the old password-less portal sign-in no longer exists; nothing issues a token without a password any more.',
     description: 'POST {{api}}/api/v1/session/portal must now answer a plain 404 (route not found), not a session — the password-less demo/portal login shortcut was removed from the product entirely on 2026-10-02, along with the 14-character password minimum it was paired with. There is no longer any surface that issues a token without a password.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2388,6 +2569,9 @@ function browserCase(browser: 'chromium' | 'firefox' | 'webkit', vp: keyof typeo
   return {
     key: `SB-CB-${browser.toUpperCase()}-${vp.toUpperCase()}${page === '/help.html' ? '-HELP' : page === '/demo.html' ? '-DEMO' : ''}`,
     name: `${browser} @ ${v.label}: ${pageName} renders without overflow`,
+    objective: loginLanding
+      ? `In ${browser} at ${v.label} size (${v.width} x ${v.height}), confirm the sign-in page renders and fits the screen with no sideways scrolling.`
+      : `In ${browser} at ${v.label} size (${v.width} x ${v.height}), open the ${pageName} page and confirm its content renders and fits the screen with no sideways scrolling.`,
     description: loginLanding
       ? `Open the portal login page in ${browser} at ${v.width}×${v.height}; verify the sign-in form renders without horizontal overflow.`
       : `Launch real ${browser}, set a ${v.width}×${v.height} viewport, open {{web}}${page}, assert the verified content renders AND the layout does not force horizontal scrolling at this width. One cell of the cross-browser/responsive matrix.`,
@@ -2427,6 +2611,7 @@ C.push(
   {
     key: 'SB-CB-CONSOLE-DESKTOP',
     name: 'chromium @ desktop: operator console mounts',
+    objective: 'In Chromium at desktop size, sign in and confirm the full console loads with its menu.',
     description: 'The full console SPA must mount (demo sign-in via the gate form, gate hides, nav renders) at desktop resolution in chromium — the compatibility anchor for the dynamic app.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2444,6 +2629,7 @@ C.push(
   {
     key: 'SB-CB-CONSOLE-TABLET',
     name: 'chromium @ tablet: operator console mounts',
+    objective: 'In Chromium at tablet width (768 px), sign in and confirm the full console loads with its menu.',
     description: 'The console SPA must also mount (demo sign-in) at tablet-portrait width (768px) — the narrowest form factor the ops console officially supports.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'playwright', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2460,6 +2646,7 @@ C.push(
   {
     key: 'SB-CB-SELENIUM-WIDE',
     name: 'Selenium Chrome @ 1920: portal login renders',
+    objective: 'In Chrome driven by Selenium at a wide 1920 x 1080 window, confirm the sign-in page and its fields render.',
     description: 'The Selenium/Chrome half of the matrix: the portal login page and its fields render at 1920×1080. Confirms viewport control works in the Selenium runner too.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'selenium', severity: 'medium', priority: 'p2',
     preconditions: 'Chrome + chromedriver on worker.',
@@ -2479,6 +2666,7 @@ C.push(
   {
     key: 'SB-CB-SELENIUM-NARROW',
     name: 'Selenium Chrome @ 768: portal login renders',
+    objective: 'In Chrome driven by Selenium at a narrow 768 x 1024 window, confirm the sign-in page and its fields still render.',
     description: 'Selenium/Chrome at a narrow 768×1024 window must still render the portal login page and its fields — the non-Playwright confirmation of narrow-viewport behavior.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'selenium', severity: 'medium', priority: 'p2',
     preconditions: 'Chrome + chromedriver on worker.',
@@ -2507,6 +2695,7 @@ C.push(
   {
     key: 'SB-CB-CONSOLE-MOBILE',
     name: 'chromium @ mobile: operator console mounts without overflow (known gap)',
+    objective: 'In Chromium at phone size (390 x 844), sign in and confirm the console loads and fits the screen without sideways scrolling (a known layout gap keeps this red until fixed).',
     description: 'The console SPA must mount (demo sign-in via the gate form, gate hides, nav renders) at a 390×844 mobile viewport (iPhone 14-class) — the narrowest form factor in the matrix, and the one most likely to reveal off-canvas nav or overflow bugs. Verified live against this deployment: the mount itself succeeds, but the layout overflows horizontally by ~133px at this width — no prior case in this suite tested the dynamic console below 768px tablet width, so this gap was previously uncovered. This case intentionally keeps the no-overflow assertion (the correct requirement) rather than loosening it to match the current broken layout, so it stays red until the responsive CSS is fixed.',
     suiteKey: 'sb-compat-browsers', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2531,6 +2720,7 @@ C.push(
   {
     key: 'SB-CH-UNKNOWN-CHANNEL',
     name: 'Unknown delivery channel does not destabilise the pipeline',
+    objective: 'Deliver a message on a channel that does not exist and confirm the application absorbs it and stays healthy.',
     description: 'Deliver a message on a channel that does not exist ("carrier-pigeon"). The hub mimic forwards it (verified live: 202); the application must absorb the unknown channel without crashing — health must be 200 immediately after.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Testhub and API up.',
@@ -2545,6 +2735,7 @@ C.push(
   {
     key: 'SB-CH-GHOST-TENANT',
     name: 'Login against a non-existent tenant fails cleanly',
+    objective: 'Try to sign in to a tenant that does not exist and confirm a clean refusal rather than an internal error.',
     description: 'A login for tenant "ghost-tenant-{{rand}}" must be rejected with a 4xx envelope — the tenancy layer degrades to a clean rejection, not a 500 from a missing-row lookup.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2556,6 +2747,7 @@ C.push(
   {
     key: 'SB-CH-DBVIEWER-BAD-TABLE',
     name: 'DB viewer degrades cleanly on unknown relation',
+    objective: 'Ask the database viewer for a table that does not exist and confirm it answers with its own clean error, not a raw database error.',
     description: 'Asking the DB viewer for a table that does not exist must produce its clean viewer_error envelope (verified live: 400 {"error":{"code":"viewer_error",...}}) — not a raw driver stack.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'DB viewer up.',
@@ -2567,6 +2759,7 @@ C.push(
   {
     key: 'SB-CH-ERROR-BURST-RECOVERY',
     name: 'Error burst leaves the API healthy',
+    objective: 'Fire a burst of requests that are guaranteed to fail and confirm the application is still healthy immediately afterwards.',
     description: 'Fire several guaranteed-error requests (unknown routes, tokenless protected reads), then assert /health still answers 200 — errors must not leak resources or wedge the event loop.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
@@ -2584,6 +2777,7 @@ C.push(
   {
     key: 'SB-CH-NEGATIVE-COUNT-CLAMPED',
     name: 'Negative run count is clamped, not crashed on',
+    objective: 'Start a run asking for a negative number of messages and confirm the application quietly uses at least one and stays healthy.',
     description: 'POST /api/v1/runs with count:-5 must not crash — verified live: the app clamps to at least 1 generated message and completes normally (202). Health must stay 200 afterwards.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2600,6 +2794,7 @@ C.push(
   {
     key: 'SB-CH-INVALID-MESSAGE-TYPE-CODE',
     name: 'Run against a nonexistent message type fails cleanly',
+    objective: 'Start a run for a message type that does not exist and confirm a clean not-found answer, with the application healthy afterwards.',
     description: 'POST /api/v1/runs with a messageTypeCode that does not exist must return a clean 404 not_found (verified live) — not a 500 from an unhandled catalogue-lookup miss — and the app must remain healthy afterwards.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2616,6 +2811,7 @@ C.push(
   {
     key: 'SB-CH-INJECTION-SHAPED-CHANNEL-VALUE',
     name: 'SQL-injection-shaped channel value does not destabilise a run',
+    objective: 'Start a run with a channel name crafted like a database attack and confirm it is handled cleanly and the tables are intact afterwards.',
     description: 'POST /api/v1/runs with channel set to a SQL-injection-shaped string ("\'; DROP TABLE test_runs; --") must be handled cleanly (accepted with a coerced/default channel, or rejected) — verified live: 202, run completes normally — and the app must remain healthy and its tables intact afterwards.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2633,6 +2829,7 @@ C.push(
   {
     key: 'SB-CH-DBVIEWER-INJECTION-SHAPED-TABLE-PARAM',
     name: 'DB viewer rejects an injection-shaped table parameter',
+    objective: 'Ask the database viewer for a table name crafted like a database attack and confirm it is rejected because the name is not a safe identifier.',
     description: 'GET the DB viewer with table set to an injection-shaped value ("users; DROP TABLE users--") must be rejected cleanly (verified live: 400 {"error":{"code":"viewer_error","message":"table is not a safe SQL identifier"}}), proving the table name is validated against a safe-identifier check, never interpolated raw into SQL.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'DB viewer up.',
@@ -2644,6 +2841,7 @@ C.push(
   {
     key: 'SB-CH-OVERSIZED-USERNAME',
     name: 'A 10,000-character username does not destabilise login',
+    objective: 'Try to sign in with a 10,000-character username and confirm a clean refusal, never an internal error.',
     description: 'A syntactically valid but wildly oversized username (10,000 characters) must be rejected cleanly (verified live: 401 unauthorized, same generic envelope as any other unknown credential) — never a 500 from an unbounded string being pushed into a downstream query or comparison without a length guard.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
@@ -2655,6 +2853,7 @@ C.push(
   {
     key: 'SB-CH-RAPID-LOGIN-BURST',
     name: 'Five rapid sequential logins do not destabilise auth',
+    objective: 'Sign in five times in quick succession and confirm every attempt succeeds with its own token.',
     description: 'Five back-to-back login calls for the same demo operator must all succeed (200, each with its own token) — proving the auth path has no shared-mutable-state race under rapid repeated use.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2674,6 +2873,7 @@ C.push(
   {
     key: 'SB-CH-BOUNDED-BURST-RUN',
     name: 'A 500-message run completes without hanging',
+    objective: 'Start a run of 500 messages and confirm it completes within its time limit and leaves the application healthy.',
     description: 'POST /api/v1/runs with count:500 — a sharp burst, not a soak — must complete within its timeout (verified live: ~1.2s, 202) and leave the app healthy. Distinguishes a slow-but-working generator from one that hangs on larger batches.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2690,6 +2890,7 @@ C.push(
   {
     key: 'SB-CH-EMPTY-CHANNEL-STRING-FALLS-BACK',
     name: 'Empty-string channel falls back cleanly instead of erroring',
+    objective: 'Start a run with an empty channel name and confirm the application falls back to a default channel and completes cleanly.',
     description: 'POST /api/v1/runs with channel:"" (falsy in the app\'s own `body.channel || target?.channel || "file"` resolution) must fall back to a default channel and complete cleanly (202) rather than erroring on an empty channel name.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -2701,6 +2902,7 @@ C.push(
   {
     key: 'SB-CH-DEEPLY-NESTED-PAYLOAD',
     name: 'A deeply nested JSON payload does not crash ingestion',
+    objective: 'Send a message nested twenty levels deep and confirm it is accepted or rejected cleanly, with the application healthy afterwards.',
     description: 'A message payload nested 20 levels deep must be accepted or cleanly rejected by the hub (verified live: 202) without a stack-overflow-shaped 500, and the app must remain healthy immediately afterwards — a cheap guard against unbounded-recursion JSON handling.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub and API up.',
@@ -2716,6 +2918,7 @@ C.push(
   {
     key: 'SB-CH-CONCURRENT-IDENTICAL-SEED-RUNS',
     name: 'Two runs with the identical seed back-to-back do not collide',
+    objective: 'Start two runs with the same seed back to back and confirm each completes independently with its own run id.',
     description: 'Firing two generation runs with the exact same seed value in immediate succession must not error, deadlock or corrupt either run\'s result — each gets its own runId and completes independently — and the app stays healthy afterwards.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2740,6 +2943,7 @@ C.push(
   {
     key: 'SB-CP-AUDIT-LOGIN-TRAIL',
     name: 'Login attempts leave an audit trail',
+    objective: 'Confirm, directly in the database, that sign-in attempts are written to the audit trail.',
     description: 'The audit_events table (read independently via the DB viewer) must contain session.login actions — the compliance evidence that authentication activity is audited.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'DB viewer registered; at least one login attempt has occurred (pen-auth suite creates them).',
@@ -2751,6 +2955,7 @@ C.push(
   {
     key: 'SB-CP-NOT-PROD-DISCLOSURE',
     name: 'Non-production disclosure page is published',
+    objective: 'Confirm the Not production notice page is published, telling operators this environment must not hold real data.',
     description: 'The deployment must serve its "Not production" disclosure page ({{web}}/not-production.html, verified title "Not production — Sand Bench") — the operator-facing statement that this environment must not carry real data.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Web tier deployed.',
@@ -2762,6 +2967,7 @@ C.push(
   {
     key: 'SB-CP-ENV-CLASSIFICATION',
     name: 'Environment classification is honest (non-production)',
+    objective: 'Confirm the deployment classifies itself as non-production (development, demo or test), never as production.',
     description: 'Because this catalog runs demo identities and synthetic data, the target must classify itself as a non-production environment: /health classification must be development/demo/test — never production.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2773,6 +2979,7 @@ C.push(
   {
     key: 'SB-CP-MASKING-EVIDENCE',
     name: 'Data-masking demonstration page is published',
+    objective: 'Confirm the data-masking demonstration page is published as visible evidence of the masking capability.',
     description: 'The masking demo page ({{web}}/mask-demo.html, verified title "Masking slide — Sand Bench") must be served — the visible evidence of the masked-payload capability compliance reviewers look for.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
@@ -2784,6 +2991,7 @@ C.push(
   {
     key: 'SB-CP-SENSITIVE-DATA-POLICY-COVERAGE',
     name: 'Sensitive-data masking policy names its covered resources',
+    objective: 'Confirm the sensitive-data policy names the resources it covers (payment messages and account numbers), not just a policy name.',
     description: 'GET /api/v1/security/policies must publish the SAND_BENCH_SENSITIVE_DATA policy with its resources array naming payment.message and customer.accountNumber — verified live — the compliance evidence that these specific fields are covered by the masking/encryption policy, not just a policy that exists in name only.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2795,6 +3003,7 @@ C.push(
   {
     key: 'SB-CP-ENCRYPTION-CONFIG-TRANSPARENT',
     name: 'Encryption configuration is disclosed, not hidden',
+    objective: 'Confirm the encryption configuration (key name and algorithm) is disclosed for an auditor to see.',
     description: 'GET /api/v1/security/status must publish its own encryption configuration (keyName, algorithm) rather than hiding it behind a bare "ok" — an auditor reviewing this bench must be able to see which key and algorithm protect sensitive fields.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -2806,6 +3015,7 @@ C.push(
   {
     key: 'SB-CP-AUDIT-ROWS-ALWAYS-ATTRIBUTED',
     name: 'A successful authenticated action is attributed to a real actor',
+    objective: 'Sign in once and confirm the newest audit row is that sign-in, attributed to the operator who did it.',
     description: 'Trigger one fresh, successful login, then confirm the newest audit row is a session.login action carrying that operator\'s actor_user_id — compliance requires every SUCCESSFUL audited action to be traceable to a specific identity. (Verified live: the audit table also carries rows with a null actor_user_id for rejected/unauthenticated attempts — e.g. a wrong-password or bogus-token probe never resolves to an identity — which is correct, not a compliance gap; this case checks attribution on the case that actually matters, a real successful action, instead of a blanket "never null" claim that doesn\'t hold across a full audit history.)',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2820,6 +3030,7 @@ C.push(
   {
     key: 'SB-CP-SIGNING-CAPABILITY-DISCLOSED',
     name: 'Message-signing capability is published for review',
+    objective: 'Confirm the message-signing modes and the default are published for compliance review.',
     description: 'GET /api/v1/catalog/signatures must publish its supported signing modes and default — compliance evidence that message-integrity signing (or its deliberate absence, mode "none" by default) is a visible, reviewable configuration rather than an undocumented internal detail.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -2831,6 +3042,7 @@ C.push(
   {
     key: 'SB-CP-LOGIN-EVENTS-ENABLED-IN-FRAMEWORK',
     name: 'Login events are enabled in the eventing framework',
+    objective: 'Confirm sign-in events are switched on in the eventing framework, so authentication activity is actually captured.',
     description: 'GET /api/v1/events/framework must show biz.session.login.success with enabled:true and emitJson:true (verified live) — compliance requires authentication events to actually be captured, not merely cataloged as possible.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
@@ -2842,6 +3054,7 @@ C.push(
   {
     key: 'SB-CP-NAMING-GOVERNANCE-PUBLISHED',
     name: 'Artefact naming governance is published for review',
+    objective: 'Confirm the naming rules for every kind of artefact are published as governance evidence.',
     description: 'GET /api/v1/naming-conventions must publish the naming patterns every artefact (rule, dataset, test_case, …) is expected to follow — governance evidence that artefact identifiers are standardised, not ad hoc, across the tenant.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
@@ -2853,6 +3066,7 @@ C.push(
   {
     key: 'SB-CP-RESILIENCE-POSTURE-HONEST',
     name: 'Resilience posture endpoint never claims production-grade guarantees',
+    objective: 'Confirm the resilience statement is honest about this being a non-production bench.',
     description: 'GET /api/v1/resilience must publish a posture that is honest about this being a non-production bench (verified live: "bench-not-production") — compliance requires this environment to never misrepresent itself as carrying production resilience guarantees.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
@@ -2864,6 +3078,7 @@ C.push(
   {
     key: 'SB-CP-USERS-VIEWER-EXPOSES-NO-CREDENTIALS',
     name: 'Read-only user reporting path never exposes credential columns',
+    objective: 'Confirm the users table, read through the database viewer, never exposes a password or password hash column.',
     description: 'The users table read through the independent DB viewer must expose only id/email_normalised/display_name/status/locale/timezone/created_at — verified live — and must never carry a password or password_hash column, even for a reporting tool with broad read access.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'DB viewer registered.',
@@ -2875,6 +3090,7 @@ C.push(
   {
     key: 'SB-CP-EXTERNAL-SYSTEMS-LABELLED-NON-PRODUCTION',
     name: 'Seeded external systems are clearly labelled as stand-ins',
+    objective: 'Confirm every seeded external system is clearly labelled Dummy so none could be mistaken for a real counterparty.',
     description: 'Every entry in /api/v1/external-systems/public must have its name prefixed "Dummy" (verified live: "Dummy sanctions list", "Dummy core banking", "Dummy fraud stream", …) — compliance evidence that no integration in this bench could be mistaken for a real counterparty connection.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo external systems seeded.',
@@ -2886,6 +3102,7 @@ C.push(
   {
     key: 'SB-CP-TENANT-ISOLATION-TIER-DISCLOSED',
     name: 'Tenant isolation model is a documented, inspectable field',
+    objective: 'Confirm the tenants table carries an isolation tier column that a data-residency review can inspect.',
     description: 'The tenants table (read independently via the DB viewer) must expose an isolation_tier column — compliance/data-residency review needs to see, per tenant, which isolation model (e.g. shared_rls) applies, not have it be an undocumented internal detail.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo tenants imported.',
@@ -2904,6 +3121,7 @@ C.push(
   {
     key: 'SB-DR-ALL-SURFACES',
     name: 'All four deployment surfaces answer together',
+    objective: 'Confirm all four parts of the deployment (API, test hub, database viewer, web) answer at the same time; the first check after any restart.',
     description: 'One case, four health probes (api, testhub, dbviewer, web): the deployment\'s minimum recovery point is all surfaces answering at once. Fails if any single container is down — the first thing to run after any restart/failover.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Deployment started.',
@@ -2920,6 +3138,7 @@ C.push(
   {
     key: 'SB-DR-EVENT-DURABILITY',
     name: 'Recorded events survive across repeated reads',
+    objective: 'Record one event through the test hub, then read the feed twice and confirm the event is still there, proving events are stored durably.',
     description: 'Write one correlated event through the hub, confirm it is recorded, then read the feed again and confirm it is still there — a cheap durability check that catches in-memory-only event stores.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Testhub and API up.',
@@ -2937,6 +3156,7 @@ C.push(
   {
     key: 'SB-DR-DUAL-PATH-CONSISTENCY',
     name: 'Database reachable via two independent paths',
+    objective: 'Confirm the application says its database is fine and the database viewer independently reads the same database; both paths must agree.',
     description: 'The application says its DB is fine (/ready) AND the DB viewer independently reads the same database (application_events rows exist). If the two disagree, recovery is incomplete even though one path looks green.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API and DB viewer up against the same database.',
@@ -2951,6 +3171,7 @@ C.push(
   {
     key: 'SB-DR-SELF-HEALING-SIGNAL',
     name: 'Background job engine shows recent activity',
+    objective: 'Confirm the background job machinery shows recent activity, because a silently dead scheduler is the classic failure after a failover.',
     description: 'The application\'s scheduled/background machinery (cron schema) is registered in its database; the application_events stream shows recent automated activity (>= 1 row). A dead scheduler is the classic silent-failure after failover.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'DB viewer registered.',
@@ -2962,6 +3183,7 @@ C.push(
   {
     key: 'SB-DR-OUTBOX-RETRY-MECHANISM-PRESENT',
     name: 'Domain event outbox carries its own retry metadata',
+    objective: 'Confirm event outbox rows carry retry attempts and a next-attempt time, so a failed publish is retried rather than lost.',
     description: 'domain_event_outbox rows (read via the DB viewer) must expose attempts and next_attempt_at columns — the self-healing retry mechanism that re-delivers an event outbox entry after a transient publish failure, rather than losing it silently.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one domain event emitted.',
@@ -2973,6 +3195,7 @@ C.push(
   {
     key: 'SB-DR-JOBS-LEASE-AND-RETRY-PRESENT',
     name: 'Background jobs carry a lease and retry-count',
+    objective: 'Confirm background jobs carry attempts and a lease expiry, so a crashed worker\'s job can be picked up by another.',
     description: 'jobs rows (read via the DB viewer) must expose attempts and leased_until columns — the mechanism that lets a crashed worker\'s job be safely picked up and retried by another worker after its lease expires, rather than being stuck forever.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one background job has run.',
@@ -2984,6 +3207,7 @@ C.push(
   {
     key: 'SB-DR-MESSAGE-TYPES-DUAL-PATH-COUNT-MATCH',
     name: 'Message-type count matches across the API and DB-viewer paths',
+    objective: 'Confirm the number of message types the application reports equals the number the database viewer counts directly.',
     description: 'The count of message types the application API reports and the count the independent DB viewer reads directly from the database must be identical — verified live: both 19. A mismatch would mean one path is looking at stale or filtered data.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API and DB viewer both up against the same database.',
@@ -3000,6 +3224,7 @@ C.push(
   {
     key: 'SB-DR-SCHEMA-MIGRATIONS-STABLE-ACROSS-REPEATED-READS',
     name: 'Applied-migration count is stable across two consecutive reads',
+    objective: 'Read the applied-migration count twice in a row and confirm it does not change.',
     description: 'Reading schema_migrations twice in a row must return the exact same total both times — a cheap durability check: if the count changed between two reads seconds apart (with no deploy in between), something is silently re-running or losing migration history.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Database migrated at deploy time.',
@@ -3014,6 +3239,7 @@ C.push(
   {
     key: 'SB-DR-AUDIT-TRAIL-MONOTONIC-GROWTH',
     name: 'Audit trail only grows, never shrinks, across an action',
+    objective: 'Count the audit rows, sign in once more, and confirm the count did not go down; the audit trail only ever grows.',
     description: 'Read the audit total, perform one more auditable action (login), then read the total again: the second count must be >= the first — append-only durability. A durable audit store never loses previously written rows.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'At least one prior audited action exists.',
@@ -3031,6 +3257,7 @@ C.push(
   {
     key: 'SB-DR-TENANT-MEMBERSHIP-DUAL-PATH-CONSISTENT',
     name: 'Tenant membership count is consistent with the users table',
+    objective: 'Confirm the users table and the tenant membership table are both populated and of matching size.',
     description: 'The tenant_memberships table (join of user↔tenant) and the users table, both read independently via the DB viewer, must both be non-empty and of a plausible matching order of magnitude — verified live: 17 users, 17 memberships — proving the identity join table was not silently left out of a data migration.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo identities imported.',
@@ -3045,6 +3272,7 @@ C.push(
   {
     key: 'SB-DR-RUN-SCHEDULES-NEXT-RUN-TRACKED',
     name: 'Enabled schedules track their own next fire time',
+    objective: 'Confirm schedules track their next and last run times, so nothing silently stops firing.',
     description: 'run_schedules rows must expose next_run_at and last_run_at — a scheduler that has lost track of when a schedule should next fire is a silent self-healing failure that would only surface as "why didn\'t this run last night".',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Schedules seeded.',
@@ -3056,6 +3284,7 @@ C.push(
   {
     key: 'SB-DR-OPTIONAL-KAFKA-PROXY-DOES-NOT-DEGRADE-API-HEALTH',
     name: 'Unconfigured Kafka proxy never takes down overall API health',
+    objective: 'Confirm an unconfigured Kafka proxy reporting failure has no effect on the application\'s overall health.',
     description: 'The Kafka connectivity check reporting produced:false (proxy not configured) must have zero effect on /health — verified live — an optional companion failing must never cascade into the core API being marked unhealthy. This is the "optional companions may fail, the bench stays up" contract from /api/v1/resilience in action.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
@@ -3072,6 +3301,7 @@ C.push(
   {
     key: 'SB-DR-DATASETS-COUNT-STABLE-ACROSS-READS',
     name: 'Dataset count is stable across two consecutive reads',
+    objective: 'Read the dataset count twice in a row through the database viewer and confirm it is the same both times.',
     description: 'Reading the datasets table twice in immediate succession via the DB viewer must return the same total both times — proving reads are consistent (no read replica lag or phantom rows) under normal conditions.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'At least one dataset seeded.',
@@ -3086,6 +3316,7 @@ C.push(
   {
     key: 'SB-DR-DETECTION-RULES-STABLE-ACROSS-READS',
     name: 'Detection-rule count is stable across two consecutive reads',
+    objective: 'Read the detection-rule count twice in a row through the database viewer and confirm it is the same both times.',
     description: 'Reading detection_rules twice in immediate succession via the DB viewer must return the same total both times — the fraud/AML rule set a live deployment depends on must not appear to gain or lose rules between two reads seconds apart.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Detection rules seeded.',
@@ -3099,4 +3330,16 @@ C.push(
   }
 );
 
-export const SANDBENCH_CASES: CaseDef[] = [...C, ...SANDBENCH_UPLOAD_CASES, ...SANDBENCH_UPLOAD_SELENIUM_CASES, ...SANDBENCH_USECASE_FLOW_CASES_BATCH1, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2A, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2B, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2C, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2D, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2E, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2F, ...SANDBENCH_USECASE_FLOW_CASES_BATCH2G];
+export const SANDBENCH_CASES: CaseDef[] = [
+  ...tagSource('sandbench-cases.ts', C),
+  ...tagSource('sandbench-upload-cases.ts', SANDBENCH_UPLOAD_CASES),
+  ...tagSource('sandbench-upload-selenium-cases.ts', SANDBENCH_UPLOAD_SELENIUM_CASES),
+  ...tagSource('sandbench-usecase-flow-cases-batch1.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH1),
+  ...tagSource('sandbench-usecase-flow-cases-batch2a.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2A),
+  ...tagSource('sandbench-usecase-flow-cases-batch2b.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2B),
+  ...tagSource('sandbench-usecase-flow-cases-batch2c.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2C),
+  ...tagSource('sandbench-usecase-flow-cases-batch2d.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2D),
+  ...tagSource('sandbench-usecase-flow-cases-batch2e.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2E),
+  ...tagSource('sandbench-usecase-flow-cases-batch2f.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2F),
+  ...tagSource('sandbench-usecase-flow-cases-batch2g.ts', SANDBENCH_USECASE_FLOW_CASES_BATCH2G),
+];

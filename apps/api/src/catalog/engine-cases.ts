@@ -14,7 +14,7 @@
  * engine-case-kit.ts explains what a case needs from its target (read-only,
  * sandbox, isolated) and how it skips where that is missing.
  */
-import type { CaseDef, SuiteDef, TypeMeta } from './types.js';
+import { tagSource, type CaseDef, type SuiteDef, type TypeMeta } from './types.js';
 import { ENGINE_FUNCTIONAL_CASES } from './engine-functional-cases.js';
 import { ENGINE_UI_CASES } from './engine-ui-cases.js';
 import { ENGINE_QUALITY_CASES } from './engine-quality-cases.js';
@@ -61,4 +61,8 @@ export const ENGINE_SUITES: SuiteDef[] = [
   { key: 'te-dr', name: 'Engine durability & recovery', description: 'Abandoned-run recovery, idempotent re-reports and multi-path read consistency.', typeKey: 'drRecovery', category: 'qc' },
 ];
 
-export const ENGINE_CASES: CaseDef[] = [...ENGINE_FUNCTIONAL_CASES, ...ENGINE_UI_CASES, ...ENGINE_QUALITY_CASES];
+export const ENGINE_CASES: CaseDef[] = [
+  ...tagSource('engine-functional-cases.ts', ENGINE_FUNCTIONAL_CASES),
+  ...tagSource('engine-ui-cases.ts', ENGINE_UI_CASES),
+  ...tagSource('engine-quality-cases.ts', ENGINE_QUALITY_CASES),
+];

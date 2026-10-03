@@ -46,6 +46,7 @@ const C: CaseDef[] = [];
 C.push(
   screen({
     key: 'TE-SCR-SHELL', name: 'Console shell renders with its navigation',
+    objective: 'Open the console in a real browser and confirm the title, brand, Overview heading and workspace menu render.',
     description: 'Open {{engine}}/ in a real browser: the page title, the brand, the Overview heading and the workspace navigation must render — not just an HTTP 200 of the HTML.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -60,6 +61,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-STATUS-PILLS', name: 'Top bar reports engine health and workers',
+    objective: 'Confirm the top bar shows a green health pill with the version, the worker count and the last poll time.',
     description: 'The top bar\'s health pill must turn green with the engine version once /health answers, the worker pill must show the live/registered count and the live pill must show the last poll.',
     steps: [
       ...OPEN,
@@ -72,6 +74,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-APPLICATION-SWITCH', name: 'Switching application rebuilds the console for it',
+    objective: 'Switch the application selector to the Test Engine and confirm the menu and environment list are rebuilt for it, then switch back.',
     description: 'Choose the Test Engine in the application selector: the navigation is rebuilt from that application\'s own test types (API tests appears, Sand Bench\'s Unit tests disappears) and the environment selector is refilled. Switching back restores Sand Bench\'s.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -88,6 +91,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-OVERVIEW-TILES', name: 'Overview shows KPIs and one status tile per test type',
+    objective: 'Confirm the Overview shows its six summary cards and a status tile for the API test type with its case count.',
     description: 'For the engine application the overview must render its six KPI cards and a status tile for the API test type with its case count.',
     steps: [
       ...OPEN, ...SWITCH_TO_ENGINE,
@@ -101,6 +105,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-TILE-HISTORY', name: 'A status tile opens its run history in place',
+    objective: 'Click a status tile and confirm its run history opens in place with a run button and a details link.',
     description: 'Clicking a tile expands its history panel under the tiles, with a run button and a link to the type\'s details, without leaving the overview.',
     steps: [
       ...OPEN, ...SWITCH_TO_ENGINE,
@@ -115,6 +120,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-TYPE-VIEW', name: 'A test type lists its cases with status and method',
+    objective: 'Open API tests from the menu and confirm the case table lists the engine\'s API cases with their columns.',
     description: 'Open "API tests" from the navigation: the view title changes, the case table renders its columns and lists the engine\'s API cases, including "Capability map is published".',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -130,6 +136,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-SEARCH', name: 'The search box filters the case table as you type',
+    objective: 'Type part of a case name in the search box and confirm the table narrows to that case.',
     description: 'Type part of a case name into the top-bar search: the table narrows to the matching case, which becomes its first row.',
     steps: [
       ...OPEN_API_TYPE,
@@ -146,6 +153,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-CASE-DETAIL', name: 'A case opens its definition and its runs',
+    objective: 'Click a case and confirm its screen shows its key, type, method, tags and description, offers Run this case, and its Runs tab opens.',
     description: 'Click a case in the table: the case screen shows its key, type, method, tags and description, offers "Run this case", and its Runs tab opens.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -169,6 +177,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-TEST-RUNS', name: 'Test runs view shows what is running and the history',
+    objective: 'Open Test runs and confirm the Running now section and the run history table render.',
     description: 'Open #/history: the view must render its "Running now" section and the run history table with its columns.',
     steps: [
       ...OPEN,
@@ -182,6 +191,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-BUILDS', name: 'In-container build view renders',
+    objective: 'Open In-container build and confirm it shows the latest CI build or says none was reported; it is never blank.',
     description: 'Open #/builds: the view shows the latest build reported by CI, or says none was reported — it must not be blank.',
     severity: 'medium',
     steps: [
@@ -194,6 +204,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-CONFIGURATION', name: 'Configuration shows the run retention setting',
+    objective: 'Open Configuration and confirm the run retention field is filled from the settings with a Save action.',
     description: 'Open #/config: the run retention field is filled from /api/v1/settings with a number of days and a Save action.',
     steps: [
       ...OPEN,
@@ -207,6 +218,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-MISSING-RECORDS', name: 'Links to a missing run or case fail soft',
+    objective: 'Follow stale links to a run and a case that do not exist and confirm the console says so instead of going blank.',
     description: 'A stale bookmark must not leave a blank screen: #/run/<unknown> says the run was not found and links back to the runs, #/case/<unknown> says the case could not be loaded, and an unknown view lands on the overview.',
     steps: [
       ...OPEN,
@@ -224,6 +236,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-DEEP-LINK', name: 'A deep link opens the view it names',
+    objective: 'Open a direct link to the smoke test type and confirm the console boots straight into it.',
     description: 'Open {{engine}}/#/type/smoke directly: the console must boot straight into the Sand Bench smoke cases and list them.',
     steps: [
       { action: 'navigate', value: '{{engine}}/#/type/smoke', description: 'open the link' },
@@ -236,6 +249,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-MOBILE-MENU', name: 'On a phone the navigation opens from the menu button',
+    objective: 'At phone size, confirm the menu button slides the navigation in and choosing an entry navigates and closes it.',
     description: 'At 390×844 the sidebar is off-canvas. The menu button must slide it in, and choosing an entry must navigate and close it again.',
     steps: [
       ...OPEN,
@@ -252,6 +266,7 @@ C.push(
   }),
   screen({
     key: 'TE-SCR-SIT-CONSOLE', name: 'Embedded SIT console page renders',
+    objective: 'Open the embedded SIT console page and confirm it renders its own catalogue.',
     description: 'Open {{engine}}/sit/: the SIT console, proxied behind the engine\'s port, must render its own page with the test catalog.',
     severity: 'medium',
     steps: [
@@ -276,6 +291,7 @@ const SELENIUM_OPEN: Step[] = [
 function seleniumView(key: string, hash: string, title: string, mustText: string, name: string): CaseDef {
   return selenium({
     key, name,
+    objective: `Using the Selenium browser driver, open the console's "${title}" view and confirm its title and the text "${mustText}" are shown.`,
     description: `Selenium WebDriver (real Chrome) opens {{engine}}/${hash} and asserts the view title "${title}" and the fragment "${mustText}". Baseline coverage proving the Selenium runner and the console work together.`,
     severity: 'medium',
     steps: [
@@ -293,6 +309,7 @@ function seleniumView(key: string, hash: string, title: string, mustText: string
 C.push(
   selenium({
     key: 'TE-SEL-CONSOLE-LOADS', name: 'Baseline: console shell loads in Selenium',
+    objective: 'Using the Selenium browser driver, open the console and confirm the Overview renders with its title and brand.',
     description: 'Selenium opens {{engine}}/ and waits for the overview to render from the summary; title and brand must be present.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -305,6 +322,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-WORKSPACE-NAV', name: 'Baseline: workspace navigation is present',
+    objective: 'Using Selenium, confirm the side menu lists the workspace entries and the two test-type sections.',
     description: 'The sidebar must list the workspace entries — Overview, Test runs, In-container build, Configuration — and the two test-type sections.',
     steps: [
       ...SELENIUM_OPEN,
@@ -319,6 +337,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-APPLICATION-SWITCH', name: 'Baseline: application selector switches to the Test Engine',
+    objective: 'Using Selenium, pick the Test Engine in the application selector and confirm the menu is rebuilt with its API test type.',
     description: 'Selenium picks the Test Engine in the application selector and waits for the navigation to be rebuilt with its API test type. The Selenium twin of TE-SCR-APPLICATION-SWITCH.',
     severity: 'critical', priority: 'p0',
     steps: [
@@ -333,6 +352,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-TYPE-VIEW', name: 'Baseline: smoke cases are listed',
+    objective: 'Using Selenium, open the Sand Bench smoke tests and read the case table.',
     description: 'Selenium opens the Sand Bench smoke type and reads the case table from the DOM.',
     steps: [
       ...SELENIUM_OPEN,
@@ -348,6 +368,7 @@ C.push(
   seleniumView('TE-SEL-CONFIGURATION', '#/config', 'Configuration', 'Run retention', 'Baseline: configuration view renders'),
   selenium({
     key: 'TE-SEL-CATALOG-ALIAS', name: 'Baseline: console loads from /catalog/',
+    objective: 'Using Selenium, open the older console address and confirm the same console loads.',
     description: 'Selenium opens {{engine}}/catalog/ — the older address of the console — and gets the same shell.',
     severity: 'medium',
     steps: [
@@ -359,6 +380,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-SIT-CONSOLE', name: 'Baseline: SIT console page renders',
+    objective: 'Using Selenium, open the embedded SIT console and read its heading.',
     description: 'Selenium opens {{engine}}/sit/ and reads the SIT console\'s own heading.',
     severity: 'medium',
     steps: [
@@ -371,6 +393,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-API-HEALTH', name: 'API: health endpoint (baseline)',
+    objective: 'Baseline check that the engine\'s health check answers OK.',
     description: 'GET {{engine}}/health returns 200 — the HTTP baseline case kept alongside the Selenium ones so the suite proves both runner families against the engine.',
     method: 'http', severity: 'critical', priority: 'p0', preconditions: PRE.readOnly, dataProfile: NO_DATA,
     steps: [GET('/health', { expect_json: [{ path: 'status', equals: 'ok' }], description: 'health' })],
@@ -378,6 +401,7 @@ C.push(
   }),
   selenium({
     key: 'TE-SEL-API-SUMMARY', name: 'API: console boot payload (baseline)',
+    objective: 'Baseline check that the console boot data the Selenium cases render from answers.',
     description: 'GET {{engine}}/api/v1/ui/summary returns the payload every Selenium case above renders from — a second HTTP baseline from this suite\'s own vantage point.',
     method: 'http', preconditions: PRE.readOnly, dataProfile: NO_DATA,
     steps: [GET('/api/v1/ui/summary?application_key=sand-bench', { expect_json: [{ path: 'data.cases', min_length: 1 }, { path: 'data.application.types', min_length: 1 }], description: 'ui summary' })],
@@ -422,6 +446,7 @@ function browserCase(browser: 'chromium' | 'firefox' | 'webkit', vp: keyof typeo
   return {
     key,
     name: `${browser} @ ${v.label}: console ${w.label} renders without overflow`,
+    objective: `In ${browser} at ${v.label} size (${v.width} x ${v.height}), open the console's ${w.label} and confirm it renders from live data and fits the screen with no sideways scrolling${knownDefect ? ' (a known layout gap keeps this red on staging builds from before the fix)' : ''}.`,
     description: `Launch real ${browser}, set a ${v.width}×${v.height} viewport, open {{engine}}/${w.hash}, wait for the ${w.label} to render from live data and assert the layout does not force horizontal scrolling at this width. One cell of the cross-browser/responsive matrix.${knownDefect ? ` Probed live 2026-09-30 against a staging deployment pinned at commit 8a26bbf: ${knownDefect}. Confirmed already fixed in the working tree the same day, so this stays red only against a staging deployment still pinned at or before 8a26bbf — expect it to self-resolve on the next redeploy.` : ''}`,
     suiteKey: 'te-compat-browsers', testType: 'ui', method: 'playwright', severity: vp === 'mobile' ? 'high' : 'medium', priority: 'p1',
     preconditions: `Target engine reachable; worker has the Playwright ${browser} engine installed.`,
@@ -457,6 +482,7 @@ C.push(
   {
     key: 'TE-CB-FIREFOX-APPLICATION-SWITCH',
     name: 'firefox @ laptop: application selector works',
+    objective: 'In Firefox at laptop size, confirm the application selector rebuilds the console for the Test Engine as it does in Chromium.',
     description: 'The application selector is a native <select>; its change event drives the whole console. It must work in Firefox as it does in Chromium: choosing the Test Engine rebuilds the navigation.',
     suiteKey: 'te-compat-browsers', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Target engine reachable; worker has the Playwright firefox engine installed.',
@@ -470,6 +496,7 @@ C.push(
   {
     key: 'TE-CB-WEBKIT-CASE-DETAIL',
     name: 'webkit @ tablet: a case opens its detail screen',
+    objective: 'In WebKit at tablet size, confirm clicking a case in the table opens its detail screen.',
     description: 'The click-through from a case table to a case screen — event delegation and a lazy detail fetch — must work in WebKit at tablet width.',
     suiteKey: 'te-compat-browsers', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
     preconditions: 'Target engine reachable; worker has the Playwright webkit engine installed.',

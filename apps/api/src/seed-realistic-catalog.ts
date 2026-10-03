@@ -30,6 +30,14 @@ import { pool, query, migrate } from './db/client.js';
 import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
+import { screenFields, type AppContext } from './catalog/plain-language.js';
+
+// Per application: the environment its cases are written for, where cases
+// that need prepared fixtures run, and the team that owns its defects.
+const APP_CONTEXT: Record<string, AppContext> = {
+  'sand-bench': { appKey: 'sand-bench', defaultEnvironment: 'sand-bench-local', team: 'Sand Bench team' },
+  'gavriq-test-engine': { appKey: 'gavriq-test-engine', defaultEnvironment: 'engine-local', fixtureEnvironment: 'engine-staging', team: 'Test Engine team' },
+};
 
 // Demo persona defaults are the DOCUMENTED, fictional dev-only identities from
 // dev/demo-seed/sand-bench-demo-tenants-users.json (never valid in production).
@@ -117,7 +125,8 @@ async function upsertEnvironment(key: string, name: string, envType: string, bas
   console.log('Environment:', key, '→', baseUrl);
 }
 
-async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: CaseDef[]) {
+async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDef[], cases: CaseDef[]) {
+  const ctx = APP_CONTEXT[appKey]!;
   const suiteIds = new Map<string, string>();
   for (const s of WITH_SUITES ? suites : []) {
     const { rows } = await query(
@@ -143,17 +152,28 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
       ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
       data_profile: c.dataProfile,
     };
+    // The Test cases screen representation: objective, plain-language steps
+    // (what is done / what should happen / data used), owner, component,
+    // environment, duration, links and triage notes. Steps keep their runner
+    // fields, so the worker executes exactly what the screen describes.
+    const sf = screenFields(c, suite, ctx);
     const { rows } = await query(
       `INSERT INTO test_cases (
          key, name, description, application_id, test_type, test_level,
          preconditions, test_data_ref, execution_method, steps, expected_results,
          validation_rules, timeout_seconds, severity, priority, tags,
-         automation_status, lifecycle, author_id, created_by, environment_requirements
+         automation_status, lifecycle, author_id, created_by, environment_requirements,
+         objective, owner_id, component, environment, estimated_duration, visibility,
+         automation_link, test_data, attachments, dependencies,
+         flakiness_notes, known_workarounds, common_failure_causes, triage_status, assignee
        ) VALUES (
          $1,$2,$3,$4,$5::test_type,'system',
          $6,$7,$8,$9::jsonb,$10,
          $11::jsonb,$12,$13::severity,$14::priority,$15,
-         'automated','active','realistic-catalog','realistic-catalog',$16::jsonb
+         'automated','active','realistic-catalog','realistic-catalog',$16::jsonb,
+         $17,$18,$19,$20,$21,$22,
+         $23,$24,$25::jsonb,$26::jsonb,
+         $27,$28,$29,$30,$31
        )
        ON CONFLICT (key) DO UPDATE SET
          name = EXCLUDED.name, description = EXCLUDED.description,
@@ -169,6 +189,16 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
          severity = EXCLUDED.severity, priority = EXCLUDED.priority,
          tags = EXCLUDED.tags, lifecycle = 'active',
          automation_status = 'automated',
+         objective = EXCLUDED.objective, owner_id = EXCLUDED.owner_id,
+         component = EXCLUDED.component, environment = EXCLUDED.environment,
+         estimated_duration = EXCLUDED.estimated_duration, visibility = EXCLUDED.visibility,
+         automation_link = EXCLUDED.automation_link, test_data = EXCLUDED.test_data,
+         attachments = EXCLUDED.attachments, dependencies = EXCLUDED.dependencies,
+         flakiness_notes = EXCLUDED.flakiness_notes, known_workarounds = EXCLUDED.known_workarounds,
+         common_failure_causes = EXCLUDED.common_failure_causes,
+         -- triage is operator state: the catalog only sets it while nobody has touched it
+         triage_status = CASE WHEN test_cases.triage_status = 'None' THEN EXCLUDED.triage_status ELSE test_cases.triage_status END,
+         assignee = COALESCE(test_cases.assignee, EXCLUDED.assignee),
          updated_at = now(), updated_by = 'realistic-catalog'
        RETURNING id`,
       [
@@ -176,12 +206,15 @@ async function seedSuitesAndCases(appId: string, suites: SuiteDef[], cases: Case
         c.preconditions,
         `${c.dataProfile.profile}: ${c.dataProfile.data} (source: ${c.dataProfile.source})`,
         c.method,
-        JSON.stringify(c.steps || []),
+        JSON.stringify(sf.steps),
         c.expected,
         JSON.stringify(validationRules),
         c.timeoutSeconds || 60,
         c.severity, c.priority, c.tags,
         JSON.stringify({ suite: suite.key, type: suite.typeKey }),
+        sf.objective, sf.owner, sf.component, sf.environment, sf.estimated_duration, sf.visibility,
+        sf.automation_link, sf.test_data, JSON.stringify(sf.attachments), JSON.stringify(sf.dependency_ids),
+        sf.flakiness_notes, sf.known_workarounds, sf.common_failure_causes, sf.triage_status, sf.assignee,
       ]
     );
     if (suiteId) {
@@ -245,7 +278,7 @@ async function main() {
       SANDBENCH_TYPES, SANDBENCH_SUITES, SANDBENCH_CASES
     );
     await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
-    const sbCount = await seedSuitesAndCases(sbId, SANDBENCH_SUITES, SANDBENCH_CASES);
+    const sbCount = await seedSuitesAndCases(sbId, 'sand-bench', SANDBENCH_SUITES, SANDBENCH_CASES);
     console.log(`Seeded ${sbCount} Sand Bench cases across ${SANDBENCH_SUITES.length} ${grouping}.`);
   }
   if (wanted('gavriq-test-engine')) {
@@ -255,7 +288,7 @@ async function main() {
       ENGINE_TYPES, ENGINE_SUITES, ENGINE_CASES
     );
     await upsertEnvironment('engine-local', 'Test Engine · local Docker (development)', 'docker', HOST_VARS.engine, HOST_VARS, ['gavriq-test-engine']);
-    const teCount = await seedSuitesAndCases(teId, ENGINE_SUITES, ENGINE_CASES);
+    const teCount = await seedSuitesAndCases(teId, 'gavriq-test-engine', ENGINE_SUITES, ENGINE_CASES);
     console.log(`Seeded ${teCount} Test Engine self-test cases across ${ENGINE_SUITES.length} ${grouping}.`);
   }
   console.log('Every case is executable: http/playwright/selenium/performance steps verified against the live deployment.');

@@ -37,6 +37,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-about-MAIN",
     name: "UC-about main flow: About",
+    objective: 'Walk through the "About" screen the way its main use case describes it: operator opens About. System displays the product purpose and scope. Operator follows the console link to begin work.',
     description: "Main flow of UC-about (About): Operator opens About. System displays the product purpose and scope. Operator follows the console link to begin work. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -50,6 +51,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-about-ALT-1",
     name: "UC-about alt flow 1: The page can be read independently of a tenant session.",
+    objective: 'Check an alternative path of "About": the page can be read independently of a tenant session.',
     description: "Alternate flow 1 of UC-about (About): \"The page can be read independently of a tenant session.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -63,6 +65,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-about-EXC-1",
     name: "UC-about exc flow 1: A failed static load is not replaced with unrelated marketing content.",
+    objective: 'Check that "About" fails safely: a failed static load is not replaced with unrelated marketing content.',
     description: "Exception flow 1 of UC-about (About): \"A failed static load is not replaced with unrelated marketing content.\" No backing API is registered for this use case, so this claim is evidenced only by the plain navigation above succeeding without needing any session/Authorization header.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -76,6 +79,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-applicationEvents-MAIN",
     name: "UC-applicationEvents main flow: Application Events",
+    objective: 'Walk through the "Application Events" screen the way its main use case describes it: operator opens Application Events. System requests the latest event collection. Operator filters by event, outcome or available screen/action context. System shows matching rows with time, actor and request identifiers where present.',
     description: "Main flow of UC-applicationEvents (Application Events): Operator opens Application Events. System requests the latest event collection. Operator filters by event, outcome or available screen/action context. System shows matching rows with time, actor and request identifiers where present. Touches the screen's real route and its registered API(s): GET /api/v1/events.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -91,6 +95,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-applicationEvents-ALT-1",
     name: "UC-applicationEvents alt flow 1: No matches is distinct from no captured events.",
+    objective: 'Check an alternative path of "Application Events": no matches is distinct from no captured events.',
     description: "Alternate flow 1 of UC-applicationEvents (Application Events): \"No matches is distinct from no captured events.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -106,6 +111,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-applicationEvents-ALT-2",
     name: "UC-applicationEvents alt flow 2: Missing actor or request context is displayed as unavailable.",
+    objective: 'Check an alternative path of "Application Events": missing actor or request context is displayed as unavailable.',
     description: "Alternate flow 2 of UC-applicationEvents (Application Events): \"Missing actor or request context is displayed as unavailable.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -121,6 +127,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-applicationEvents-EXC-1",
     name: "UC-applicationEvents exc flow 1: A fetch failure is not proof of zero events.",
+    objective: 'Check that "Application Events" fails safely: a fetch failure is not proof of zero events.',
     description: "Exception flow 1 of UC-applicationEvents (Application Events): \"A fetch failure is not proof of zero events.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -136,6 +143,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-applicationEvents-EXC-2",
     name: "UC-applicationEvents exc flow 2: The memory fallback must not be assumed equivalent to tenant-filtered ",
+    objective: 'Check that "Application Events" fails safely: the memory fallback must not be assumed equivalent to tenant-filtered database results.',
     description: "Exception flow 2 of UC-applicationEvents (Application Events): \"The memory fallback must not be assumed equivalent to tenant-filtered database results.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -151,6 +159,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationApiAccess-MAIN",
     name: "UC-configurationApiAccess main flow: API access",
+    objective: 'Walk through the "API access" screen the way its main use case describes it: administrator opens application service access. System shows the current supported policy or identifies preview-only text. Administrator reviews the intended enablement and credential scope. Any supported change must report its effective result independently of credential creation.',
     description: "Main flow of UC-configurationApiAccess (API access): Administrator opens API access. System shows the current supported policy or identifies preview-only text. Administrator reviews the intended enablement and credential scope. Any supported change must report its effective result independently of credential creation. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -164,6 +173,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationApiAccess-ALT-1",
     name: "UC-configurationApiAccess alt flow 1: Keep programmatic access disabled.",
+    objective: 'Check an alternative path of "API access": keep programmatic access disabled.',
     description: "Alternate flow 1 of UC-configurationApiAccess (API access): \"Keep programmatic access disabled.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -177,6 +187,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationApiAccess-ALT-2",
     name: "UC-configurationApiAccess alt flow 2: Session authentication remains a separate flow.",
+    objective: 'Check an alternative path of "API access": session authentication remains a separate flow.',
     description: "Alternate flow 2 of UC-configurationApiAccess (API access): \"Session authentication remains a separate flow.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -190,6 +201,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationApiAccess-EXC-1",
     name: "UC-configurationApiAccess exc flow 1: An unwired toggle must not claim to create or revoke credentials.",
+    objective: 'Check that "API access" fails safely: an unwired toggle must not claim to create or revoke credentials.',
     description: "Exception flow 1 of UC-configurationApiAccess (API access): \"An unwired toggle must not claim to create or revoke credentials.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -203,6 +215,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationApiAccess-EXC-2",
     name: "UC-configurationApiAccess exc flow 2: A failure cannot expose a fabricated API key.",
+    objective: 'Check that "API access" fails safely: a failure cannot expose a fabricated application service key.',
     description: "Exception flow 2 of UC-configurationApiAccess (API access): \"A failure cannot expose a fabricated API key.\" No backing API is registered for this use case, so this claim is evidenced only by the plain navigation above succeeding without needing any session/Authorization header.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -216,6 +229,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationDataRetention-MAIN",
     name: "UC-configurationDataRetention main flow: Data retention",
+    objective: 'Walk through the "Data retention" screen the way its main use case describes it: administrator opens Data retention. System identifies the displayed policy and covered data classes. Administrator reviews cutoff, timezone and exceptions before any policy change. A supported save confirms the policy; deletion evidence is reported separately.',
     description: "Main flow of UC-configurationDataRetention (Data retention): Administrator opens Data retention. System identifies the displayed policy and covered data classes. Administrator reviews cutoff, timezone and exceptions before any policy change. A supported save confirms the policy; deletion evidence is reported separately. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -229,6 +243,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationDataRetention-ALT-1",
     name: "UC-configurationDataRetention alt flow 1: Keep existing retention until a policy is agreed.",
+    objective: 'Check an alternative path of "Data retention": keep existing retention until a policy is agreed.',
     description: "Alternate flow 1 of UC-configurationDataRetention (Data retention): \"Keep existing retention until a policy is agreed.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -242,6 +257,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationDataRetention-ALT-2",
     name: "UC-configurationDataRetention alt flow 2: Legal holds or explicit exceptions require separate policy decisions.",
+    objective: 'Check an alternative path of "Data retention": legal holds or explicit exceptions require separate policy decisions.',
     description: "Alternate flow 2 of UC-configurationDataRetention (Data retention): \"Legal holds or explicit exceptions require separate policy decisions.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -255,6 +271,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationDataRetention-EXC-1",
     name: "UC-configurationDataRetention exc flow 1: A 90-day caption cannot prove records were deleted.",
+    objective: 'Check that "Data retention" fails safely: a 90-day caption cannot prove records were deleted.',
     description: "Exception flow 1 of UC-configurationDataRetention (Data retention): \"A 90-day caption cannot prove records were deleted.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -268,6 +285,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationDataRetention-EXC-2",
     name: "UC-configurationDataRetention exc flow 2: Failed deletion must not be reported as completed cleanup.",
+    objective: 'Check that "Data retention" fails safely: failed deletion must not be reported as completed cleanup.',
     description: "Exception flow 2 of UC-configurationDataRetention (Data retention): \"Failed deletion must not be reported as completed cleanup.\" No backing API is registered for this use case, so this claim is evidenced only by the plain navigation above succeeding without needing any session/Authorization header.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -281,6 +299,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationEnvironmentDefaults-MAIN",
     name: "UC-configurationEnvironmentDefaults main flow: Environment defaults",
+    objective: 'Walk through the "Environment defaults" screen the way its main use case describes it: administrator opens Environment defaults. System shows the available default or clearly labels preview-only content. Administrator reviews the effect on future runs. A supported save must confirm the effective value before it is relied on.',
     description: "Main flow of UC-configurationEnvironmentDefaults (Environment defaults): Administrator opens Environment defaults. System shows the available default or clearly labels preview-only content. Administrator reviews the effect on future runs. A supported save must confirm the effective value before it is relied on. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -294,6 +313,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationEnvironmentDefaults-ALT-1",
     name: "UC-configurationEnvironmentDefaults alt flow 1: Keep the current environment unchanged.",
+    objective: 'Check an alternative path of "Environment defaults": keep the current environment unchanged.',
     description: "Alternate flow 1 of UC-configurationEnvironmentDefaults (Environment defaults): \"Keep the current environment unchanged.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -307,6 +327,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationEnvironmentDefaults-ALT-2",
     name: "UC-configurationEnvironmentDefaults alt flow 2: An individual run can use an explicit target where that run contract s",
+    objective: 'Check an alternative path of "Environment defaults": an individual run can use an explicit target where that run contract supports it.',
     description: "Alternate flow 2 of UC-configurationEnvironmentDefaults (Environment defaults): \"An individual run can use an explicit target where that run contract supports it.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -320,6 +341,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationEnvironmentDefaults-EXC-1",
     name: "UC-configurationEnvironmentDefaults exc flow 1: No write binding means no persisted-default claim.",
+    objective: 'Check that "Environment defaults" fails safely: no write binding means no persisted-default claim.',
     description: "Exception flow 1 of UC-configurationEnvironmentDefaults (Environment defaults): \"No write binding means no persisted-default claim.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -333,6 +355,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationEnvironmentDefaults-EXC-2",
     name: "UC-configurationEnvironmentDefaults exc flow 2: A change must not imply existing or running jobs were retargeted.",
+    objective: 'Check that "Environment defaults" fails safely: a change must not imply existing or running jobs were retargeted.',
     description: "Exception flow 2 of UC-configurationEnvironmentDefaults (Environment defaults): \"A change must not imply existing or running jobs were retargeted.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -346,6 +369,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationNotifications-MAIN",
     name: "UC-configurationNotifications main flow: Notifications",
+    objective: 'Walk through the "Notifications" screen the way its main use case describes it: administrator opens Notifications. System identifies the available notification preferences. Administrator selects event categories and supported delivery channels. A supported save confirms preferences; actual delivery is reviewed separately.',
     description: "Main flow of UC-configurationNotifications (Notifications): Administrator opens Notifications. System identifies the available notification preferences. Administrator selects event categories and supported delivery channels. A supported save confirms preferences; actual delivery is reviewed separately. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -359,6 +383,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationNotifications-ALT-1",
     name: "UC-configurationNotifications alt flow 1: Disable a supported notification category.",
+    objective: 'Check an alternative path of "Notifications": disable a supported notification category.',
     description: "Alternate flow 1 of UC-configurationNotifications (Notifications): \"Disable a supported notification category.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -372,6 +397,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationNotifications-ALT-2",
     name: "UC-configurationNotifications alt flow 2: In-app and email delivery can have different availability.",
+    objective: 'Check an alternative path of "Notifications": in-app and email delivery can have different availability.',
     description: "Alternate flow 2 of UC-configurationNotifications (Notifications): \"In-app and email delivery can have different availability.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -385,6 +411,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationNotifications-EXC-1",
     name: "UC-configurationNotifications exc flow 1: Invalid recipients need an explicit validation result.",
+    objective: 'Check that "Notifications" fails safely: invalid recipients need an explicit validation result.',
     description: "Exception flow 1 of UC-configurationNotifications (Notifications): \"Invalid recipients need an explicit validation result.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -398,6 +425,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationNotifications-EXC-2",
     name: "UC-configurationNotifications exc flow 2: A saved preference does not mean a notification was delivered.",
+    objective: 'Check that "Notifications" fails safely: a saved preference does not mean a notification was delivered.',
     description: "Exception flow 2 of UC-configurationNotifications (Notifications): \"A saved preference does not mean a notification was delivered.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -411,6 +439,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationUserRoles-MAIN",
     name: "UC-configurationUserRoles main flow: User roles",
+    objective: 'Walk through the "User roles" screen the way its main use case describes it: operator opens User roles under Configuration. System displays the available role setting or clearly labelled informational row. Operator follows a supported access-management path where available. Actual assignments are reviewed using their registered contract.',
     description: "Main flow of UC-configurationUserRoles (User roles): Operator opens User roles under Configuration. System displays the available role setting or clearly labelled informational row. Operator follows a supported access-management path where available. Actual assignments are reviewed using their registered contract. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -424,6 +453,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationUserRoles-ALT-1",
     name: "UC-configurationUserRoles alt flow 1: The operator reads the role summary without changing anything.",
+    objective: 'Check an alternative path of "User roles": the operator reads the role summary without changing anything.',
     description: "Alternate flow 1 of UC-configurationUserRoles (User roles): \"The operator reads the role summary without changing anything.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -437,6 +467,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationUserRoles-ALT-2",
     name: "UC-configurationUserRoles alt flow 2: Functional and data access profiles are inspected separately.",
+    objective: 'Check an alternative path of "User roles": functional and data access profiles are inspected separately.',
     description: "Alternate flow 2 of UC-configurationUserRoles (User roles): \"Functional and data access profiles are inspected separately.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -450,6 +481,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationUserRoles-EXC-1",
     name: "UC-configurationUserRoles exc flow 1: A generic on/off row cannot create roles.",
+    objective: 'Check that "User roles" fails safely: a generic on/off row cannot create roles.',
     description: "Exception flow 1 of UC-configurationUserRoles (User roles): \"A generic on/off row cannot create roles.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -463,6 +495,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-configurationUserRoles-EXC-2",
     name: "UC-configurationUserRoles exc flow 2: Role labels must not imply assignments that were never loaded.",
+    objective: 'Check that "User roles" fails safely: role labels must not imply assignments that were never loaded.',
     description: "Exception flow 2 of UC-configurationUserRoles (User roles): \"Role labels must not imply assignments that were never loaded.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -476,6 +509,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-dsAll-MAIN",
     name: "UC-dsAll main flow: Datasets",
+    objective: 'Walk through the "Datasets" screen the way its main use case describes it: operator opens Datasets; system retrieves tenant records. Operator reviews each dataset identity and available type, count and state. Operator selects a dataset for inspection or later test-case assignment. System carries its stable identity into the supported next workflow.',
     description: "Main flow of UC-dsAll (Datasets): Operator opens Datasets; system retrieves tenant records. Operator reviews each dataset identity and available type, count and state. Operator selects a dataset for inspection or later test-case assignment. System carries its stable identity into the supported next workflow. Touches the screen's real route and its registered API(s): GET /api/v1/datasets.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -491,6 +525,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-dsAll-ALT-1",
     name: "UC-dsAll alt flow 1: New dataset opens creation.",
+    objective: 'Check an alternative path of "Datasets": new dataset opens creation.',
     description: "Alternate flow 1 of UC-dsAll (Datasets): \"New dataset opens creation.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -506,6 +541,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-dsAll-ALT-2",
     name: "UC-dsAll alt flow 2: A shell with no assembled rows remains visible as zero rows.",
+    objective: 'Check an alternative path of "Datasets": a shell with no assembled rows remains visible as zero rows.',
     description: "Alternate flow 2 of UC-dsAll (Datasets): \"A shell with no assembled rows remains visible as zero rows.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -521,6 +557,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-dsAll-EXC-1",
     name: "UC-dsAll exc flow 1: Failed retrieval is not evidence of an empty tenant.",
+    objective: 'Check that "Datasets" fails safely: failed retrieval is not evidence of an empty tenant.',
     description: "Exception flow 1 of UC-dsAll (Datasets): \"Failed retrieval is not evidence of an empty tenant.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -536,6 +573,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-dsAll-EXC-2",
     name: "UC-dsAll exc flow 2: A removed dataset reference is reported when reused.",
+    objective: 'Check that "Datasets" fails safely: a removed dataset reference is reported when reused.',
     description: "Exception flow 2 of UC-dsAll (Datasets): \"A removed dataset reference is reported when reused.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -551,6 +589,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-featureIds-MAIN",
     name: "UC-featureIds main flow: Feature IDs",
+    objective: 'Walk through the "Feature IDs" screen the way its main use case describes it: administrator opens Feature IDs. System loads feature pages and displays FTR identifiers, labels, level, kind and overlays. Administrator inspects a row and its source level. Any attempted level update reports the actual application service result.',
     description: "Main flow of UC-featureIds (Feature IDs): Administrator opens Feature IDs. System loads feature pages and displays FTR identifiers, labels, level, kind and overlays. Administrator inspects a row and its source level. Any attempted level update reports the actual API result. Touches the screen's real route and its registered API(s): GET /api/v1/features.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -566,6 +605,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-featureIds-ALT-1",
     name: "UC-featureIds alt flow 1: The catalogue can be inspected without edits.",
+    objective: 'Check an alternative path of "Feature IDs": the catalogue can be inspected without edits.',
     description: "Alternate flow 1 of UC-featureIds (Feature IDs): \"The catalogue can be inspected without edits.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -581,6 +621,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-featureIds-ALT-2",
     name: "UC-featureIds alt flow 2: No catalogue availability produces an explicit unavailable state.",
+    objective: 'Check an alternative path of "Feature IDs": no catalogue availability produces an explicit unavailable state.',
     description: "Alternate flow 2 of UC-featureIds (Feature IDs): \"No catalogue availability produces an explicit unavailable state.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -596,6 +637,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-featureIds-EXC-1",
     name: "UC-featureIds exc flow 1: The row-specific PATCH used by the UI is not registered in the inspect",
+    objective: 'Check that "Feature IDs" fails safely: the row-specific update used by the screen is not registered in the inspected feature module.',
     description: "Exception flow 1 of UC-featureIds (Feature IDs): \"The row-specific PATCH used by the UI is not registered in the inspected feature module.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -611,6 +653,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-featureIds-EXC-2",
     name: "UC-featureIds exc flow 2: A failed update keeps the prior confirmed level.",
+    objective: 'Check that "Feature IDs" fails safely: a failed update keeps the prior confirmed level.',
     description: "Exception flow 2 of UC-featureIds (Feature IDs): \"A failed update keeps the prior confirmed level.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -626,6 +669,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-help-MAIN",
     name: "UC-help main flow: Help",
+    objective: 'Walk through the "Help" screen the way its main use case describes it: operator opens Help. System displays available topics and shortcuts. Operator searches or selects a topic. System shows the matching topic and an available return path.',
     description: "Main flow of UC-help (Help): Operator opens Help. System displays available topics and shortcuts. Operator searches or selects a topic. System shows the matching topic and an available return path. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -639,6 +683,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-help-ALT-1",
     name: "UC-help alt flow 1: An unmatched search reports no matching topic.",
+    objective: 'Check an alternative path of "Help": an unmatched search reports no matching topic.',
     description: "Alternate flow 1 of UC-help (Help): \"An unmatched search reports no matching topic.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -652,6 +697,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-help-ALT-2",
     name: "UC-help alt flow 2: The standalone help page is usable without assuming console draft stat",
+    objective: 'Check an alternative path of "Help": the standalone help page is usable without assuming console draft state.',
     description: "Alternate flow 2 of UC-help (Help): \"The standalone help page is usable without assuming console draft state.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -665,6 +711,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-help-EXC-1",
     name: "UC-help exc flow 1: A missing topic asset is disclosed.",
+    objective: 'Check that "Help" fails safely: a missing topic asset is disclosed.',
     description: "Exception flow 1 of UC-help (Help): \"A missing topic asset is disclosed.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -678,6 +725,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-help-EXC-2",
     name: "UC-help exc flow 2: A keyboard shortcut in a text field must not unexpectedly trigger a de",
+    objective: 'Check that "Help" fails safely: a keyboard shortcut in a text field must not unexpectedly trigger a destructive action.',
     description: "Exception flow 2 of UC-help (Help): \"A keyboard shortcut in a text field must not unexpectedly trigger a destructive action.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -691,6 +739,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFamily-MAIN",
     name: "UC-messageDesignerFamily main flow: Choose a message family",
+    objective: 'Walk through the "Choose a message family" screen the way its main use case describes it: analyst opens the family step. System groups available message types by family. Analyst selects a family tile. System opens the message step scoped to that family.',
     description: "Main flow of UC-messageDesignerFamily (Choose a message family): Analyst opens the family step. System groups available message types by family. Analyst selects a family tile. System opens the message step scoped to that family. Touches the screen's real route and its registered API(s): GET /api/v1/catalog/designer-types.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -706,6 +755,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFamily-ALT-1",
     name: "UC-messageDesignerFamily alt flow 1: A schema handoff bypasses this selection with explicit source context.",
+    objective: 'Check an alternative path of "Choose a message family": a schema handoff bypasses this selection with explicit source context.',
     description: "Alternate flow 1 of UC-messageDesignerFamily (Choose a message family): \"A schema handoff bypasses this selection with explicit source context.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -721,6 +771,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFamily-ALT-2",
     name: "UC-messageDesignerFamily alt flow 2: Start over clears a previous family before a fresh selection.",
+    objective: 'Check an alternative path of "Choose a message family": start over clears a previous family before a fresh selection.',
     description: "Alternate flow 2 of UC-messageDesignerFamily (Choose a message family): \"Start over clears a previous family before a fresh selection.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -736,6 +787,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFamily-EXC-1",
     name: "UC-messageDesignerFamily exc flow 1: A failed load is not an empty catalogue.",
+    objective: 'Check that "Choose a message family" fails safely: a failed load is not an empty catalogue.',
     description: "Exception flow 1 of UC-messageDesignerFamily (Choose a message family): \"A failed load is not an empty catalogue.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -751,6 +803,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFamily-EXC-2",
     name: "UC-messageDesignerFamily exc flow 2: A family with no usable type cannot create a fabricated message choice",
+    objective: 'Check that "Choose a message family" fails safely: a family with no usable type cannot create a fabricated message choice.',
     description: "Exception flow 2 of UC-messageDesignerFamily (Choose a message family): \"A family with no usable type cannot create a fabricated message choice.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -766,6 +819,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFields-MAIN",
     name: "UC-messageDesignerFields main flow: Select fields",
+    objective: 'Walk through the "Select fields" screen the way its main use case describes it: system displays the selected message field hierarchy. Analyst expands branches and inspects paths. Analyst includes or excludes optional fields; required fields stay selected. Analyst reviews the selection and continues to the workspace.',
     description: "Main flow of UC-messageDesignerFields (Select fields): System displays the selected message field hierarchy. Analyst expands branches and inspects paths. Analyst includes or excludes optional fields; required fields stay selected. Analyst reviews the selection and continues to the workspace. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -779,6 +833,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFields-ALT-1",
     name: "UC-messageDesignerFields alt flow 1: Back returns to message selection.",
+    objective: 'Check an alternative path of "Select fields": back returns to message selection.',
     description: "Alternate flow 1 of UC-messageDesignerFields (Select fields): \"Back returns to message selection.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -792,6 +847,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFields-ALT-2",
     name: "UC-messageDesignerFields alt flow 2: Draft-save controls, where offered, must describe what is actually per",
+    objective: 'Check an alternative path of "Select fields": draft-save controls, where offered, must describe what is actually persisted.',
     description: "Alternate flow 2 of UC-messageDesignerFields (Select fields): \"Draft-save controls, where offered, must describe what is actually persisted.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -805,6 +861,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFields-EXC-1",
     name: "UC-messageDesignerFields exc flow 1: An empty model is not populated with example fields.",
+    objective: 'Check that "Select fields" fails safely: an empty model is not populated with example fields.',
     description: "Exception flow 1 of UC-messageDesignerFields (Select fields): \"An empty model is not populated with example fields.\" No backing API is registered for this use case; this claim is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -818,6 +875,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerFields-EXC-2",
     name: "UC-messageDesignerFields exc flow 2: Unresolved required content prevents a claim that the selection is sch",
+    objective: 'Check that "Select fields" fails safely: unresolved required content prevents a claim that the selection is schema-valid.',
     description: "Exception flow 2 of UC-messageDesignerFields (Select fields): \"Unresolved required content prevents a claim that the selection is schema-valid.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -831,6 +889,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerMessage-MAIN",
     name: "UC-messageDesignerMessage main flow: Choose a message",
+    objective: 'Walk through the "Choose a message" screen the way its main use case describes it: system lists message tiles for the chosen family. Analyst reviews code, parsed-field information and available version context. Analyst selects one message. System opens its field model; Back returns to the family step.',
     description: "Main flow of UC-messageDesignerMessage (Choose a message): System lists message tiles for the chosen family. Analyst reviews code, parsed-field information and available version context. Analyst selects one message. System opens its field model; Back returns to the family step. Touches the screen's real route and its registered API(s): GET /api/v1/catalog/designer-types.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -846,6 +905,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerMessage-ALT-1",
     name: "UC-messageDesignerMessage alt flow 1: Back allows a different family choice.",
+    objective: 'Check an alternative path of "Choose a message": back allows a different family choice.',
     description: "Alternate flow 1 of UC-messageDesignerMessage (Choose a message): \"Back allows a different family choice.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -861,6 +921,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerMessage-ALT-2",
     name: "UC-messageDesignerMessage alt flow 2: A tile with no fields discloses that limitation before the empty field",
+    objective: 'Check an alternative path of "Choose a message": a tile with no fields discloses that limitation before the empty field step.',
     description: "Alternate flow 2 of UC-messageDesignerMessage (Choose a message): \"A tile with no fields discloses that limitation before the empty field step.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -876,6 +937,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerMessage-EXC-1",
     name: "UC-messageDesignerMessage exc flow 1: An unavailable type is not replaced with the first type in the catalog",
+    objective: 'Check that "Choose a message" fails safely: an unavailable type is not replaced with the first type in the catalogue.',
     description: "Exception flow 1 of UC-messageDesignerMessage (Choose a message): \"An unavailable type is not replaced with the first type in the catalogue.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -891,6 +953,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-messageDesignerMessage-EXC-2",
     name: "UC-messageDesignerMessage exc flow 2: Two versions sharing a label need a disambiguating identity.",
+    objective: 'Check that "Choose a message" fails safely: two versions sharing a label need a disambiguating identity.',
     description: "Exception flow 2 of UC-messageDesignerMessage (Choose a message): \"Two versions sharing a label need a disambiguating identity.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -906,6 +969,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgDataFiles-MAIN",
     name: "UC-msgDataFiles main flow: Saved test data files",
+    objective: 'Walk through the "Saved test data files" screen the way its main use case describes it: operator opens saved test data files. System lists actual saved batch metadata. Operator inspects message type and confirmed message count. Operator selects an available batch for a supported test workflow.',
     description: "Main flow of UC-msgDataFiles (Saved test data files): Operator opens saved test data files. System lists actual saved batch metadata. Operator inspects message type and confirmed message count. Operator selects an available batch for a supported test workflow. Touches the screen's real route and its registered API(s): GET /api/v1/data-files, GET /api/v1/generated-messages.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -922,6 +986,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgDataFiles-ALT-1",
     name: "UC-msgDataFiles alt flow 1: An empty library directs the analyst to generate and save data.",
+    objective: 'Check an alternative path of "Saved test data files": an empty library directs the analyst to generate and save data.',
     description: "Alternate flow 1 of UC-msgDataFiles (Saved test data files): \"An empty library directs the analyst to generate and save data.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -938,6 +1003,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgDataFiles-ALT-2",
     name: "UC-msgDataFiles alt flow 2: A batch may be inspected without sending it.",
+    objective: 'Check an alternative path of "Saved test data files": a batch may be inspected without sending it.',
     description: "Alternate flow 2 of UC-msgDataFiles (Saved test data files): \"A batch may be inspected without sending it.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -954,6 +1020,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgDataFiles-EXC-1",
     name: "UC-msgDataFiles exc flow 1: A missing batch cannot be replaced silently with newly randomised data",
+    objective: 'Check that "Saved test data files" fails safely: a missing batch cannot be replaced silently with newly randomised data.',
     description: "Exception flow 1 of UC-msgDataFiles (Saved test data files): \"A missing batch cannot be replaced silently with newly randomised data.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -970,6 +1037,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgDataFiles-EXC-2",
     name: "UC-msgDataFiles exc flow 2: An incomplete generation displays the confirmed count and available st",
+    objective: 'Check that "Saved test data files" fails safely: an incomplete generation displays the confirmed count and available state.',
     description: "Exception flow 2 of UC-msgDataFiles (Saved test data files): \"An incomplete generation displays the confirmed count and available state.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -986,6 +1054,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgSchemaRegister-MAIN",
     name: "UC-msgSchemaRegister main flow: Schema register",
+    objective: 'Walk through the "Schema register" screen the way its main use case describes it: analyst opens Schema register. System loads upload and designer-type information. Analyst reviews code, family, state and available field count. Analyst selects a usable entry and requests the designer handoff.',
     description: "Main flow of UC-msgSchemaRegister (Schema register): Analyst opens Schema register. System loads upload and designer-type information. Analyst reviews code, family, state and available field count. Analyst selects a usable entry and requests the designer handoff. Touches the screen's real route and its registered API(s): GET /api/v1/catalog/iso/uploads, GET /api/v1/catalog/designer-types.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1002,6 +1071,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgSchemaRegister-ALT-1",
     name: "UC-msgSchemaRegister alt flow 1: No entries prompts import or creation.",
+    objective: 'Check an alternative path of "Schema register": no entries prompts import or creation.',
     description: "Alternate flow 1 of UC-msgSchemaRegister (Schema register): \"No entries prompts import or creation.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1018,6 +1088,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgSchemaRegister-ALT-2",
     name: "UC-msgSchemaRegister alt flow 2: A not-ready entry remains visible with its limitation.",
+    objective: 'Check an alternative path of "Schema register": a not-ready entry remains visible with its limitation.',
     description: "Alternate flow 2 of UC-msgSchemaRegister (Schema register): \"A not-ready entry remains visible with its limitation.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1034,6 +1105,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgSchemaRegister-EXC-1",
     name: "UC-msgSchemaRegister exc flow 1: A stale ready entry is checked when opened.",
+    objective: 'Check that "Schema register" fails safely: a stale ready entry is checked when opened.',
     description: "Exception flow 1 of UC-msgSchemaRegister (Schema register): \"A stale ready entry is checked when opened.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1050,6 +1122,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgSchemaRegister-EXC-2",
     name: "UC-msgSchemaRegister exc flow 2: A failed collection load must not be reported as successful emptiness.",
+    objective: 'Check that "Schema register" fails safely: a failed collection load must not be reported as successful emptiness.',
     description: "Exception flow 2 of UC-msgSchemaRegister (Schema register): \"A failed collection load must not be reported as successful emptiness.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1065,6 +1138,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgViewSaved-MAIN",
     name: "UC-msgViewSaved main flow: Saved message definitions",
+    objective: 'Walk through the "Saved message definitions" screen the way its main use case describes it: analyst opens Saved message definitions. System loads available definitions and source message types. Analyst identifies a definition by name, type and version. System opens the selected definition or provides its supported reuse path.',
     description: "Main flow of UC-msgViewSaved (Saved message definitions): Analyst opens Saved message definitions. System loads available definitions and source message types. Analyst identifies a definition by name, type and version. System opens the selected definition or provides its supported reuse path. Touches the screen's real route and its registered API(s): GET /api/v1/message-types, GET /api/v1/definitions.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1081,6 +1155,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgViewSaved-ALT-1",
     name: "UC-msgViewSaved alt flow 1: New definition starts the wizard.",
+    objective: 'Check an alternative path of "Saved message definitions": new definition starts the wizard.',
     description: "Alternate flow 1 of UC-msgViewSaved (Saved message definitions): \"New definition starts the wizard.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1097,6 +1172,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgViewSaved-ALT-2",
     name: "UC-msgViewSaved alt flow 2: A draft, if stored, is identified separately from a completed definiti",
+    objective: 'Check an alternative path of "Saved message definitions": a draft, if stored, is identified separately from a completed definition.',
     description: "Alternate flow 2 of UC-msgViewSaved (Saved message definitions): \"A draft, if stored, is identified separately from a completed definition.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1113,6 +1189,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgViewSaved-EXC-1",
     name: "UC-msgViewSaved exc flow 1: A missing source schema is disclosed when reopening.",
+    objective: 'Check that "Saved message definitions" fails safely: a missing source schema is disclosed when reopening.',
     description: "Exception flow 1 of UC-msgViewSaved (Saved message definitions): \"A missing source schema is disclosed when reopening.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1129,6 +1206,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-msgViewSaved-EXC-2",
     name: "UC-msgViewSaved exc flow 2: A load error is not represented as a successfully empty library.",
+    objective: 'Check that "Saved message definitions" fails safely: a load error is not represented as a successfully empty library.',
     description: "Exception flow 2 of UC-msgViewSaved (Saved message definitions): \"A load error is not represented as a successfully empty library.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1145,6 +1223,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-overview-MAIN",
     name: "UC-overview main flow: Overview",
+    objective: 'Walk through the "Overview" screen the way its main use case describes it: operator opens Overview; the system requests the tenant bootstrap. System renders available run, message and rule counts with their observation context. Operator selects a summary or attention item; the system opens its configured page. Operator returns to Overview; the system refreshes available data without creating assets.',
     description: "Main flow of UC-overview (Overview): Operator opens Overview; the system requests the tenant bootstrap. System renders available run, message and rule counts with their observation context. Operator selects a summary or attention item; the system opens its configured page. Operator returns to Overview; the system refreshes available data without creating assets. Touches the screen's real route and its registered API(s): GET /api/v1/console/bootstrap, GET /api/v1/ux/first-run.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1161,6 +1240,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-overview-ALT-1",
     name: "UC-overview alt flow 1: A genuinely empty tenant sees zero counts and creation links.",
+    objective: 'Check an alternative path of "Overview": a genuinely empty tenant sees zero counts and creation links.',
     description: "Alternate flow 1 of UC-overview (Overview): \"A genuinely empty tenant sees zero counts and creation links.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1177,6 +1257,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-overview-ALT-2",
     name: "UC-overview alt flow 2: Operator changes the activity range where available; the displayed ran",
+    objective: 'Check an alternative path of "Overview": operator changes the activity range where available; the displayed range must identify the data actually used.',
     description: "Alternate flow 2 of UC-overview (Overview): \"Operator changes the activity range where available; the displayed range must identify the data actually used.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1193,6 +1274,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-overview-EXC-1",
     name: "UC-overview exc flow 1: A failed bootstrap is an unavailable-data state, not evidence of zero ",
+    objective: 'Check that "Overview" fails safely: a failed bootstrap is an unavailable-data state, not evidence of zero assets.',
     description: "Exception flow 1 of UC-overview (Overview): \"A failed bootstrap is an unavailable-data state, not evidence of zero assets.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1208,6 +1290,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-overview-EXC-2",
     name: "UC-overview exc flow 2: An expired session requires sign-in before tenant statistics are treat",
+    objective: 'Check that "Overview" fails safely: an expired session requires sign-in before tenant statistics are treated as current.',
     description: "Exception flow 2 of UC-overview (Overview): \"An expired session requires sign-in before tenant statistics are treated as current.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1224,6 +1307,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repAll-MAIN",
     name: "UC-repAll main flow: All reports",
+    objective: 'Walk through the "All reports" screen the way its main use case describes it: operator opens All reports. System loads stored report records. Operator identifies the intended report by run and generation context. System opens the available report representation or explains missing content.',
     description: "Main flow of UC-repAll (All reports): Operator opens All reports. System loads stored report records. Operator identifies the intended report by run and generation context. System opens the available report representation or explains missing content. Touches the screen's real route and its registered API(s): GET /api/v1/reports.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1239,6 +1323,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repAll-ALT-1",
     name: "UC-repAll alt flow 1: A category-specific view narrows the same source collection.",
+    objective: 'Check an alternative path of "All reports": a category-specific view narrows the same source collection.',
     description: "Alternate flow 1 of UC-repAll (All reports): \"A category-specific view narrows the same source collection.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1254,6 +1339,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repAll-ALT-2",
     name: "UC-repAll alt flow 2: No reports directs the operator to a supported run workflow.",
+    objective: 'Check an alternative path of "All reports": no reports directs the operator to a supported run workflow.',
     description: "Alternate flow 2 of UC-repAll (All reports): \"No reports directs the operator to a supported run workflow.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1269,6 +1355,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repAll-EXC-1",
     name: "UC-repAll exc flow 1: Failed report retrieval is not proof that no reports exist.",
+    objective: 'Check that "All reports" fails safely: failed report retrieval is not proof that no reports exist.',
     description: "Exception flow 1 of UC-repAll (All reports): \"Failed report retrieval is not proof that no reports exist.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1284,6 +1371,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repAll-EXC-2",
     name: "UC-repAll exc flow 2: A preview or placeholder document is not downloadable evidence of a ru",
+    objective: 'Check that "All reports" fails safely: a preview or placeholder document is not downloadable evidence of a run.',
     description: "Exception flow 2 of UC-repAll (All reports): \"A preview or placeholder document is not downloadable evidence of a run.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1299,6 +1387,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCompliance-MAIN",
     name: "UC-repCompliance main flow: Compliance reports",
+    objective: 'Walk through the "Compliance reports" screen the way its main use case describes it: reviewer opens Compliance reports. System displays the report framework label, run context and actual outcome. Reviewer inspects supporting controls and failed or untested items. Reviewer records or performs the follow-up in the supported process.',
     description: "Main flow of UC-repCompliance (Compliance reports): Reviewer opens Compliance reports. System displays the report framework label, run context and actual outcome. Reviewer inspects supporting controls and failed or untested items. Reviewer records or performs the follow-up in the supported process. Touches the screen's real route and its registered API(s): GET /api/v1/reports.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1314,6 +1403,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCompliance-ALT-1",
     name: "UC-repCompliance alt flow 1: No framework evidence is shown as unavailable.",
+    objective: 'Check an alternative path of "Compliance reports": no framework evidence is shown as unavailable.',
     description: "Alternate flow 1 of UC-repCompliance (Compliance reports): \"No framework evidence is shown as unavailable.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1329,6 +1419,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCompliance-ALT-2",
     name: "UC-repCompliance alt flow 2: Review status remains visible until supported evidence changes it.",
+    objective: 'Check an alternative path of "Compliance reports": review status remains visible until supported evidence changes it.',
     description: "Alternate flow 2 of UC-repCompliance (Compliance reports): \"Review status remains visible until supported evidence changes it.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1344,6 +1435,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCompliance-EXC-1",
     name: "UC-repCompliance exc flow 1: An unsupported framework mapping is disclosed.",
+    objective: 'Check that "Compliance reports" fails safely: an unsupported framework mapping is disclosed.',
     description: "Exception flow 1 of UC-repCompliance (Compliance reports): \"An unsupported framework mapping is disclosed.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1359,6 +1451,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCompliance-EXC-2",
     name: "UC-repCompliance exc flow 2: A Passed test badge cannot establish regulatory compliance by itself.",
+    objective: 'Check that "Compliance reports" fails safely: a Passed test badge cannot establish regulatory compliance by itself.',
     description: "Exception flow 2 of UC-repCompliance (Compliance reports): \"A Passed test badge cannot establish regulatory compliance by itself.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1374,6 +1467,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCoverage-MAIN",
     name: "UC-repCoverage main flow: Coverage reports",
+    objective: 'Walk through the "Coverage reports" screen the way its main use case describes it: analyst opens Coverage reports. System identifies the rule set and evidence period/version. System distinguishes tested, untested and unavailable results. Analyst inspects uncovered rules before planning additional tests.',
     description: "Main flow of UC-repCoverage (Coverage reports): Analyst opens Coverage reports. System identifies the rule set and evidence period/version. System distinguishes tested, untested and unavailable results. Analyst inspects uncovered rules before planning additional tests. Touches the screen's real route and its registered API(s): GET /api/v1/reports, GET /api/v1/rules.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1390,6 +1484,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCoverage-ALT-1",
     name: "UC-repCoverage alt flow 1: No evidence is reported as unknown or untested.",
+    objective: 'Check an alternative path of "Coverage reports": no evidence is reported as unknown or untested.',
     description: "Alternate flow 1 of UC-repCoverage (Coverage reports): \"No evidence is reported as unknown or untested.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1406,6 +1501,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCoverage-ALT-2",
     name: "UC-repCoverage alt flow 2: A partial run retains unevaluated cases in the denominator policy.",
+    objective: 'Check an alternative path of "Coverage reports": a partial run retains unevaluated cases in the denominator policy.',
     description: "Alternate flow 2 of UC-repCoverage (Coverage reports): \"A partial run retains unevaluated cases in the denominator policy.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1422,6 +1518,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCoverage-EXC-1",
     name: "UC-repCoverage exc flow 1: Division by zero is not 100% coverage.",
+    objective: 'Check that "Coverage reports" fails safely: division by zero is not 100% coverage.',
     description: "Exception flow 1 of UC-repCoverage (Coverage reports): \"Division by zero is not 100% coverage.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1438,6 +1535,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repCoverage-EXC-2",
     name: "UC-repCoverage exc flow 2: Missing or stale results are not silently counted as passed.",
+    objective: 'Check that "Coverage reports" fails safely: missing or stale results are not silently counted as passed.',
     description: "Exception flow 2 of UC-repCoverage (Coverage reports): \"Missing or stale results are not silently counted as passed.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1454,6 +1552,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repRuns-MAIN",
     name: "UC-repRuns main flow: Test run reports",
+    objective: 'Walk through the "Test run reports" screen the way its main use case describes it: operator selects a run context. System loads available reports and filters by the run reference. Operator opens a matching report. System retains the run identity while displaying the evidence.',
     description: "Main flow of UC-repRuns (Test run reports): Operator selects a run context. System loads available reports and filters by the run reference. Operator opens a matching report. System retains the run identity while displaying the evidence. Touches the screen's real route and its registered API(s): GET /api/v1/reports.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1469,6 +1568,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repRuns-ALT-1",
     name: "UC-repRuns alt flow 1: No matching report is a valid result.",
+    objective: 'Check an alternative path of "Test run reports": no matching report is a valid result.',
     description: "Alternate flow 1 of UC-repRuns (Test run reports): \"No matching report is a valid result.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1484,6 +1584,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repRuns-ALT-2",
     name: "UC-repRuns alt flow 2: All reports returns to the wider collection explicitly.",
+    objective: 'Check an alternative path of "Test run reports": all reports returns to the wider collection explicitly.',
     description: "Alternate flow 2 of UC-repRuns (Test run reports): \"All reports returns to the wider collection explicitly.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1499,6 +1600,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repRuns-EXC-1",
     name: "UC-repRuns exc flow 1: A missing run context must not silently show unrelated reports.",
+    objective: 'Check that "Test run reports" fails safely: a missing run context must not silently show unrelated reports.',
     description: "Exception flow 1 of UC-repRuns (Test run reports): \"A missing run context must not silently show unrelated reports.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1514,6 +1616,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repRuns-EXC-2",
     name: "UC-repRuns exc flow 2: An unavailable report remains unavailable rather than replaced with th",
+    objective: 'Check that "Test run reports" fails safely: an unavailable report remains unavailable rather than replaced with the newest report.',
     description: "Exception flow 2 of UC-repRuns (Test run reports): \"An unavailable report remains unavailable rather than replaced with the newest report.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1529,6 +1632,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repScheduled-MAIN",
     name: "UC-repScheduled main flow: Scheduled exports",
+    objective: 'Walk through the "Scheduled exports" screen the way its main use case describes it: administrator opens Scheduled exports. System displays available configuration with report scope, destination and cadence. Administrator reviews the next occurrence and most recent actual delivery. Administrator uses only a supported creation or maintenance action.',
     description: "Main flow of UC-repScheduled (Scheduled exports): Administrator opens Scheduled exports. System displays available configuration with report scope, destination and cadence. Administrator reviews the next occurrence and most recent actual delivery. Administrator uses only a supported creation or maintenance action. Touches the screen's real route and its registered API(s): GET /api/v1/reports.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1544,6 +1648,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repScheduled-ALT-1",
     name: "UC-repScheduled alt flow 1: No configured export produces an empty state.",
+    objective: 'Check an alternative path of "Scheduled exports": no configured export produces an empty state.',
     description: "Alternate flow 1 of UC-repScheduled (Scheduled exports): \"No configured export produces an empty state.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1559,6 +1664,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repScheduled-ALT-2",
     name: "UC-repScheduled alt flow 2: A manual report download remains separate from recurring export.",
+    objective: 'Check an alternative path of "Scheduled exports": a manual report download remains separate from recurring export.',
     description: "Alternate flow 2 of UC-repScheduled (Scheduled exports): \"A manual report download remains separate from recurring export.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1574,6 +1680,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repScheduled-EXC-1",
     name: "UC-repScheduled exc flow 1: An invalid destination cannot be shown as a successful delivery.",
+    objective: 'Check that "Scheduled exports" fails safely: an invalid destination cannot be shown as a successful delivery.',
     description: "Exception flow 1 of UC-repScheduled (Scheduled exports): \"An invalid destination cannot be shown as a successful delivery.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1589,6 +1696,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repScheduled-EXC-2",
     name: "UC-repScheduled exc flow 2: A failed export must not be silently advanced as completed.",
+    objective: 'Check that "Scheduled exports" fails safely: a failed export must not be silently advanced as completed.',
     description: "Exception flow 2 of UC-repScheduled (Scheduled exports): \"A failed export must not be silently advanced as completed.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1604,6 +1712,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repSuites-MAIN",
     name: "UC-repSuites main flow: Test suite reports",
+    objective: 'Walk through the "Test suite reports" screen the way its main use case describes it: reviewer opens suite evidence and enters the intended suite ID. System resolves the suite and its evidence source. Reviewer requests the package. System returns a supported representation with suite and result context. Reviewer opens the package and checks totals against included cases.',
     description: "Main flow of UC-repSuites (Test suite reports): Reviewer opens suite evidence and enters the intended suite ID. System resolves the suite and its evidence source. Reviewer requests the package. System returns a supported representation with suite and result context. Reviewer opens the package and checks totals against included cases. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1617,6 +1726,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repSuites-ALT-1",
     name: "UC-repSuites alt flow 1: An empty suite needs an explicit no-evidence outcome.",
+    objective: 'Check an alternative path of "Test suite reports": an empty suite needs an explicit no-evidence outcome.',
     description: "Alternate flow 1 of UC-repSuites (Test suite reports): \"An empty suite needs an explicit no-evidence outcome.\" No backing API is registered for this use case; this claim is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1630,6 +1740,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repSuites-ALT-2",
     name: "UC-repSuites alt flow 2: Offline readability does not by itself establish cryptographic integri",
+    objective: 'Check an alternative path of "Test suite reports": offline readability does not by itself establish cryptographic integrity.',
     description: "Alternate flow 2 of UC-repSuites (Test suite reports): \"Offline readability does not by itself establish cryptographic integrity.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1643,6 +1754,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repSuites-EXC-1",
     name: "UC-repSuites exc flow 1: An unavailable endpoint or unknown suite cannot produce a successful e",
+    objective: 'Check that "Test suite reports" fails safely: an unavailable endpoint or unknown suite cannot produce a successful empty pack.',
     description: "Exception flow 1 of UC-repSuites (Test suite reports): \"An unavailable endpoint or unknown suite cannot produce a successful empty pack.\" No backing API is registered for this use case, so this claim is evidenced only by the plain navigation above succeeding without needing any session/Authorization header.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1656,6 +1768,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-repSuites-EXC-2",
     name: "UC-repSuites exc flow 2: A live rerun must not replace historical evidence silently.",
+    objective: 'Check that "Test suite reports" fails safely: a live rerun must not replace historical evidence silently.',
     description: "Exception flow 2 of UC-repSuites (Test suite reports): \"A live rerun must not replace historical evidence silently.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1669,6 +1782,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roleCreate-MAIN",
     name: "UC-roleCreate main flow: Create user role",
+    objective: 'Walk through the "Create user role" screen the way its main use case describes it: administrator names the job function. Administrator selects explicit supported permissions. Administrator reviews any separate feature slice. System validates the grouping through a confirmed provisioning contract. System confirms the created identity before it becomes assignable.',
     description: "Main flow of UC-roleCreate (Create user role): Administrator names the job function. Administrator selects explicit supported permissions. Administrator reviews any separate feature slice. System validates the grouping through a confirmed provisioning contract. System confirms the created identity before it becomes assignable. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1682,6 +1796,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roleCreate-ALT-1",
     name: "UC-roleCreate alt flow 1: An existing suitable role should be reused rather than duplicated.",
+    objective: 'Check an alternative path of "Create user role": an existing suitable role should be reused rather than duplicated.',
     description: "Alternate flow 1 of UC-roleCreate (Create user role): \"An existing suitable role should be reused rather than duplicated.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1695,6 +1810,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roleCreate-ALT-2",
     name: "UC-roleCreate alt flow 2: An incomplete role remains a proposal until provisioning exists.",
+    objective: 'Check an alternative path of "Create user role": an incomplete role remains a proposal until provisioning exists.',
     description: "Alternate flow 2 of UC-roleCreate (Create user role): \"An incomplete role remains a proposal until provisioning exists.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1708,6 +1824,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roleCreate-EXC-1",
     name: "UC-roleCreate exc flow 1: Unknown permission strings must not become effective silently.",
+    objective: 'Check that "Create user role" fails safely: unknown permission strings must not become effective silently.',
     description: "Exception flow 1 of UC-roleCreate (Create user role): \"Unknown permission strings must not become effective silently.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1721,6 +1838,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roleCreate-EXC-2",
     name: "UC-roleCreate exc flow 2: Duplicate name scope and role deletion policy remain decisions.",
+    objective: 'Check that "Create user role" fails safely: duplicate name scope and role deletion policy remain decisions.',
     description: "Exception flow 2 of UC-roleCreate (Create user role): \"Duplicate name scope and role deletion policy remain decisions.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1734,6 +1852,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roles-MAIN",
     name: "UC-roles main flow: User roles",
+    objective: 'Walk through the "User roles" screen the way its main use case describes it: administrator opens supported access administration. System lists the actual functional profiles. Administrator reviews permitted operations and effective assignments. Administrator identifies a supported change path or records a missing capability.',
     description: "Main flow of UC-roles (User roles): Administrator opens supported access administration. System lists the actual functional profiles. Administrator reviews permitted operations and effective assignments. Administrator identifies a supported change path or records a missing capability. Touches the screen's real route and its registered API(s): GET /api/v1/admin/functional-access-profiles, GET /api/v1/admin/data-access-profiles.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1750,6 +1869,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roles-ALT-1",
     name: "UC-roles alt flow 1: Data access profiles are reviewed separately from functional permissio",
+    objective: 'Check an alternative path of "User roles": data access profiles are reviewed separately from functional permissions.',
     description: "Alternate flow 1 of UC-roles (User roles): \"Data access profiles are reviewed separately from functional permissions.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1766,6 +1886,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roles-ALT-2",
     name: "UC-roles alt flow 2: A historical User roles setting is not a role editor.",
+    objective: 'Check an alternative path of "User roles": a historical User roles setting is not a role editor.',
     description: "Alternate flow 2 of UC-roles (User roles): \"A historical User roles setting is not a role editor.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1782,6 +1903,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roles-EXC-1",
     name: "UC-roles exc flow 1: Unregistered role CRUD is not claimed available.",
+    objective: 'Check that "User roles" fails safely: unregistered role create/edit/delete is not claimed available.',
     description: "Exception flow 1 of UC-roles (User roles): \"Unregistered role CRUD is not claimed available.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1798,6 +1920,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-roles-EXC-2",
     name: "UC-roles exc flow 2: Deleting an assigned role requires an agreed dependency policy.",
+    objective: 'Check that "User roles" fails safely: deleting an assigned role requires an agreed dependency policy.',
     description: "Exception flow 2 of UC-roles (User roles): \"Deleting an assigned role requires an agreed dependency policy.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1814,6 +1937,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExisting-MAIN",
     name: "UC-ruleBenchExisting main flow: Existing rules",
+    objective: 'Walk through the "Existing rules" screen the way its main use case describes it: analyst opens Existing rules; the system loads tenant rules. System shows each rule identity, condition, status and available validation evidence. Analyst opens a rule; the system retrieves that rule rather than a row-position substitute. Analyst chooses an allowed edit or lifecycle action, or returns without changing it.',
     description: "Main flow of UC-ruleBenchExisting (Existing rules): Analyst opens Existing rules; the system loads tenant rules. System shows each rule identity, condition, status and available validation evidence. Analyst opens a rule; the system retrieves that rule rather than a row-position substitute. Analyst chooses an allowed edit or lifecycle action, or returns without changing it. Touches the screen's real route and its registered API(s): GET /api/v1/rules.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1829,6 +1953,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExisting-ALT-1",
     name: "UC-ruleBenchExisting alt flow 1: An empty library offers Create new rule.",
+    objective: 'Check an alternative path of "Existing rules": an empty library offers Create new rule.',
     description: "Alternate flow 1 of UC-ruleBenchExisting (Existing rules): \"An empty library offers Create new rule.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1844,6 +1969,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExisting-ALT-2",
     name: "UC-ruleBenchExisting alt flow 2: A view-only operator may inspect allowed data without being offered a ",
+    objective: 'Check an alternative path of "Existing rules": a view-only operator may inspect allowed data without being offered a write.',
     description: "Alternate flow 2 of UC-ruleBenchExisting (Existing rules): \"A view-only operator may inspect allowed data without being offered a write.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1859,6 +1985,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExisting-EXC-1",
     name: "UC-ruleBenchExisting exc flow 1: A deleted rule selected from a stale list produces a not-found result.",
+    objective: 'Check that "Existing rules" fails safely: a deleted rule selected from a stale list produces a not-found result.',
     description: "Exception flow 1 of UC-ruleBenchExisting (Existing rules): \"A deleted rule selected from a stale list produces a not-found result.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1874,6 +2001,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExisting-EXC-2",
     name: "UC-ruleBenchExisting exc flow 2: Missing validation evidence is shown as not validated, not 100% covera",
+    objective: 'Check that "Existing rules" fails safely: missing validation evidence is shown as not validated, not 100% coverage.',
     description: "Exception flow 2 of UC-ruleBenchExisting (Existing rules): \"Missing validation evidence is shown as not validated, not 100% coverage.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1889,6 +2017,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-MAIN",
     name: "UC-ruleBenchExport main flow: Export rules",
+    objective: 'Walk through the "Export rules" screen the way its main use case describes it: analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing the…',
     description: "Main flow of UC-ruleBenchExport (Export rules): Analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing the package. Touches the screen's real route and its registered API(s): GET /api/v1/rules/export.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1904,6 +2033,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-ALT-1",
     name: "UC-ruleBenchExport alt flow 1: An empty catalogue produces the documented empty representation or an ",
+    objective: 'Check an alternative path of "Export rules": an empty catalogue produces the documented empty representation or an explicit no-data outcome.',
     description: "Alternate flow 1 of UC-ruleBenchExport (Export rules): \"An empty catalogue produces the documented empty representation or an explicit no-data outcome.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1919,6 +2049,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-ALT-2",
     name: "UC-ruleBenchExport alt flow 2: A selection UI that is not honoured by the endpoint is identified as a",
+    objective: 'Check an alternative path of "Export rules": a selection screen that is not honoured by the endpoint is identified as a gap.',
     description: "Alternate flow 2 of UC-ruleBenchExport (Export rules): \"A selection UI that is not honoured by the endpoint is identified as a gap.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1934,6 +2065,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-EXC-1",
     name: "UC-ruleBenchExport exc flow 1: A service error must not download an error body as a valid rule pack.",
+    objective: 'Check that "Export rules" fails safely: a service error must not download an error body as a valid rule pack.',
     description: "Exception flow 1 of UC-ruleBenchExport (Export rules): \"A service error must not download an error body as a valid rule pack.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1949,6 +2081,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-EXC-2",
     name: "UC-ruleBenchExport exc flow 2: Unsupported XML conversion is not inferred from a prototype format col",
+    objective: 'Check that "Export rules" fails safely: unsupported file-format conversion is not inferred from a prototype format column.',
     description: "Exception flow 2 of UC-ruleBenchExport (Export rules): \"Unsupported XML conversion is not inferred from a prototype format column.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1964,6 +2097,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleCanvas-MAIN",
     name: "UC-ruleCanvas main flow: Rule Canvas",
+    objective: 'Walk through the "Rule Canvas" screen the way its main use case describes it: analyst opens the companion canvas from a creation screen. System opens the standalone canvas. Analyst sketches the intended logic and inspects the representation. Analyst returns to the rule form for its supported save and validation workflow.',
     description: "Main flow of UC-ruleCanvas (Rule Canvas): Analyst opens the companion canvas from a creation screen. System opens the standalone canvas. Analyst sketches the intended logic and inspects the representation. Analyst returns to the rule form for its supported save and validation workflow. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1977,6 +2111,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleCanvas-ALT-1",
     name: "UC-ruleCanvas alt flow 1: The canvas can be closed without submitting the underlying form.",
+    objective: 'Check an alternative path of "Rule Canvas": the canvas can be closed without submitting the underlying form.',
     description: "Alternate flow 1 of UC-ruleCanvas (Rule Canvas): \"The canvas can be closed without submitting the underlying form.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -1990,6 +2125,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleCanvas-ALT-2",
     name: "UC-ruleCanvas alt flow 2: A local canvas export, if offered, is distinct from rule catalogue per",
+    objective: 'Check an alternative path of "Rule Canvas": a local canvas export, if offered, is distinct from rule catalogue persistence.',
     description: "Alternate flow 2 of UC-ruleCanvas (Rule Canvas): \"A local canvas export, if offered, is distinct from rule catalogue persistence.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2003,6 +2139,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleCanvas-EXC-1",
     name: "UC-ruleCanvas exc flow 1: A canvas load failure leaves the original form available.",
+    objective: 'Check that "Rule Canvas" fails safely: a canvas load failure leaves the original form available.',
     description: "Exception flow 1 of UC-ruleCanvas (Rule Canvas): \"A canvas load failure leaves the original form available.\" No backing API is registered for this use case, so this claim is evidenced only by the plain navigation above succeeding without needing any session/Authorization header.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2016,6 +2153,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleCanvas-EXC-2",
     name: "UC-ruleCanvas exc flow 2: Unsupported logic cannot be advertised as executable merely because it",
+    objective: 'Check that "Rule Canvas" fails safely: unsupported logic cannot be advertised as executable merely because it is drawn.',
     description: "Exception flow 2 of UC-ruleCanvas (Rule Canvas): \"Unsupported logic cannot be advertised as executable merely because it is drawn.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2029,6 +2167,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schAll-MAIN",
     name: "UC-schAll main flow: All schedules",
+    objective: 'Walk through the "All schedules" screen the way its main use case describes it: operator opens All schedules. System lists stored schedules with cadence and next occurrence. Operator inspects enabled or paused state where persisted. Operator opens creation or a separately supported maintenance action.',
     description: "Main flow of UC-schAll (All schedules): Operator opens All schedules. System lists stored schedules with cadence and next occurrence. Operator inspects enabled or paused state where persisted. Operator opens creation or a separately supported maintenance action. Touches the screen's real route and its registered API(s): GET /api/v1/schedules.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2044,6 +2183,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schAll-ALT-1",
     name: "UC-schAll alt flow 1: A schedule outside the upcoming window remains visible.",
+    objective: 'Check an alternative path of "All schedules": a schedule outside the upcoming window remains visible.',
     description: "Alternate flow 1 of UC-schAll (All schedules): \"A schedule outside the upcoming window remains visible.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2059,6 +2199,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schAll-ALT-2",
     name: "UC-schAll alt flow 2: A zero-record response is shown as an empty list when confirmed.",
+    objective: 'Check an alternative path of "All schedules": a zero-record response is shown as an empty list when confirmed.',
     description: "Alternate flow 2 of UC-schAll (All schedules): \"A zero-record response is shown as an empty list when confirmed.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2074,6 +2215,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schAll-EXC-1",
     name: "UC-schAll exc flow 1: A load failure is not a successful zero-record result.",
+    objective: 'Check that "All schedules" fails safely: a load failure is not a successful zero-record result.',
     description: "Exception flow 1 of UC-schAll (All schedules): \"A load failure is not a successful zero-record result.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2089,6 +2231,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schAll-EXC-2",
     name: "UC-schAll exc flow 2: Unavailable pause/resume controls are not represented as working actio",
+    objective: 'Check that "All schedules" fails safely: unavailable pause/resume controls are not represented as working actions.',
     description: "Exception flow 2 of UC-schAll (All schedules): \"Unavailable pause/resume controls are not represented as working actions.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2104,6 +2247,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schUpcoming-MAIN",
     name: "UC-schUpcoming main flow: Upcoming schedules",
+    objective: 'Walk through the "Upcoming schedules" screen the way its main use case describes it: operator opens Upcoming schedules. System loads schedule records and identifies the displayed time basis. System applies the declared upcoming interval and enabled-state policy. Operator reviews next occurrence and intended target before creating another schedule.',
     description: "Main flow of UC-schUpcoming (Upcoming schedules): Operator opens Upcoming schedules. System loads schedule records and identifies the displayed time basis. System applies the declared upcoming interval and enabled-state policy. Operator reviews next occurrence and intended target before creating another schedule. Touches the screen's real route and its registered API(s): GET /api/v1/schedules.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2119,6 +2263,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schUpcoming-ALT-1",
     name: "UC-schUpcoming alt flow 1: No due schedules produces an explicit empty interval.",
+    objective: 'Check an alternative path of "Upcoming schedules": no due schedules produces an explicit empty interval.',
     description: "Alternate flow 1 of UC-schUpcoming (Upcoming schedules): \"No due schedules produces an explicit empty interval.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2134,6 +2279,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schUpcoming-ALT-2",
     name: "UC-schUpcoming alt flow 2: All schedules permits inspection outside the upcoming interval.",
+    objective: 'Check an alternative path of "Upcoming schedules": all schedules permits inspection outside the upcoming interval.',
     description: "Alternate flow 2 of UC-schUpcoming (Upcoming schedules): \"All schedules permits inspection outside the upcoming interval.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2149,6 +2295,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schUpcoming-EXC-1",
     name: "UC-schUpcoming exc flow 1: An invalid next-run timestamp is disclosed.",
+    objective: 'Check that "Upcoming schedules" fails safely: an invalid next-run timestamp is disclosed.',
     description: "Exception flow 1 of UC-schUpcoming (Upcoming schedules): \"An invalid next-run timestamp is disclosed.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2164,6 +2311,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-schUpcoming-EXC-2",
     name: "UC-schUpcoming exc flow 2: A paused schedule is not promised to fire.",
+    objective: 'Check that "Upcoming schedules" fails safely: a paused schedule is not promised to fire.',
     description: "Exception flow 2 of UC-schUpcoming (Upcoming schedules): \"A paused schedule is not promised to fire.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2179,6 +2327,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-tcPool-MAIN",
     name: "UC-tcPool main flow: Test Cases",
+    objective: 'Walk through the "Test Cases" screen the way its main use case describes it: analyst opens Test Cases; system loads the tenant case collection. Analyst reviews name, objective and dataset reference. Analyst opens a case by ID and reviews its stored details. Analyst chooses a supported edit or uses the case when building a suite.',
     description: "Main flow of UC-tcPool (Test Cases): Analyst opens Test Cases; system loads the tenant case collection. Analyst reviews name, objective and dataset reference. Analyst opens a case by ID and reviews its stored details. Analyst chooses a supported edit or uses the case when building a suite. Touches the screen's real route and its registered API(s): GET /api/v1/test-cases.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2194,6 +2343,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-tcPool-ALT-1",
     name: "UC-tcPool alt flow 1: A case without a dataset remains a draft definition for later completi",
+    objective: 'Check an alternative path of "Test Cases": a case without a dataset remains a draft definition for later completion.',
     description: "Alternate flow 1 of UC-tcPool (Test Cases): \"A case without a dataset remains a draft definition for later completion.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2209,6 +2359,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-tcPool-ALT-2",
     name: "UC-tcPool alt flow 2: An empty pool offers case creation.",
+    objective: 'Check an alternative path of "Test Cases": an empty pool offers case creation.',
     description: "Alternate flow 2 of UC-tcPool (Test Cases): \"An empty pool offers case creation.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2224,6 +2375,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-tcPool-EXC-1",
     name: "UC-tcPool exc flow 1: A missing dataset is disclosed rather than substituted.",
+    objective: 'Check that "Test Cases" fails safely: a missing dataset is disclosed rather than substituted.',
     description: "Exception flow 1 of UC-tcPool (Test Cases): \"A missing dataset is disclosed rather than substituted.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2239,6 +2391,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-tcPool-EXC-2",
     name: "UC-tcPool exc flow 2: A stale version cannot silently overwrite a concurrent case edit.",
+    objective: 'Check that "Test Cases" fails safely: a stale version cannot silently overwrite a concurrent case edit.',
     description: "Exception flow 2 of UC-tcPool (Test Cases): \"A stale version cannot silently overwrite a concurrent case edit.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2254,6 +2407,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trAll-MAIN",
     name: "UC-trAll main flow: All test runs",
+    objective: 'Walk through the "All test runs" screen the way its main use case describes it: operator opens All test runs. System retrieves stored runs and displays their returned states. Operator inspects a run by identity. Operator follows an available report or starts a separate new run.',
     description: "Main flow of UC-trAll (All test runs): Operator opens All test runs. System retrieves stored runs and displays their returned states. Operator inspects a run by identity. Operator follows an available report or starts a separate new run. Touches the screen's real route and its registered API(s): GET /api/v1/runs.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2269,6 +2423,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trAll-ALT-1",
     name: "UC-trAll alt flow 1: Pagination limits visible rows without changing total semantics.",
+    objective: 'Check an alternative path of "All test runs": pagination limits visible rows without changing total semantics.',
     description: "Alternate flow 1 of UC-trAll (All test runs): \"Pagination limits visible rows without changing total semantics.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2284,6 +2439,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trAll-ALT-2",
     name: "UC-trAll alt flow 2: Failed runs remain visible.",
+    objective: 'Check an alternative path of "All test runs": failed runs remain visible.',
     description: "Alternate flow 2 of UC-trAll (All test runs): \"Failed runs remain visible.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2299,6 +2455,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trAll-EXC-1",
     name: "UC-trAll exc flow 1: A storage error currently may appear as an empty API list; it must not",
+    objective: 'Check that "All test runs" fails safely: a storage error currently may appear as an empty application service list; it must not be described as verified absence.',
     description: "Exception flow 1 of UC-trAll (All test runs): \"A storage error currently may appear as an empty API list; it must not be described as verified absence.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2314,6 +2471,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trAll-EXC-2",
     name: "UC-trAll exc flow 2: Missing timestamps produce unknown duration, not zero.",
+    objective: 'Check that "All test runs" fails safely: missing timestamps produce unknown duration, not zero.',
     description: "Exception flow 2 of UC-trAll (All test runs): \"Missing timestamps produce unknown duration, not zero.\" Closest executable proxy: the same read must keep returning a well-formed 200 response shape, the structural half of \"empty is distinct from failure\".",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2329,6 +2487,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trHistory-MAIN",
     name: "UC-trHistory main flow: Run history",
+    objective: 'Walk through the "Run history" screen the way its main use case describes it: operator opens Run history. System selects terminal records according to the implemented status mapping. Operator reviews start, completion and measured duration. Operator opens the available evidence for a selected run.',
     description: "Main flow of UC-trHistory (Run history): Operator opens Run history. System selects terminal records according to the implemented status mapping. Operator reviews start, completion and measured duration. Operator opens the available evidence for a selected run. Touches the screen's real route and its registered API(s): GET /api/v1/runs.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2344,6 +2503,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trHistory-ALT-1",
     name: "UC-trHistory alt flow 1: Failed terminal runs are included with their outcome.",
+    objective: 'Check an alternative path of "Run history": failed terminal runs are included with their outcome.',
     description: "Alternate flow 1 of UC-trHistory (Run history): \"Failed terminal runs are included with their outcome.\" Closest executable proxy: the same read must fail cleanly (401) on an invalid session, not silently substitute a fabricated empty/successful result.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2359,6 +2519,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trHistory-ALT-2",
     name: "UC-trHistory alt flow 2: Older runs are included or excluded only according to a declared actua",
+    objective: 'Check an alternative path of "Run history": older runs are included or excluded only according to a declared actual filter.',
     description: "Alternate flow 2 of UC-trHistory (Run history): \"Older runs are included or excluded only according to a declared actual filter.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2374,6 +2535,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trHistory-EXC-1",
     name: "UC-trHistory exc flow 1: Invalid or missing timestamps do not produce a made-up duration.",
+    objective: 'Check that "Run history" fails safely: invalid or missing timestamps do not produce a made-up duration.',
     description: "Exception flow 1 of UC-trHistory (Run history): \"Invalid or missing timestamps do not produce a made-up duration.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2389,6 +2551,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-trHistory-EXC-2",
     name: "UC-trHistory exc flow 2: A running record is not treated as a completed history entry.",
+    objective: 'Check that "Run history" fails safely: a running record is not treated as a completed history entry.',
     description: "Exception flow 2 of UC-trHistory (Run history): \"A running record is not treated as a completed history entry.\" Re-verifies the screen route and its backing read on this flow.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2404,6 +2567,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-useCaseTemplates-MAIN",
     name: "UC-useCaseTemplates main flow: Use-case templates",
+    objective: 'Walk through the "Use-case templates" screen the way its main use case describes it: author opens Use-case templates. System presents the available canonical template. Author selects Download use-case template. System downloads Markdown with metadata and all required sections.',
     description: "Main flow of UC-useCaseTemplates (Use-case templates): Author opens Use-case templates. System presents the available canonical template. Author selects Download use-case template. System downloads Markdown with metadata and all required sections. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2417,6 +2581,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-useCaseTemplates-ALT-1",
     name: "UC-useCaseTemplates alt flow 1: The author leaves without downloading.",
+    objective: 'Check an alternative path of "Use-case templates": the author leaves without downloading.',
     description: "Alternate flow 1 of UC-useCaseTemplates (Use-case templates): \"The author leaves without downloading.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2430,6 +2595,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-useCaseTemplates-ALT-2",
     name: "UC-useCaseTemplates alt flow 2: The downloaded template can be used for an unlinked use case.",
+    objective: 'Check an alternative path of "Use-case templates": the downloaded template can be used for an unlinked use case.',
     description: "Alternate flow 2 of UC-useCaseTemplates (Use-case templates): \"The downloaded template can be used for an unlinked use case.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2443,6 +2609,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-useCaseTemplates-EXC-1",
     name: "UC-useCaseTemplates exc flow 1: A blocked download must not be described as completed.",
+    objective: 'Check that "Use-case templates" fails safely: a blocked download must not be described as completed.',
     description: "Exception flow 1 of UC-useCaseTemplates (Use-case templates): \"A blocked download must not be described as completed.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2456,6 +2623,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-useCaseTemplates-EXC-2",
     name: "UC-useCaseTemplates exc flow 2: A template with missing sections is a documentation defect.",
+    objective: 'Check that "Use-case templates" fails safely: a template with missing sections is a documentation defect.',
     description: "Exception flow 2 of UC-useCaseTemplates (Use-case templates): \"A template with missing sections is a documentation defect.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2469,6 +2637,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-userCreate-MAIN",
     name: "UC-userCreate main flow: Create new user",
+    objective: 'Walk through the "Create new user" screen the way its main use case describes it: administrator enters the intended person identity. System checks required identity fields and existing membership under the agreed policy. Administrator reviews the intended tenant and assignments. Administrator explicitly submits through a supported provisioning path. System reports confirmed membership or a precise failure.',
     description: "Main flow of UC-userCreate (Create new user): Administrator enters the intended person identity. System checks required identity fields and existing membership under the agreed policy. Administrator reviews the intended tenant and assignments. Administrator explicitly submits through a supported provisioning path. System reports confirmed membership or a precise failure. Touches the screen's real route (no backing API is registered for this use case).",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2482,6 +2651,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-userCreate-ALT-1",
     name: "UC-userCreate alt flow 1: An existing identity may need membership assignment rather than anothe",
+    objective: 'Check an alternative path of "Create new user": an existing identity may need membership assignment rather than another account.',
     description: "Alternate flow 1 of UC-userCreate (Create new user): \"An existing identity may need membership assignment rather than another account.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2495,6 +2665,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-userCreate-ALT-2",
     name: "UC-userCreate alt flow 2: An invitation-based flow is proposed until its endpoint and expiry rul",
+    objective: 'Check an alternative path of "Create new user": an invitation-based flow is proposed until its endpoint and expiry rules are defined.',
     description: "Alternate flow 2 of UC-userCreate (Create new user): \"An invitation-based flow is proposed until its endpoint and expiry rules are defined.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2508,6 +2679,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-userCreate-EXC-1",
     name: "UC-userCreate exc flow 1: An invalid role must not silently become the intended role.",
+    objective: 'Check that "Create new user" fails safely: an invalid role must not silently become the intended role.',
     description: "Exception flow 1 of UC-userCreate (Create new user): \"An invalid role must not silently become the intended role.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2521,6 +2693,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-userCreate-EXC-2",
     name: "UC-userCreate exc flow 2: Duplicate identity behavior requires a confirmed scope before assignin",
+    objective: 'Check that "Create new user" fails safely: duplicate identity behavior requires a confirmed scope before assigning a specific response code.',
     description: "Exception flow 2 of UC-userCreate (Create new user): \"Duplicate identity behavior requires a confirmed scope before assigning a specific response code.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',

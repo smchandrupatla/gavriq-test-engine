@@ -41,6 +41,47 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '90-agents': { suite: 'sit-agents', type: 'integration', method: 'http' },
 };
 
+/**
+ * Test cases screen fields for an imported SIT case (adopted from Sand Bench's
+ * representation): the part of the application it exercises, who looks after
+ * it, how long it takes, where its script lives, and what usually breaks it.
+ */
+const COMPONENT: Record<string, string> = {
+  '00-health': 'Deployment health', '10-mq-round-trip': 'MQ channel', '20-kafka-round-trip': 'Kafka channel', '30-api-round-trip': 'API channel',
+  '40-worker-job': 'Background worker', '50-dbviewer-cross-check': 'Database viewer', '51-use-case-api': 'Use cases (API)',
+  '60-gui-smoke': 'Web console', '60-ui-eventing': 'Web console · eventing', '61-selenium-screens': 'Web console · screens', '62-selenium-fields': 'Web console · forms',
+  '63-selenium-workflows': 'Web console · workflows', '64-use-case-ui': 'Web console · use cases', '66-official-clicks': 'Web console · controls',
+  '67-feature-access-ui': 'Web console · feature access', '68-console-chrome': 'Web console · chrome', '70-e2e-ux': 'End-to-end operator journeys', '70-ui-pages': 'Web console · pages',
+  '80-security-auth': 'Security · sign-in', '80-ui-workflows': 'Web console · workflows', '81-security-api': 'Security · API', '82-security-headers': 'Security · headers',
+  '83-security-vuln': 'Security · vulnerabilities', '84-security-zap': 'Security · ZAP scan', '85-security-sast': 'Security · static analysis',
+  '90-agents': 'Agents', '91-performance-soak': 'Performance · soak', '92-performance-burst': 'Performance · burst',
+};
+
+function screenFieldsFor(fileKey: string, file: string, name: string | null, meta: { type: string; method: string }) {
+  const security = fileKey.includes('security');
+  const perf = fileKey.includes('performance');
+  const browser = meta.method !== 'http';
+  const plainName = (name || file).replace(/\s+/g, ' ').trim();
+  return {
+    objective: name
+      ? `Run the application team's own SIT check that ${plainName[0]!.toLowerCase()}${plainName.slice(1)}${/[.!?]$/.test(plainName) ? '' : '.'}`
+      : `Run every check in the application team's SIT file ${file} against the deployed Sand Bench.`,
+    owner: security || perf ? 'Quality control team' : 'Quality assurance team',
+    component: COMPONENT[fileKey] || 'Sand Bench',
+    environment: 'sand-bench-local',
+    estimated_duration: perf ? '5-15m' : browser ? '1-5m' : 'Under 1m',
+    visibility: 'Team',
+    automation_link: `sit/cases/${file}${name ? `::${name}` : ''} (SIT runner, node:test)`,
+    test_data: 'Defined inside the SIT script: the demo operator identity from the environment plus per-run generated messages.',
+    attachments: JSON.stringify([{ name: `SIT script ${file}`, url: `sit/cases/${file}` }, { name: 'Catalog documentation', url: 'docs/TEST-CASE-CATALOG.md' }]),
+    flakiness_notes: browser
+      ? 'The SIT scripts follow the deployed console closely: a selector or copy change upstream shows up here as a failure before anything else does.'
+      : 'None known — a scripted request-and-check; round-trip checks poll for up to a few seconds.',
+    known_workarounds: 'Compare sit/cases/<file> with the upstream Sand Bench repository and probe the deployed page before treating a red result as an application defect; test names are the catalogue identity, so fix the body of a test, never its name.',
+    common_failure_causes: `${browser ? 'Worker image without sit/ or the browser engine; console changed under the test; ' : 'Worker image without sit/; '}demo sign-in disabled or its password rotated; target stack not fully up.`,
+  };
+}
+
 /** Extract test() names from a .sit.ts source file */
 function extractTestNames(source: string): string[] {
   const names: string[] = [];
@@ -99,12 +140,21 @@ async function main() {
     if (!names.length) {
       // File-level placeholder case
       const key = `SIT-${fileKey.toUpperCase().replace(/-/g, '_')}`;
+      const sf = screenFieldsFor(fileKey, file, null, meta);
       const { rows } = await query(
         `INSERT INTO test_cases (
            key, name, description, application_id, test_type, execution_method,
-           script, automation_status, lifecycle, tags, author_id, created_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'automated','active',$8,'sit-import','sit-import')
-         ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+           script, automation_status, lifecycle, tags, author_id, created_by,
+           objective, owner_id, component, environment, estimated_duration, visibility, automation_link, test_data, attachments,
+           flakiness_notes, known_workarounds, common_failure_causes, preconditions
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'automated','active',$8,'sit-import','sit-import',
+           $9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21)
+         ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, updated_at = now(),
+           objective = EXCLUDED.objective, owner_id = COALESCE(test_cases.owner_id, EXCLUDED.owner_id), component = EXCLUDED.component,
+           environment = COALESCE(test_cases.environment, EXCLUDED.environment), estimated_duration = EXCLUDED.estimated_duration,
+           automation_link = EXCLUDED.automation_link, test_data = EXCLUDED.test_data, attachments = EXCLUDED.attachments,
+           flakiness_notes = EXCLUDED.flakiness_notes, known_workarounds = EXCLUDED.known_workarounds,
+           common_failure_causes = EXCLUDED.common_failure_causes, preconditions = EXCLUDED.preconditions
          RETURNING id`,
         [
           key,
@@ -115,6 +165,9 @@ async function main() {
           meta.method,
           `sit/cases/${file}`,
           ['sit', 'imported', meta.type],
+          sf.objective, sf.owner, sf.component, sf.environment, sf.estimated_duration, sf.visibility, sf.automation_link, sf.test_data, sf.attachments,
+          sf.flakiness_notes, sf.known_workarounds, sf.common_failure_causes,
+          'The deployed Sand Bench stack (web, API, test hub, database viewer) is up and the demo operator identity is enabled; the worker image carries sit/ and, for browser checks, the browser engine.',
         ]
       );
       await query(
@@ -128,12 +181,21 @@ async function main() {
 
     for (const name of names) {
       const key = `SIT-${fileKey.toUpperCase().replace(/-/g, '_')}-${slug(name).toUpperCase().slice(0, 40)}`;
+      const sf = screenFieldsFor(fileKey, file, name, meta);
       const { rows } = await query(
         `INSERT INTO test_cases (
            key, name, description, application_id, test_type, execution_method,
-           script, automation_status, lifecycle, tags, author_id, created_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'automated','active',$8,'sit-import','sit-import')
-         ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, updated_at = now()
+           script, automation_status, lifecycle, tags, author_id, created_by,
+           objective, owner_id, component, environment, estimated_duration, visibility, automation_link, test_data, attachments,
+           flakiness_notes, known_workarounds, common_failure_causes, preconditions
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'automated','active',$8,'sit-import','sit-import',
+           $9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21)
+         ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, updated_at = now(),
+           objective = EXCLUDED.objective, owner_id = COALESCE(test_cases.owner_id, EXCLUDED.owner_id), component = EXCLUDED.component,
+           environment = COALESCE(test_cases.environment, EXCLUDED.environment), estimated_duration = EXCLUDED.estimated_duration,
+           automation_link = EXCLUDED.automation_link, test_data = EXCLUDED.test_data, attachments = EXCLUDED.attachments,
+           flakiness_notes = EXCLUDED.flakiness_notes, known_workarounds = EXCLUDED.known_workarounds,
+           common_failure_causes = EXCLUDED.common_failure_causes, preconditions = EXCLUDED.preconditions
          RETURNING id`,
         [
           key.slice(0, 120),
@@ -144,6 +206,9 @@ async function main() {
           meta.method,
           `sit/cases/${file}::${name}`,
           ['sit', 'imported', meta.type, fileKey],
+          sf.objective, sf.owner, sf.component, sf.environment, sf.estimated_duration, sf.visibility, sf.automation_link, sf.test_data, sf.attachments,
+          sf.flakiness_notes, sf.known_workarounds, sf.common_failure_causes,
+          'The deployed Sand Bench stack (web, API, test hub, database viewer) is up and the demo operator identity is enabled; the worker image carries sit/ and, for browser checks, the browser engine.',
         ]
       );
       await query(

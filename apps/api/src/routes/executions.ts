@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 import { humanDateTime } from '../lib/naming.js';
+import { deployFirstIfDown } from '../infra.js';
 
 /** "<case name> — <timestamp>" for a single case, "<suite name> — <timestamp>" for many, else "Run — <timestamp>". */
 function runName(caseNames: string[], suiteName: string | null, at: Date): string {
@@ -44,11 +45,20 @@ export async function runAllCases(b: Record<string, unknown>, actorId?: string |
   let environmentId: string | null = null;
   if (typeof b.environment_id === 'string' && b.environment_id) {
     const env = await query(
-      `SELECT id FROM environments WHERE id::text = $1 OR key = $1`,
+      `SELECT id, key, config FROM environments WHERE id::text = $1 OR key = $1`,
       [b.environment_id]
     );
     if (!env.rows[0]) return { status: 404, body: { error: 'Environment not found' } };
     environmentId = env.rows[0].id;
+    // A managed stack that is down is deployed first; "everything" is queued when the deploy succeeds.
+    if (b.dry_run !== true) {
+      const deferred = await deployFirstIfDown(
+        env.rows[0],
+        { planner: 'run_all', application: application.key, trigger_source: (b.trigger_source as string) || 'run-all', requested_by: (b.requested_by as string) ?? actorId ?? null },
+        actorId
+      );
+      if (deferred) return { status: deferred.status, body: deferred.body };
+    }
   }
 
   const suites = await query(
@@ -390,16 +400,21 @@ export async function executionRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: 'Execution was cancelled', code: 'execution_cancelled' });
       }
 
+      // Remarks: what happened in plain words, one line per step then the outcome
+      // (the worker sends them; an older worker's message is split into lines).
+      const remarks = Array.isArray(b.remarks)
+        ? b.remarks.map((r: unknown) => String(r ?? '').trim()).filter(Boolean).slice(0, 200)
+        : String(b.message || '').split(/;\s+(?=[A-Za-z0-9])/).map((s) => s.trim()).filter(Boolean);
       const { rows } = await query(
         `INSERT INTO execution_results (
            execution_id, test_case_id, status, verdict, duration_ms,
-           started_at, finished_at, message, classification, metrics
-         ) VALUES ($1,$2,$3::execution_status,$4,$5,$6,$7,$8,$9::failure_classification,COALESCE($10,'{}'::jsonb))
+           started_at, finished_at, message, classification, metrics, remarks
+         ) VALUES ($1,$2,$3::execution_status,$4,$5,$6,$7,$8,$9::failure_classification,COALESCE($10,'{}'::jsonb),$11::jsonb)
          RETURNING *`,
         [
           exec.rows[0].id, b.test_case_id, b.status, b.verdict ?? null,
           b.duration_ms ?? null, b.started_at ?? null, b.finished_at ?? new Date().toISOString(),
-          b.message ?? null, b.classification ?? null, JSON.stringify(b.metrics ?? {}),
+          b.message ?? null, b.classification ?? null, JSON.stringify(b.metrics ?? {}), JSON.stringify(remarks),
         ]
       );
 

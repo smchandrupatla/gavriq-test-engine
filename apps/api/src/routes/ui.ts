@@ -90,7 +90,8 @@ export async function uiRoutes(app: FastifyInstance) {
       query(
         // config.applications lists the applications deployed there; an
         // environment without the list is offered to every application.
-        `SELECT id, key, name, env_type, base_url, config->'deployment' AS deployment
+        `SELECT id, key, name, env_type, base_url, config->'deployment' AS deployment,
+                CASE WHEN config->'infra'->>'driver' = 'compose' THEN config->'infra' END AS infra
          FROM environments
          WHERE status = 'active'
            AND (NOT (config ? 'applications') OR config->'applications' ? $1)
@@ -148,7 +149,7 @@ export async function uiRoutes(app: FastifyInstance) {
     const since = parseSince(q.since);
     const envId = await resolveEnvironmentId(q.environment_id);
 
-    const [executions, workers, changed, sig] = await Promise.all([
+    const [executions, workers, changed, sig, envDeployment] = await Promise.all([
       query(
         `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.test_suite_id, e.worker_id,
                 e.environment_id,
@@ -214,6 +215,11 @@ export async function uiRoutes(app: FastifyInstance) {
                   AS catalog_sig`,
         [appKey]
       ),
+      // The selected environment's stack state (config.deployment: up/down/deploying…) so the console's
+      // chip follows a deploy or teardown without reloading the summary.
+      envId
+        ? query(`SELECT config->'deployment' AS deployment FROM environments WHERE id = $1::uuid`, [envId])
+        : Promise.resolve({ rows: [] as any[] }),
     ]);
 
     return reply.send({
@@ -223,6 +229,7 @@ export async function uiRoutes(app: FastifyInstance) {
         executions: executions.rows,
         workers: workers.rows,
         changed: changed.rows,
+        environment_deployment: envId ? (envDeployment.rows[0]?.deployment ?? null) : undefined,
       },
     });
   });
@@ -230,8 +237,8 @@ export async function uiRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/v1/ui/executions/:id', async (req, reply) => {
     const { rows } = await query(
       `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.test_suite_id, e.test_case_ids, e.worker_id,
-              e.environment_id, e.created_at, e.started_at, e.finished_at, e.requested_by,
-              env.name AS environment_name, s.name AS suite_name
+              e.environment_id, e.created_at, e.started_at, e.finished_at, e.requested_by, e.remarks, e.metadata,
+              env.name AS environment_name, env.key AS environment_key, s.name AS suite_name
        FROM executions e
        LEFT JOIN environments env ON env.id = e.environment_id
        LEFT JOIN test_suites s ON s.id = e.test_suite_id
@@ -243,7 +250,7 @@ export async function uiRoutes(app: FastifyInstance) {
 
     const [results, cases] = await Promise.all([
       query(
-        `SELECT er.id, er.test_case_id, er.status, er.duration_ms, er.message, er.classification,
+        `SELECT er.id, er.test_case_id, er.status, er.duration_ms, er.message, er.classification, er.remarks, er.verdict,
                 er.started_at, COALESCE(er.finished_at, er.created_at) AS finished_at,
                 (SELECT count(*)::int FROM evidence ev WHERE ev.execution_result_id = er.id) AS evidence_count
          FROM execution_results er

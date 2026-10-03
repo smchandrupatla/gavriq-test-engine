@@ -44,6 +44,7 @@ C.push(
   {
     key: 'SB-UC-useCaseEditor-MAIN',
     name: 'UC-useCaseEditor main flow: Use case',
+    objective: 'Walk through the "Use case" screen the way its main use case describes it: author opens the use-case link for a real published page, the system loads its specification, contract and revision history, and the complete Markdown is downloadable.',
     description: 'Main flow of UC-useCaseEditor (Use case): author opens the use-case link for a real published page, the system loads its specification, contract and revision history, and the complete Markdown is downloadable. Touches GET /api/v1/use-cases/:page, GET /api/v1/use-cases/:page/revisions and GET /api/v1/use-cases/:page.md.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; use-case catalogue published.',
@@ -61,6 +62,7 @@ C.push(
   {
     key: 'SB-UC-useCaseEditor-ALT-1',
     name: 'UC-useCaseEditor alt flow 1: Read or download without editing.',
+    objective: 'Check an alternative path of "Use case": read or download without editing. The Markdown download and detail read both succeed with no PUT ever sent — reading never requires a write.',
     description: 'Alternate flow 1 of UC-useCaseEditor (Use case): "Read or download without editing." The Markdown download and detail read both succeed with no PUT ever sent — reading never requires a write.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -75,6 +77,7 @@ C.push(
   {
     key: 'SB-UC-useCaseEditor-ALT-2',
     name: 'UC-useCaseEditor alt flow 2: An unlinked catalogue case can be opened by its page key.',
+    objective: 'Check an alternative path of "Use case": an unlinked catalogue case can be opened by its page key. A second, different real page key (schAll) opens its own distinct specification by key, independent of the first.',
     description: 'Alternate flow 2 of UC-useCaseEditor (Use case): "An unlinked catalogue case can be opened by its page key." A second, different real page key (schAll) opens its own distinct specification by key, independent of the first.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -89,6 +92,7 @@ C.push(
   {
     key: 'SB-UC-useCaseEditor-EXC-1',
     name: 'UC-useCaseEditor exc flow 1: An unknown key is not replaced with Overview.',
+    objective: 'Check that "Use case" fails safely: an unknown key is not replaced with Overview. Requesting a nonexistent page key must return a clean not-found, never silently substituting the Overview use case.',
     description: 'Exception flow 1 of UC-useCaseEditor (Use case): "An unknown key is not replaced with Overview." Requesting a nonexistent page key must return a clean not-found, never silently substituting the Overview use case.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -103,6 +107,7 @@ C.push(
   {
     key: 'SB-UC-useCaseEditor-EXC-2',
     name: 'UC-useCaseEditor exc flow 2: Failed saving is not a confirmed new revision.',
+    objective: 'Check that "Use case" fails safely: failed saving is not a confirmed new revision. No PUT is fired against this shared, hand-authored documentation catalogue by policy (other sessions may be actively editing it); this case instead confirms the revision history for a real page is independently readable, the precondition for ever being able to tell a confirmed revision apart from a failed one.',
     description: 'Exception flow 2 of UC-useCaseEditor (Use case): "Failed saving is not a confirmed new revision." No PUT is fired against this shared, hand-authored documentation catalogue by policy (other sessions may be actively editing it); this case instead confirms the revision history for a real page is independently readable, the precondition for ever being able to tell a confirmed revision apart from a failed one.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -124,6 +129,7 @@ C.push(
   {
     key: 'SB-UC-useCaseReview-MAIN',
     name: 'UC-useCaseReview main flow: Use-case review',
+    objective: 'Walk through the "Use-case review" screen the way its main use case describes it: author selects Review all use cases; the deterministic review endpoint runs and returns its real findings.',
     description: 'Main flow of UC-useCaseReview (Use-case review): author selects Review all use cases; the deterministic review endpoint runs and returns its real findings. Touches POST /api/v1/use-cases/review.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -139,6 +145,7 @@ C.push(
   {
     key: 'SB-UC-useCaseReview-ALT-1',
     name: 'UC-useCaseReview alt flow 1: A page-specific review can be requested through its registered API.',
+    objective: 'Check an alternative path of "Use-case review": a page-specific review can be requested through its registered application service. the matching write reviews exactly one named page, distinct from the full-catalogue review.',
     description: 'Alternate flow 1 of UC-useCaseReview (Use-case review): "A page-specific review can be requested through its registered API." POST /api/v1/use-cases/review/:page reviews exactly one named page, distinct from the full-catalogue review.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -153,6 +160,7 @@ C.push(
   {
     key: 'SB-UC-useCaseReview-ALT-2',
     name: 'UC-useCaseReview alt flow 2: No findings means only the implemented review rules found nothing.',
+    objective: 'Check an alternative path of "Use-case review": no findings means only the implemented review rules found nothing. Running the full review twice in a row returns the same deterministic mode/reviewer both times — the review is not probabilistic or state-mutating.',
     description: 'Alternate flow 2 of UC-useCaseReview (Use-case review): "No findings means only the implemented review rules found nothing." Running the full review twice in a row returns the same deterministic mode/reviewer both times — the review is not probabilistic or state-mutating.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -168,6 +176,7 @@ C.push(
   {
     key: 'SB-UC-useCaseReview-EXC-1',
     name: 'UC-useCaseReview exc flow 1: A failed review request must not be shown as all cases passing.',
+    objective: 'Check that "Use-case review" fails safely: a failed review request must not be shown as all cases passing. Reviewing a nonexistent single page must return a clean not-found, never a fabricated all-pass result.',
     description: 'Exception flow 1 of UC-useCaseReview (Use-case review): "A failed review request must not be shown as all cases passing." Reviewing a nonexistent single page must return a clean not-found, never a fabricated all-pass result.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -182,6 +191,7 @@ C.push(
   {
     key: 'SB-UC-useCaseReview-EXC-2',
     name: 'UC-useCaseReview exc flow 2: A missing case cannot be silently omitted from the coverage denominator.',
+    objective: 'Check that "Use-case review" fails safely: a missing case cannot be silently omitted from the coverage denominator. The full review\'s data array length is checked against the published catalogue\'s own count — the review covers the real published set, not a silently truncated subset.',
     description: 'Exception flow 2 of UC-useCaseReview (Use-case review): "A missing case cannot be silently omitted from the coverage denominator." The full review\'s data array length is checked against the published catalogue\'s own count — the review covers the real published set, not a silently truncated subset.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -204,6 +214,7 @@ C.push(
   {
     key: 'SB-UC-users-MAIN',
     name: 'UC-users main flow: Users',
+    objective: 'Walk through the "Users" screen the way its main use case describes it: administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access.',
     description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -220,6 +231,7 @@ C.push(
   {
     key: 'SB-UC-users-ALT-1',
     name: 'UC-users alt flow 1: An empty membership collection is shown without demo users.',
+    objective: 'Check an alternative path of "Users": an empty membership collection is shown without demo users.',
     description: 'Alternate flow 1 of UC-users (Users): "An empty membership collection is shown without demo users." Closest executable proxy: GET /api/v1/admin/users always answers with a well-formed 200/array (the structural precondition for honestly distinguishing a genuinely empty tenant from a failed read).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -234,6 +246,7 @@ C.push(
   {
     key: 'SB-UC-users-ALT-2',
     name: 'UC-users alt flow 2: Effective access may be inspected without changing assignments.',
+    objective: 'Check an alternative path of "Users": effective access may be inspected without changing assignments. Reading effective access twice for the same user returns the same assignment data both times — inspection alone never mutates it.',
     description: 'Alternate flow 2 of UC-users (Users): "Effective access may be inspected without changing assignments." Reading effective access twice for the same user returns the same assignment data both times — inspection alone never mutates it.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -250,6 +263,7 @@ C.push(
   {
     key: 'SB-UC-users-EXC-1',
     name: 'UC-users exc flow 1: Unavailable historical /users endpoints are not treated as working CRUD.',
+    objective: 'Check that "Users" fails safely: unavailable historical /users endpoints are not treated as working create/edit/delete. A plain, unversioned/legacy the matching read path (as opposed to the real the application application service) must not be mistaken for a working endpoint — it answers not-found, not a silent empty success.',
     description: 'Exception flow 1 of UC-users (Users): "Unavailable historical /users endpoints are not treated as working CRUD." A plain, unversioned/legacy GET /api/v1/users path (as opposed to the real /api/v1/admin/users) must not be mistaken for a working endpoint — it answers not-found, not a silent empty success.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
@@ -264,6 +278,7 @@ C.push(
   {
     key: 'SB-UC-users-EXC-2',
     name: 'UC-users exc flow 2: A missing user cannot be replaced by a matching display name.',
+    objective: 'Check that "Users" fails safely: a missing user cannot be replaced by a matching display name.',
     description: 'Exception flow 2 of UC-users (Users): "A missing user cannot be replaced by a matching display name." Verified live: a fabricated user id does NOT 404 — it returns 200 with every permission/assignment array empty, echoing back the exact id requested. That is still the honest behavior this flow cares about (no cross-user substitution ever occurs); it is not a 404, which this case\'s assertion reflects as observed rather than assumed.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',

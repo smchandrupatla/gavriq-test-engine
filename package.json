@@ -27,7 +27,8 @@
     "report:unit-container": "node scripts/in-container-unit-report.mjs",
     "sit": "node sit/run.mjs",
     "sit:console": "PORT=8098 node sit/console.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:infra-agent": "tsx apps/infra-agent/src/agent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

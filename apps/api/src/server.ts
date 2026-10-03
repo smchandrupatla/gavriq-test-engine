@@ -12,6 +12,7 @@ import { migrate } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
+import { testBenchRoutes } from './routes/test-bench.js';
 import { environmentRoutes } from './routes/environments.js';
 import { executionRoutes } from './routes/executions.js';
 import { workerRoutes } from './routes/workers.js';
@@ -28,6 +29,8 @@ import { opsRoutes } from './routes/ops.js';
 import { uiRoutes } from './routes/ui.js';
 import { triggerRoutes } from './routes/trigger.js';
 import { deploymentRoutes } from './routes/deployments.js';
+import { infraRoutes } from './routes/infra.js';
+import { infraTick } from './infra.js';
 import { settingsRoutes } from './routes/settings.js';
 import { reportRoutes } from './routes/reports.js';
 import { insightRoutes } from './routes/insights.js';
@@ -163,6 +166,14 @@ async function main() {
       if (pathName.startsWith('/api/v1/deployments')) {
         return requirePermission(method === 'GET' ? 'tests:read' : 'environments:deploy')(req, reply);
       }
+      if (pathName.startsWith('/api/v1/infra')) {
+        if (method === 'GET') return requirePermission('tests:read')(req, reply);
+        // The infra agent authenticates like a worker (X-Worker-Key).
+        if (/^\/api\/v1\/infra\/(jobs\/claim|jobs\/[^/]+\/(progress|complete)|agents\/heartbeat)$/.test(pathName)) {
+          return requirePermission('workers:manage')(req, reply);
+        }
+        return requirePermission('environments:deploy')(req, reply);
+      }
       // Create/update only — leaves sub-paths like .../run-tests, .../policy untouched.
       if (
         (method === 'POST' && (pathName === '/api/v1/applications' || pathName === '/api/v1/environments')) ||
@@ -203,6 +214,7 @@ async function main() {
   await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
+  await app.register(testBenchRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
   await app.register(evidenceRoutes);
@@ -215,6 +227,7 @@ async function main() {
   await app.register(uiRoutes);
   await app.register(triggerRoutes);
   await app.register(deploymentRoutes);
+  await app.register(infraRoutes);
   await app.register(settingsRoutes);
   await app.register(reportRoutes);
   await app.register(insightRoutes);
@@ -241,6 +254,25 @@ async function main() {
       .catch((err) => app.log.warn({ err }, 'run retention failed'));
   setTimeout(pruneRunsTick, 90_000).unref();
   setInterval(pruneRunsTick, 60 * 60_000).unref();
+
+  // Infrastructure lifecycle: tear managed stacks down after their run / when idle / when up too long,
+  // and queue Docker housekeeping on its cadence (infra.ts). Decisions only — the infra agent does the work.
+  if (process.env.INFRA_TICK_MS !== '0') {
+    let infraBusy = false;
+    const infraTickSafe = () => {
+      if (infraBusy) return;
+      infraBusy = true;
+      infraTick()
+        .then((r) => {
+          if (r.reaped || r.after_run.length || r.teardowns.length || r.prune_queued) app.log.info(r, 'infra tick');
+        })
+        .catch((err) => app.log.warn({ err }, 'infra tick failed'))
+        .finally(() => { infraBusy = false; });
+    };
+    const every = Math.max(10_000, Number(process.env.INFRA_TICK_MS) || 60_000);
+    setTimeout(infraTickSafe, 30_000).unref();
+    setInterval(infraTickSafe, every).unref();
+  }
 
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
   console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
