@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Test Engine target manifest",
+  "type": "object",
+  "required": ["key", "name", "environments"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {"type": "string"},
+    "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "name": {"type": "string"},
+    "repo": {"type": "string"},
+    "environments": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["name", "base_url"],
+      "properties": {"name": {"type": "string"}, "base_url": {"type": "string", "format": "uri"}}}},
+    "services": {"type": "object", "additionalProperties": {"type": "string"}},
+    "suites": {"type": "object", "properties": {"dir": {"type": "string"}, "taxonomy": {"enum": ["manifest", "filename-prefix"]}, "catalog": {"type": "string"}}},
+    "auth": {"type": "object", "description": "Names of env vars holding credentials; never the credentials themselves."},
+    "seed": {"type": "object", "properties": {"enabled": {"type": "boolean"}}}
+  }
+}
