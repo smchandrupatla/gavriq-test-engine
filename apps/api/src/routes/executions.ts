@@ -10,11 +10,12 @@ export async function executionRoutes(app: FastifyInstance) {
     const clauses: string[] = [];
     const params: unknown[] = [];
     let i = 1;
-    if (q.status) { clauses.push(`status = $${i++}`); params.push(q.status); }
-    if (q.environment_id) { clauses.push(`environment_id = $${i++}`); params.push(q.environment_id); }
+    if (q.status) { clauses.push(`e.status = $${i++}::execution_status`); params.push(q.status); }
+    if (q.environment_id) { clauses.push(`e.environment_id = $${i++}`); params.push(q.environment_id); }
+    if (q.test_suite_id) { clauses.push(`e.test_suite_id = $${i++}`); params.push(q.test_suite_id); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await query(
-      `SELECT * FROM executions ${where} ORDER BY created_at DESC LIMIT 50`,
+      `${EXECUTION_SUMMARY_SQL} ${where} GROUP BY e.id, s.name ORDER BY e.created_at DESC LIMIT 50`,
       params
     );
     return reply.send({ data: rows });
@@ -22,12 +23,19 @@ export async function executionRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string } }>('/api/v1/executions/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM executions WHERE id::text = $1 OR key = $1',
+      `SELECT e.*, s.name AS suite_name, s.key AS suite_key, env.name AS environment_name, env.base_url AS environment_base_url
+       FROM executions e
+       LEFT JOIN test_suites s ON s.id = e.test_suite_id
+       LEFT JOIN environments env ON env.id = e.environment_id
+       WHERE e.id::text = $1 OR e.key = $1`,
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
     const results = await query(
-      'SELECT * FROM execution_results WHERE execution_id = $1 ORDER BY created_at',
+      `SELECT er.*, c.key AS test_case_key, c.name AS test_case_name, c.test_type, c.execution_method
+       FROM execution_results er
+       LEFT JOIN test_cases c ON c.id = er.test_case_id
+       WHERE er.execution_id = $1 ORDER BY er.created_at`,
       [rows[0].id]
     );
 

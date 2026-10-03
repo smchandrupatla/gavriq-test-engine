@@ -184,7 +184,26 @@ dialog::backdrop{background:#000a}
   </div>
   <div class="dialog-body" id="detailBody"></div>
 </dialog>
+<dialog id="picker" aria-labelledby="pickerTitle">
+  <div class="dialog-head">
+    <h2 id="pickerTitle">Select test cases</h2>
+    <button class="icon-btn" id="pickerCancel" aria-label="Close" style="display:inline-block">&#10005;</button>
+  </div>
+  <div class="picker-bar">
+    <select id="pickerCat" aria-label="Category"></select>
+    <input id="pickerSearch" type="search" placeholder="Search name or key…" aria-label="Search test cases">
+    <label class="small muted"><input type="checkbox" id="pickerHide"> Hide cases with no script</label>
+    <button class="btn small" id="pickerAll" type="button">Select all shown</button>
+    <button class="btn small" id="pickerNone" type="button">Clear shown</button>
+  </div>
+  <div class="picker-list" id="pickerList"></div>
+  <div class="picker-foot">
+    <span class="muted small" id="pickerCount"></span>
+    <button class="btn primary" id="pickerApply" type="button">Save selection</button>
+  </div>
+</dialog>
 <div class="toast-wrap" id="toastWrap"></div>
+<script src="/catalog/views.js"></script>
 <script src="/catalog/app.js"></script>
 <script src="/catalog/scheduler.js"></script>
 </body>

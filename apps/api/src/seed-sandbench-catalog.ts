@@ -138,23 +138,25 @@ async function main() {
 
       for (const c of s.cases) {
         const caseKey = `SB-${t.key.toUpperCase()}-${s.id.toUpperCase()}-${slug(c.name).toUpperCase()}`.slice(0, 120);
+        // The catalog JSON is a design taxonomy: its status / duration / "tested" fields are
+        // mock-up values, not results, and it carries no script. Seed the case as an honest
+        // draft to be automated; the catalog audit lists it until a script is attached.
         const { rows } = await query(
           `INSERT INTO test_cases (
              key, name, description, application_id, test_type, execution_method,
-             automation_status, lifecycle, tags, severity, priority, author_id, created_by,
-             expected_results
+             automation_status, lifecycle, tags, severity, priority, author_id, created_by
            ) VALUES (
              $1, $2, $3, $4, COALESCE($5::test_type, 'other'), 'http',
-             'automated', 'active', $6, 'medium', 'p2', $7, 'sandbench-seed', $8
+             'to_be_automated', 'draft', $6, 'medium', 'p2', $7, 'sandbench-seed'
            )
            ON CONFLICT (key) DO UPDATE SET
              name = EXCLUDED.name, description = EXCLUDED.description, tags = EXCLUDED.tags,
-             expected_results = EXCLUDED.expected_results, updated_at = now()
+             updated_at = now()
            RETURNING id`,
           [
             caseKey, c.name, `${s.name}: ${s.desc}`, appId, typeEnum,
-            ['sandbench', 'seeded', t.key, t.category, s.id, `tone:${c.tone}`, `status:${c.status}`],
-            s.owner, `Duration ref: ${c.duration}; last tested: ${c.tested}`,
+            ['sandbench', 'seeded', t.key, t.category, s.id],
+            s.owner,
           ]
         );
         await query(
