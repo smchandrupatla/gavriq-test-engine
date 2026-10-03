@@ -8,6 +8,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, migrate } from './db/client.js';
+import { DEFAULT_APPLICATION_KEY } from './app-config.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const casesDir = path.join(root, 'sit/cases');
@@ -63,9 +64,10 @@ async function main() {
 
   const appRes = await query(
     `INSERT INTO applications (key, name, description, status)
-     VALUES ('sand-bench', 'Sand Bench / Sandbox', 'Primary development sandbox under test', 'active')
+     VALUES ($1, $2, 'Application under test (SIT import)', 'active')
      ON CONFLICT (key) DO UPDATE SET updated_at = now()
-     RETURNING id`
+     RETURNING id`,
+    [DEFAULT_APPLICATION_KEY, DEFAULT_APPLICATION_KEY === 'sand-bench' ? 'Sand Bench / Sandbox' : DEFAULT_APPLICATION_KEY]
   );
   const appId = appRes.rows[0]!.id;
 
