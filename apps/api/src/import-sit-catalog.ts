@@ -38,6 +38,12 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '83-security-vuln': { suite: 'sit-security', type: 'security', method: 'http' },
   '84-security-zap': { suite: 'sit-security', type: 'security', method: 'http' },
   '85-security-sast': { suite: 'sit-security', type: 'security', method: 'http' },
+  '86-pentest-authn': { suite: 'sit-pentest', type: 'security', method: 'http' },
+  '87-pentest-authz': { suite: 'sit-pentest', type: 'security', method: 'http' },
+  '88-pentest-injection': { suite: 'sit-pentest', type: 'security', method: 'http' },
+  '89-pentest-server-side': { suite: 'sit-pentest', type: 'security', method: 'http' },
+  '93-pentest-ui-xss-headers': { suite: 'sit-pentest', type: 'security', method: 'playwright' },
+  '94-pentest-ui-inventory-sweep': { suite: 'sit-pentest', type: 'security', method: 'playwright' },
   '90-agents': { suite: 'sit-agents', type: 'integration', method: 'http' },
 };
 

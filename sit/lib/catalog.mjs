@@ -11,7 +11,7 @@ export function appOf(fileName = "", filePath = "") {
   const blob = `${filePath} ${fileName}`.replace(/\\/g, "/");
   const nested = blob.match(/cases\/apps\/([^/]+)\//) || blob.match(/apps\/([^/]+)\//);
   if (nested) return nested[1];
-  if (fileName.startsWith("8") || /zap|sast|trivy|secportal/.test(blob)) return "security";
+  if (fileName.startsWith("8") || fileName.startsWith("93-") || fileName.startsWith("94-") || /zap|sast|trivy|secportal/.test(blob)) return "security";
   if (/^(10-|20-|30-)/.test(fileName)) return "testhub";
   return "sand-bench";
 }
@@ -45,6 +45,8 @@ export const GROUPS = {
     { id: "sast", title: "SAST (Semgrep)" },
     { id: "dast", title: "DAST (OWASP ZAP)" },
     { id: "pentest", title: "Penetration-lite (login + injection)" },
+    { id: "server-side", title: "Server-side abuse (SSRF, traversal, resource exhaustion)" },
+    { id: "ui-pentest", title: "Screen penetration testing (stored/reflected XSS, headers, session)" },
   ],
   performance: [
     { id: "soak", title: "Soak / endurance (bounded duration)" },
@@ -60,6 +62,7 @@ export function suiteOf(fileName) {
   if (fileName.startsWith("60-") || fileName.startsWith("61-") || fileName.startsWith("62-") || fileName.startsWith("63-")) return "gui";
   if (fileName.startsWith("70-")) return "e2e";
   if (fileName.startsWith("8")) return "security";
+  if (fileName.startsWith("93-") || fileName.startsWith("94-")) return "security"; // screen pentest (UI, not "8"-prefixed)
   if (fileName.startsWith("91-") || fileName.startsWith("92-")) return "performance";
   return "other";
 }
@@ -67,6 +70,13 @@ export function suiteOf(fileName) {
 export function groupOf(fileName, testName = "") {
   if (fileName.startsWith('51-') || fileName.startsWith('64-')) return 'use-cases';
   const n = `${fileName} ${testName}`.toLowerCase();
+  // Pentest cases (86-89 API, 93-94 screens): explicit, so the heuristics below never
+  // second-guess a case this suite wrote on purpose.
+  if (fileName.startsWith("86-")) return "authentication";
+  if (fileName.startsWith("87-")) return "api-top10";
+  if (fileName.startsWith("88-")) return "pentest";
+  if (fileName.startsWith("89-")) return "server-side";
+  if (fileName.startsWith("93-") || fileName.startsWith("94-")) return "ui-pentest";
   if (fileName.startsWith("91-")) return "soak";
   if (fileName.startsWith("92-")) return "burst";
   if (fileName.startsWith("00-")) return "reachability";

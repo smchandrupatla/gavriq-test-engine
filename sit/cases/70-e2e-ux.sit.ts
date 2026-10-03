@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ENV } from "../lib/env.ts";
+import { apiFetch } from "../lib/client.ts";
+
+// These routes need a session since the API went deny-by-default (security sweep 2026-09-29).
 
 test("UX first-run strip is published on the deployed API", async () => {
-  const res = await fetch(`${ENV.apiBase}/api/v1/ux/first-run`, { signal: AbortSignal.timeout(5000) });
+  const res = await apiFetch("/api/v1/ux/first-run", { signal: AbortSignal.timeout(5000) });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.lead, "Good rules survive bad data.");
@@ -11,7 +13,7 @@ test("UX first-run strip is published on the deployed API", async () => {
 });
 
 test("N-2 demo script is the same walk after deploy", async () => {
-  const res = await fetch(`${ENV.apiBase}/api/v1/ux/demo/n2`, { signal: AbortSignal.timeout(5000) });
+  const res = await apiFetch("/api/v1/ux/demo/n2", { signal: AbortSignal.timeout(5000) });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.seconds, 90);
@@ -19,10 +21,10 @@ test("N-2 demo script is the same walk after deploy", async () => {
 });
 
 test("channel targets list file, api, mq, kafka", async () => {
-  const res = await fetch(`${ENV.apiBase}/api/v1/channel-targets`, { signal: AbortSignal.timeout(5000) });
+  const res = await apiFetch("/api/v1/channel-targets", { signal: AbortSignal.timeout(5000) });
   assert.equal(res.status, 200);
   const body = await res.json();
-  const channels = (body.data || []).map((row) => row.channel);
+  const channels = (body.data || []).map((row: { channel: string }) => row.channel);
   for (const expected of ["file", "api", "mq", "kafka"]) {
     assert.ok(channels.includes(expected), `missing channel ${expected}`);
   }
