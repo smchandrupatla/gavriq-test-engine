@@ -4,6 +4,7 @@ import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 import { humanDateTime } from '../lib/naming.js';
 import { deployFirstIfDown } from '../infra.js';
+import { ingestExecution } from '../defects/service.js';
 
 /** "<case name> — <timestamp>" for a single case, "<suite name> — <timestamp>" for many, else "Run — <timestamp>". */
 function runName(caseNames: string[], suiteName: string | null, at: Date): string {
@@ -462,7 +463,15 @@ export async function executionRoutes(app: FastifyInstance) {
           [rows[0].worker_id]
         );
       }
-      return reply.send({ data: rows[0] });
+      // Defect Manager: file failures as a defect report, or settle a PM rerun.
+      // Never let the register fail a completion the worker already reported.
+      let defects: unknown = null;
+      try {
+        defects = await ingestExecution(rows[0].id);
+      } catch (err) {
+        req.log.warn({ err }, 'defect ingest failed');
+      }
+      return reply.send({ data: rows[0], defects });
     }
   );
 }
