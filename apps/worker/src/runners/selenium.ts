@@ -12,7 +12,7 @@ export interface SeleniumRunInput {
   script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
-  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string; timeout_ms?: number; description?: string; text?: string; markdown_file?: string }>;
+  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string; must_contain?: string; timeout_ms?: number; description?: string; text?: string; markdown_file?: string }>;
   viewport?: { width: number; height: number };
   vars?: Record<string, string>;
   /** Run with a visible browser window instead of headless. Defaults to headless, overridable via SELENIUM_HEADLESS=false. */
@@ -347,8 +347,9 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
                 // Case-insensitive: CSS text-transform makes rendered text differ
                 // from source casing (e.g. "SAND BENCH" for "Sand Bench").
                 const body = (await driver.findElement(By.css('body')).getText()).toLowerCase();
-                if (step.expected && !body.includes(step.expected.toLowerCase())) {
-                  throw new Error(`assert_text failed: expected "${step.expected}"`);
+                const want = step.must_contain ?? step.expected;
+                if (want && !body.includes(want.toLowerCase())) {
+                  throw new Error(`assert_text failed: expected "${want}"`);
                 }
               }
               break;
@@ -357,8 +358,9 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
                 if (!step.selector) throw new Error('assert_selector_text requires selector');
                 const el = await driver.wait(until.elementLocated(By.css(step.selector)), step.timeout_ms ?? 10000);
                 const text = ((await el.getText()) || '').trim();
-                if (step.expected && !text.includes(step.expected)) {
-                  throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected "${step.expected}"`);
+                const want = step.must_contain ?? step.expected;
+                if (want && !text.includes(want)) {
+                  throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected "${want}"`);
                 }
               }
               break;
@@ -373,7 +375,8 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
             case 'assert_title':
               {
                 const title = await driver.getTitle();
-                if (step.expected && !title.includes(step.expected)) {
+                const want = step.must_contain ?? step.expected;
+                if (want && !title.includes(want)) {
                   throw new Error(`assert_title failed: got "${title}"`);
                 }
               }

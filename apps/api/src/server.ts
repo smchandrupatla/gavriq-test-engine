@@ -37,6 +37,9 @@ import { insightRoutes } from './routes/insights.js';
 import { registerEvidenceGate } from './evidence-gate.js';
 import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
 import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
+import { defectRoutes } from './routes/defects.js';
+import { feedbackLoopRoutes } from './routes/feedback-loop.js';
+import { feedbackLoopTick } from './feedback-loop.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -185,7 +188,7 @@ async function main() {
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/ui/'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/ui/') || pathName.startsWith('/api/v1/defect'))) {
         return requirePermission('tests:read')(req, reply);
       }
       if (method === 'POST' && (pathName === '/api/v1/ui/history' || pathName === '/api/v1/reports')) {
@@ -196,6 +199,9 @@ async function main() {
       }
       if (pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/insights')) {
         return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
+      if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
+        return requirePermission('executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
         return requirePermission('tests:write')(req, reply);
@@ -232,6 +238,8 @@ async function main() {
   await app.register(reportRoutes);
   await app.register(insightRoutes);
   await app.register(opsRoutes);
+  await app.register(defectRoutes);
+  await app.register(feedbackLoopRoutes);
 
   await app.listen({ port, host });
 
@@ -272,6 +280,21 @@ async function main() {
     const every = Math.max(10_000, Number(process.env.INFRA_TICK_MS) || 60_000);
     setTimeout(infraTickSafe, 30_000).unref();
     setInterval(infraTickSafe, every).unref();
+  }
+
+  // Feedback loops (feedback-loop.ts): advance every running loop. Loops start stopped, so nothing runs
+  // until an operator starts one. FEEDBACK_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.FEEDBACK_LOOP_TICK_MS !== '0') {
+    let loopBusy = false;
+    const loopTickSafe = () => {
+      if (loopBusy) return;
+      loopBusy = true;
+      feedbackLoopTick()
+        .catch((err) => app.log.warn({ err }, 'feedback loop tick failed'))
+        .finally(() => { loopBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.FEEDBACK_LOOP_TICK_MS) || 20_000);
+    setInterval(loopTickSafe, every).unref();
   }
 
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);

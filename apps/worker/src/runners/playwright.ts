@@ -18,6 +18,8 @@ export interface PlaywrightStep {
   selector?: string;
   value?: string;
   expected?: string;
+  /** What an assertion matches against; falls back to expected. */
+  must_contain?: string;
   timeout_ms?: number;
   description?: string;
   /** Plain-language wording of the step, as the Test cases screen shows it. */
@@ -280,16 +282,18 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               // Case-insensitive: rendered text often differs from source only
               // by CSS text-transform (e.g. "SAND BENCH" for "Sand Bench").
               const text = (await page.locator('body').innerText()).toLowerCase();
-              if (step.expected && !text.includes(step.expected.toLowerCase())) {
-                throw new Error(`assert_text failed: expected "${step.expected}"`);
+              const want = step.must_contain ?? step.expected;
+              if (want && !text.includes(want.toLowerCase())) {
+                throw new Error(`assert_text failed: expected "${want}"`);
               }
               break;
             }
             case 'assert_selector_text': {
               if (!step.selector) throw new Error('assert_selector_text requires selector');
               const text = (await page.locator(step.selector).first().innerText()).trim();
-              if (step.expected && !text.includes(step.expected)) {
-                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${step.expected}"`);
+              const want = step.must_contain ?? step.expected;
+              if (want && !text.includes(want)) {
+                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${want}"`);
               }
               break;
             }
@@ -302,7 +306,8 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             }
             case 'assert_title': {
               const title = await page.title();
-              if (step.expected && !title.includes(step.expected)) {
+              const want = step.must_contain ?? step.expected;
+              if (want && !title.includes(want)) {
                 throw new Error(`assert_title failed: got "${title}"`);
               }
               break;

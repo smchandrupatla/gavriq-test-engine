@@ -51,7 +51,7 @@ function safetyCategory(c: { execution_method?: string | null; test_type?: strin
   return 'functional_smoke';
 }
 
-async function onlineWorkers(): Promise<number> {
+export async function onlineWorkers(): Promise<number> {
   const { rows } = await query(
     `SELECT count(*)::int AS c FROM workers
      WHERE last_heartbeat > now() - interval '60 seconds' AND status <> 'draining'`
@@ -59,7 +59,7 @@ async function onlineWorkers(): Promise<number> {
   return rows[0]?.c ?? 0;
 }
 
-async function loadRun(runId: string) {
+export async function loadRun(runId: string) {
   let { rows: executions } = await query(
     `SELECT * FROM executions WHERE metadata->>'run_group' = $1 ORDER BY created_at`,
     [runId]
@@ -85,7 +85,7 @@ async function loadRun(runId: string) {
   return { executions, results };
 }
 
-function summarize(runId: string, executions: any[], results: any[], workers: number) {
+export function summarize(runId: string, executions: any[], results: any[], workers: number) {
   const expected = executions.reduce((n, e) => n + (e.test_case_ids?.length || 0), 0);
   const count = (pred: (r: any) => boolean) => results.filter(pred).length;
   const passed = count((r) => r.status === 'passed');

@@ -868,7 +868,17 @@ export interface ScreenFields {
 
 /** Every Test cases screen field for a catalog case, authored values first. */
 export function screenFields(c: CaseDef, suite: SuiteDef | undefined, ctx: AppContext): ScreenFields {
-  const steps: Array<Step & HumanStep> = ((c.steps || []) as Step[]).map((s, i) => ({ ...s, ...narrateStep(s, i) }));
+  // The worker matches these actions against step.must_contain (falling back to
+  // step.expected). The screen shows expected as a sentence, so the runner's fragment
+  // moves to must_contain and expected carries the plain sentence.
+  const runnerMatches = new Set(['assert_text', 'assert_title', 'assert_selector_text']);
+  const steps = ((c.steps || []) as Step[]).map((s, i) => {
+    const narrated = narrateStep(s, i);
+    if (runnerMatches.has(s.action) && typeof s.expected === 'string' && s.must_contain === undefined) {
+      return { ...s, ...narrated, must_contain: s.expected } as Step & HumanStep;
+    }
+    return { ...s, ...narrated } as Step & HumanStep;
+  });
   if (!steps.length && c.method === 'performance') steps.push({ action: 'performance', ...performanceStep((c.validationRules || {}) as Record<string, any>) });
   const triage = triageDefaults(c, ctx);
   const hasPrecondition = ((c.steps || []) as Step[]).some((s) => s.precondition);
