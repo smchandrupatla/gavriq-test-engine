@@ -11,7 +11,7 @@
  * Never point it at the shared engine: it creates a throwaway environment,
  * queues real executions and runs the lifecycle tick there.
  */
-import { describe, it } from 'node:test';
+import { before, after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_INFRA_POLICY,
@@ -142,6 +142,21 @@ describe('teardown decisions', () => {
 describe('lifecycle round trip (disposable engine)', () => {
   const ENV_KEY = 'infra-test-stack';
   let ready = false;
+  let savedPruneEvery: number | null = null;
+
+  // The tick queues housekeeping on its own cadence; a housekeeping job queued in the middle of the
+  // test would be claimed by the fake agent ahead of the teardown it is waiting for. Pause it here.
+  before(async () => {
+    if (!API) return;
+    const policy = await api('/api/v1/infra/policy');
+    savedPruneEvery = policy.body?.data?.prune_every_hours ?? null;
+    await api('/api/v1/infra/policy', { method: 'PUT', body: JSON.stringify({ prune_every_hours: 0 }) });
+  });
+
+  after(async () => {
+    if (!API || savedPruneEvery === null) return;
+    await api('/api/v1/infra/policy', { method: 'PUT', body: JSON.stringify({ prune_every_hours: savedPruneEvery }) });
+  });
 
   async function up() {
     if (!API) return false;
