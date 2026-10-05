@@ -12,6 +12,7 @@ import {
   isDefectStatus, planIngest, reportKey, rerunBlockers, summarize,
   type DefectStatus, type ExistingDefect, type ReportStatus, type ResultRow,
 } from './core.js';
+import { autoApproveFor, logAutoDefect } from '../defect-log.js';
 
 export class DefectError extends Error {
   constructor(public statusCode: number, message: string, public details?: unknown) {
@@ -61,7 +62,7 @@ const FINISHED = new Set(['passed', 'failed', 'error', 'timed_out', 'blocked', '
 export async function ingestExecution(executionId: string): Promise<IngestResult> {
   return withTransaction(async (db) => {
     const { rows: execs } = await db.query(
-      `SELECT id, key, status::text AS status, metadata FROM executions WHERE id::text = $1 OR key = $1 FOR UPDATE`,
+      `SELECT id, key, status::text AS status, metadata, environment_id FROM executions WHERE id::text = $1 OR key = $1 FOR UPDATE`,
       [executionId]
     );
     const exec = execs[0];
@@ -107,24 +108,44 @@ export async function ingestExecution(executionId: string): Promise<IngestResult
     }
 
     const key = reportKey(new Date(), randomUUID().replace(/-/g, ''));
+    // Held until a person sends it, unless the application auto-approves (defect-log.ts).
+    const held = !(await autoApproveFor(db, exec.metadata?.application_key));
     const { rows: reports } = await db.query(
-      `INSERT INTO defect_reports (key, execution_id, source, status, history)
-       VALUES ($1,$2,'execution','open',$3::jsonb) RETURNING id, key`,
-      [key, exec.id, entry('defect-manager', 'created', { execution: exec.key })]
+      `INSERT INTO defect_reports (key, execution_id, source, status, held, history)
+       VALUES ($1,$2,'execution','open',$3,$4::jsonb) RETURNING id, key`,
+      [key, exec.id, held, entry('defect-manager', 'created', { execution: exec.key })]
     );
     const report = reports[0]!;
 
     for (const c of plan.create) {
-      await db.query(
+      const { rows: created } = await db.query(
         `INSERT INTO defects (key, report_id, fingerprint, test_case_id, case_key, case_name, test_type,
                               category, severity, status, message, execution_id, execution_result_id, history)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13::jsonb)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13::jsonb) RETURNING id`,
         [
           await nextDefectKey(db), report.id, c.fingerprint, c.test_case_id, c.case_key, c.case_name,
           c.test_type, c.category, c.severity, c.message, exec.id, c.execution_result_id,
           entry('defect-manager', 'opened', { execution: exec.key }),
         ]
       );
+      if (exec.metadata?.application_key) {
+        await logAutoDefect(db, {
+          applicationKey: exec.metadata.application_key,
+          defectId: created[0]!.id,
+          defectReportId: report.id,
+          held,
+          executionId: exec.id,
+          executionResultId: c.execution_result_id,
+          testCaseId: c.test_case_id,
+          caseKey: c.case_key,
+          caseName: c.case_name,
+          severity: c.severity,
+          message: c.message,
+          runId: exec.metadata?.run_group ?? null,
+          environmentId: exec.environment_id ?? null,
+          loggedBy: 'defect-manager',
+        });
+      }
     }
     for (const { defect } of plan.regress) {
       await db.query(
@@ -175,11 +196,12 @@ async function applyRerun(db: Db, reportId: string, executionId: string, results
 
 export async function listReports(filter: { status?: string; limit?: number }) {
   const params: unknown[] = [];
-  let where = '';
+  // Held reports are not in the product manager's queue until a person sends them.
+  let where = 'WHERE NOT r.held';
   if (filter.status) {
     const wanted = filter.status.split(',').map((s) => s.trim()).filter(Boolean);
     params.push(wanted);
-    where = `WHERE r.status = ANY($1::text[])`;
+    where = `WHERE r.status = ANY($1::text[]) AND NOT r.held`;
   }
   params.push(Math.min(Math.max(filter.limit || 50, 1), 200));
   const { rows } = await query(
@@ -380,7 +402,8 @@ export async function requestRerun(ref: string, by: string, note?: string, envir
 export async function defectOverview() {
   const { rows } = await query(
     `SELECT
-       (SELECT COUNT(*) FROM defect_reports WHERE status IN ('open','reopened'))::int AS awaiting_pm,
+       (SELECT COUNT(*) FROM defect_reports WHERE status IN ('open','reopened') AND NOT held)::int AS awaiting_pm,
+       (SELECT COUNT(*) FROM defect_reports WHERE held)::int AS held_for_approval,
        (SELECT COUNT(*) FROM defect_reports WHERE status IN ('with_pm','fixing'))::int AS in_fix,
        (SELECT COUNT(*) FROM defect_reports WHERE status = 'rerunning')::int AS rerunning,
        (SELECT COUNT(*) FROM defect_reports WHERE status = 'verified')::int AS verified,

@@ -697,6 +697,64 @@ CREATE TABLE IF NOT EXISTS quality_insights (
 );
 
 -- ---------------------------------------------------------------------------
+-- Held reports wait in the defect log until a person sends them to the implementation
+-- manager (auto-approve off), so the product manager's queue only sees released ones.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS held BOOLEAN NOT NULL DEFAULT false;
+
+-- Defect log: every failure the engine logs, and every defect a person raises by hand,
+-- with its lifecycle (logged -> validated -> sent, or rejected), the run, test case,
+-- environment and application version it was seen in, and its attachments.
+CREATE SEQUENCE IF NOT EXISTS defect_log_key_seq;
+
+CREATE TABLE IF NOT EXISTS defect_log (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                   TEXT NOT NULL UNIQUE,              -- DL-000001
+  application_id        UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  title                 TEXT NOT NULL,
+  description           TEXT NOT NULL DEFAULT '',
+  severity              TEXT NOT NULL DEFAULT 'medium',    -- low|medium|high|critical
+  status                TEXT NOT NULL DEFAULT 'logged',    -- logged|validated|rejected|sent
+  origin                TEXT NOT NULL DEFAULT 'manual',    -- auto|manual
+  test_case_id          UUID REFERENCES test_cases(id) ON DELETE SET NULL,
+  case_key              TEXT,
+  run_id                TEXT,
+  execution_id          UUID REFERENCES executions(id) ON DELETE SET NULL,
+  execution_result_id   UUID REFERENCES execution_results(id) ON DELETE SET NULL,
+  environment_id        UUID REFERENCES environments(id) ON DELETE SET NULL,
+  environment_key       TEXT,
+  application_version   TEXT NOT NULL DEFAULT 'not recorded',
+  failure_message       TEXT,
+  defect_report_id      UUID REFERENCES defect_reports(id) ON DELETE SET NULL,
+  defect_id             UUID REFERENCES defects(id) ON DELETE SET NULL,
+  logged_by             TEXT,
+  validated_by          TEXT,
+  validated_at          TIMESTAMPTZ,
+  rejected_reason       TEXT,
+  sent_by               TEXT,
+  sent_at               TIMESTAMPTZ,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_status_idx ON defect_log (application_id, status);
+CREATE INDEX IF NOT EXISTS defect_log_run_idx ON defect_log (run_id);
+
+-- Attachments: a screenshot or system log either linked to the run's evidence (evidence_id)
+-- or uploaded by a person (content).
+CREATE TABLE IF NOT EXISTS defect_log_attachments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  defect_log_id   UUID NOT NULL REFERENCES defect_log(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'other',          -- screenshot|log|other
+  name            TEXT NOT NULL,
+  content_type    TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes      INT NOT NULL DEFAULT 0,
+  sha256          TEXT,
+  evidence_id     UUID REFERENCES evidence(id) ON DELETE SET NULL,
+  content         BYTEA,
+  created_by      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_attachments_log_idx ON defect_log_attachments (defect_log_id);
+
 -- Feedback loop (feedback-loop.ts): one row per application. The loop runs the
 -- application's suite, lets the Defect Manager file reports, requests reruns of
 -- the defects the implementation manager fixed, and stops once a full sweep is clean.

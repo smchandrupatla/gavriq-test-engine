@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defect log — GAVRIQ Test Engine</title>
+<style>
+:root { --bg:#f6f7f9; --fg:#1d232b; --muted:#5b6674; --line:#d9dee5; --card:#fff; --accent:#2457c5; --warn:#b45309; --bad:#b42318; --good:#067647; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#101418; --fg:#e8edf3; --muted:#9aa6b4; --line:#2a323c; --card:#171d24; --accent:#7aa2ff; --warn:#f0a040; --bad:#ff7a70; --good:#5fd39a; } }
+:root[data-theme="dark"] { --bg:#101418; --fg:#e8edf3; --muted:#9aa6b4; --line:#2a323c; --card:#171d24; --accent:#7aa2ff; --warn:#f0a040; --bad:#ff7a70; --good:#5fd39a; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui, Segoe UI, Roboto, sans-serif; }
+header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--line); background:var(--card); }
+h1 { font-size:18px; margin:0; }
+main { padding:16px; display:grid; gap:16px; grid-template-columns: minmax(0,1fr); }
+@media (min-width: 980px) { main { grid-template-columns: minmax(0,1.25fr) minmax(0,1fr); } }
+section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
+h2 { font-size:15px; margin:0 0 10px; }
+label { display:block; color:var(--muted); font-size:12px; margin:8px 0 3px; }
+input, select, textarea, button { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; max-width:100%; }
+textarea { width:100%; min-height:70px; }
+button { cursor:pointer; background:var(--card); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.danger { color:var(--bad); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; font-size:12px; }
+tr.pick { cursor:pointer; }
+tr.pick:hover, tr.sel { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+.pill { display:inline-block; padding:1px 8px; border-radius:999px; border:1px solid var(--line); font-size:12px; }
+.s-logged { color:var(--warn); } .s-validated { color:var(--accent); } .s-rejected { color:var(--bad); } .s-sent { color:var(--good); }
+.muted { color:var(--muted); }
+.msg { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; max-height:160px; overflow:auto; }
+.err { color:var(--bad); }
+.hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Defect log</h1>
+  <div class="row">
+    <label style="margin:0">Application
+      <select id="app"></select>
+    </label>
+    <label style="margin:0"><input type="checkbox" id="autoApprove"> Auto-approve: send new defects to the implementation manager at once</label>
+    <span id="autoState" class="muted"></span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="row" style="justify-content:space-between">
+      <h2>Defects</h2>
+      <button class="primary" id="newBtn">New defect</button>
+    </div>
+    <div class="row">
+      <label style="margin:0">Status
+        <select id="fStatus">
+          <option value="">all</option><option>logged</option><option>validated</option><option>rejected</option><option>sent</option>
+        </select>
+      </label>
+      <label style="margin:0">Origin
+        <select id="fOrigin"><option value="">all</option><option>auto</option><option>manual</option></select>
+      </label>
+      <label style="margin:0">Run <input id="fRun" placeholder="run-…" size="16"></label>
+      <button id="refresh">Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Key</th><th>Title</th><th>Severity</th><th>Status</th><th>Origin</th><th>Case</th><th>Environment</th><th>Version</th><th>Run</th><th>Files</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <p id="listErr" class="err"></p>
+  </section>
+
+  <section id="detail">
+    <h2>Select a defect</h2>
+    <p class="muted">Pick a row to view, update, validate, reject, attach files, send it to the implementation manager, or delete it. Use <b>New defect</b> to raise one by hand.</p>
+  </section>
+
+  <section id="create" class="hidden" style="grid-column: 1 / -1">
+    <h2>New defect</h2>
+    <div class="row" style="align-items:flex-start">
+      <div style="flex:2;min-width:240px"><label>Title</label><input id="cTitle" style="width:100%"></div>
+      <div style="flex:1;min-width:140px"><label>Severity</label>
+        <select id="cSeverity"><option>low</option><option selected>medium</option><option>high</option><option>critical</option></select></div>
+      <div style="flex:1;min-width:160px"><label>Test case key (optional)</label><input id="cCase" style="width:100%"></div>
+      <div style="flex:1;min-width:160px"><label>Environment key (optional)</label><input id="cEnv" style="width:100%"></div>
+      <div style="flex:1;min-width:140px"><label>Application version</label><input id="cVersion" style="width:100%" placeholder="not recorded"></div>
+      <div style="flex:1;min-width:160px"><label>Run id (optional)</label><input id="cRun" style="width:100%"></div>
+    </div>
+    <label>What happened, and what should have happened</label>
+    <textarea id="cDesc"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" id="createBtn">Log defect</button>
+      <button id="cancelCreate">Cancel</button>
+      <span id="createErr" class="err"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+const API = '/api/v1';
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
+let current = null;
+let apps = [];
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { headers: { 'content-type': 'application/json' }, ...opts });
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+async function loadApps() {
+  const res = await fetch('/api/v1/applications');
+  apps = (await res.json()).data || [];
+  $('app').innerHTML = apps.map((a) => `<option value="${esc(a.key)}">${esc(a.name || a.key)}</option>`).join('');
+  const pick = apps.find((a) => a.key === 'sand-bench') || apps[0];
+  if (pick) $('app').value = pick.key;
+  await loadSettings();
+  await loadList();
+}
+
+async function loadSettings() {
+  const app = $('app').value;
+  try {
+    const s = (await api(`/defect-log/settings/${encodeURIComponent(app)}`)).data;
+    $('autoApprove').checked = s.auto_approve;
+    $('autoState').textContent = s.auto_approve ? 'New defects go straight to the implementation manager.' : 'New defects wait here until someone sends them.';
+  } catch (e) { $('autoState').textContent = e.message; }
+}
+
+$('autoApprove').addEventListener('change', async (ev) => {
+  try {
+    await api(`/defect-log/settings/${encodeURIComponent($('app').value)}`, { method: 'PUT', body: JSON.stringify({ auto_approve: ev.target.checked }) });
+    await loadSettings();
+  } catch (e) { ev.target.checked = !ev.target.checked; $('autoState').textContent = e.message; }
+});
+
+async function loadList() {
+  $('listErr').textContent = '';
+  const q = new URLSearchParams({ application: $('app').value });
+  if ($('fStatus').value) q.set('status', $('fStatus').value);
+  if ($('fOrigin').value) q.set('origin', $('fOrigin').value);
+  if ($('fRun').value.trim()) q.set('run_id', $('fRun').value.trim());
+  try {
+    const rows = (await api(`/defect-log?${q}`)).data;
+    if (!rows.length) { $('rows').innerHTML = '<tr><td colspan="10" class="muted">No defects here yet.</td></tr>'; return; }
+    $('rows').innerHTML = rows.map((r) => `
+      <tr class="pick ${current === r.id ? 'sel' : ''}" data-id="${esc(r.id)}">
+        <td>${esc(r.key)}</td><td>${esc(r.title)}</td><td>${esc(r.severity)}</td>
+        <td class="s-${esc(r.status)}">${esc(r.status)}</td><td>${esc(r.origin)}</td><td>${esc(r.case_key || '—')}</td>
+        <td>${esc(r.environment_key || '—')}</td><td>${esc(r.application_version)}</td><td>${esc(r.run_id || '—')}</td>
+        <td>${esc(r.attachments)}</td></tr>`).join('');
+    document.querySelectorAll('tr.pick').forEach((tr) => tr.addEventListener('click', () => openDetail(tr.dataset.id)));
+  } catch (e) { $('listErr').textContent = e.message; }
+}
+
+async function openDetail(id) {
+  current = id;
+  const d = (await api(`/defect-log/${id}`)).data;
+  const editable = d.status !== 'sent';
+  const atts = d.attachments.map((a) => `
+    <li>${esc(a.kind)} — <a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.name)}</a>
+      <span class="muted">(${esc(a.content_type)}, ${esc(a.size_bytes)} bytes)</span>
+      ${a.from_run ? '' : `<button class="danger" data-att="${esc(a.id)}">Remove</button>`}</li>`).join('');
+  $('detail').innerHTML = `
+    <div class="row" style="justify-content:space-between"><h2>${esc(d.key)} — ${esc(d.title)}</h2><span class="pill s-${esc(d.status)}">${esc(d.status)}</span></div>
+    <p class="muted">Origin: ${esc(d.origin)} · Logged by ${esc(d.logged_by || '—')} · ${fmt(d.created_at)}</p>
+    <div class="row muted">
+      <span>Application: ${esc(d.application)}</span><span>Version: ${esc(d.application_version)}</span>
+      <span>Environment: ${esc(d.environment_key || '—')}</span><span>Run: ${esc(d.run_id || '—')}</span>
+      <span>Test case: ${esc(d.case_key || '—')}${d.case_name ? ' (' + esc(d.case_name) + ')' : ''}</span>
+    </div>
+    ${d.failure_message ? `<label>Failure</label><div class="msg">${esc(d.failure_message)}</div>` : ''}
+    ${d.sent_at ? `<p>Sent to the implementation manager by ${esc(d.sent_by)} at ${fmt(d.sent_at)}.</p>` : ''}
+    ${d.rejected_reason ? `<p class="err">Rejected: ${esc(d.rejected_reason)}</p>` : ''}
+
+    <label>Title</label><input id="eTitle" value="${esc(d.title)}" style="width:100%" ${editable ? '' : 'disabled'}>
+    <label>Description</label><textarea id="eDesc" ${editable ? '' : 'disabled'}>${esc(d.description)}</textarea>
+    <div class="row">
+      <div><label>Severity</label><select id="eSeverity" ${editable ? '' : 'disabled'}>
+        ${['low','medium','high','critical'].map((s) => `<option ${s === d.severity ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+      <div><label>Test case key</label><input id="eCase" value="${esc(d.case_key || '')}" ${editable ? '' : 'disabled'}></div>
+      <div><label>Application version</label><input id="eVersion" value="${esc(d.application_version)}" ${editable ? '' : 'disabled'}></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="saveBtn" ${editable ? '' : 'disabled'}>Save changes</button>
+      <button id="validateBtn" ${d.status === 'logged' ? '' : 'disabled'}>Mark validated</button>
+      <button id="reopenBtn" ${d.status === 'rejected' ? '' : 'disabled'}>Reopen</button>
+      <button class="danger" id="rejectBtn" ${d.status === 'logged' || d.status === 'validated' ? '' : 'disabled'}>Reject…</button>
+      <button class="primary" id="sendBtn" ${d.status === 'sent' || d.status === 'rejected' ? 'disabled' : ''}>Send to implementation manager</button>
+      <button class="danger" id="deleteBtn">Delete</button>
+    </div>
+    <p id="detailErr" class="err"></p>
+
+    <h2 style="margin-top:14px">Attachments</h2>
+    <ul>${atts || '<li class="muted">None.</li>'}</ul>
+    <div class="row">
+      <select id="attKind"><option value="screenshot">screenshot</option><option value="log">log</option><option value="other">other</option></select>
+      <input type="file" id="attFile">
+      <button id="attachBtn">Attach file</button>
+    </div>`;
+  $('saveBtn').onclick = () => run(async () => {
+    await api(`/defect-log/${id}`, { method: 'PATCH', body: JSON.stringify({ title: $('eTitle').value, description: $('eDesc').value, severity: $('eSeverity').value, case_key: $('eCase').value || null, application_version: $('eVersion').value }) });
+  });
+  $('validateBtn').onclick = () => run(() => api(`/defect-log/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'validated' }) }));
+  $('reopenBtn').onclick = () => run(() => api(`/defect-log/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'logged' }) }));
+  $('rejectBtn').onclick = () => {
+    const reason = prompt('Why is this not a defect? (kept with the record)');
+    if (reason && reason.trim()) run(() => api(`/defect-log/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'rejected', rejected_reason: reason.trim() }) }));
+  };
+  $('sendBtn').onclick = () => {
+    if (confirm('Send this defect to the implementation manager now?')) run(() => api(`/defect-log/${id}/send`, { method: 'POST', body: '{}' }));
+  };
+  $('deleteBtn').onclick = () => {
+    if (confirm(`Delete ${d.key}? Its attachments are removed too.`)) run(async () => { await api(`/defect-log/${id}`, { method: 'DELETE' }); current = null; $('detail').innerHTML = '<h2>Deleted</h2>'; });
+  };
+  $('attachBtn').onclick = () => run(async () => {
+    const f = $('attFile').files[0];
+    if (!f) throw new Error('choose a file first');
+    const data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1]);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(f);
+    });
+    await api(`/defect-log/${id}/attachments`, { method: 'POST', body: JSON.stringify({ name: f.name, kind: $('attKind').value, content_type: f.type || 'application/octet-stream', data_base64: data }) });
+  });
+  document.querySelectorAll('[data-att]').forEach((b) => b.addEventListener('click', () => run(() => api(`/defect-log/attachments/${b.dataset.att}`, { method: 'DELETE' }))));
+  await loadList();
+}
+
+async function run(fn) {
+  try {
+    await fn();
+    if (current) await openDetail(current); else await loadList();
+    await loadList();
+  } catch (e) { const el = $('detailErr'); if (el) el.textContent = e.message; else $('listErr').textContent = e.message; }
+}
+
+$('app').addEventListener('change', async () => { current = null; await loadSettings(); await loadList(); });
+$('fStatus').addEventListener('change', loadList);
+$('fOrigin').addEventListener('change', loadList);
+$('fRun').addEventListener('change', loadList);
+$('refresh').addEventListener('click', loadList);
+$('newBtn').addEventListener('click', () => $('create').classList.remove('hidden'));
+$('cancelCreate').addEventListener('click', () => $('create').classList.add('hidden'));
+$('createBtn').addEventListener('click', async () => {
+  $('createErr').textContent = '';
+  try {
+    const body = { application: $('app').value, title: $('cTitle').value, severity: $('cSeverity').value, description: $('cDesc').value, case_key: $('cCase').value || null, environment: $('cEnv').value || null, application_version: $('cVersion').value || null, run_id: $('cRun').value || null };
+    const created = (await api('/defect-log', { method: 'POST', body: JSON.stringify(body) })).data;
+    $('create').classList.add('hidden');
+    ['cTitle','cDesc','cCase','cEnv','cVersion','cRun'].forEach((id) => { $(id).value = ''; });
+    await loadList();
+    await openDetail(created.id);
+  } catch (e) { $('createErr').textContent = e.message; }
+});
+
+loadApps();
+</script>
+</body>
+</html>

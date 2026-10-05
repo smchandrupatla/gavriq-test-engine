@@ -39,6 +39,7 @@ import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
 import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
 import { defectRoutes } from './routes/defects.js';
 import { feedbackLoopRoutes } from './routes/feedback-loop.js';
+import { defectLogRoutes } from './routes/defect-log.js';
 import { feedbackLoopTick } from './feedback-loop.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
@@ -145,6 +146,9 @@ async function main() {
   app.get('/console-ui.js', async (req, reply) => sendPublic(req, reply, 'console-ui.js'));
   app.get('/console-pages.js', async (req, reply) => sendPublic(req, reply, 'console-pages.js'));
 
+  // Defect log: review what the engine logged, raise defects by hand, send them to the implementation manager.
+  app.get('/defect-log', async (req, reply) => sendPublic(req, reply, 'defect-log.html', 'Defect log not found'));
+
   // Same shell also at /catalog/
   app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
   app.get('/catalog/', async (req, reply) => sendPublic(req, reply, 'catalog/index.html', 'Catalog UI not found'));
@@ -240,6 +244,7 @@ async function main() {
   await app.register(opsRoutes);
   await app.register(defectRoutes);
   await app.register(feedbackLoopRoutes);
+  await app.register(defectLogRoutes);
 
   await app.listen({ port, host });
 
