@@ -22,6 +22,76 @@ export interface RunAllOutcome {
 }
 
 /**
+ * Rolling fail-rate guard for a run_group. After each result lands, look at
+ * the most-recent reported results across every execution in the group and,
+ * if more than half of them are failures, cancel every still-queued execution
+ * in the group so nobody waits on an obviously broken deploy.
+ *
+ * Tunable via the engine's `runtime_settings` row:
+ *   rolling_fail_cancel_enabled  (default true)
+ *   rolling_fail_cancel_window   (default 20 — minimum results before the guard fires)
+ *   rolling_fail_cancel_threshold(default 0.5 — fraction, 0.5 = 50 %)
+ *
+ * Running executions are left alone (they finish or time out normally); only
+ * queued ones are cancelled. A group never cancels itself twice: once at least
+ * one execution carries `metadata.rolling_fail_cancelled`, the guard is quiet.
+ */
+async function cancelOnRollingFailure(runGroup: string): Promise<void> {
+  const settings = await query(
+    `SELECT rolling_fail_cancel_enabled AS enabled,
+            rolling_fail_cancel_window AS window,
+            rolling_fail_cancel_threshold_pct AS threshold_pct
+     FROM settings WHERE id = true`
+  ).catch(() => ({ rows: [] as any[] }));
+  const row = settings.rows[0] as { enabled?: boolean; window?: number; threshold_pct?: number } | undefined;
+  if (!row || row.enabled === false) return;
+  const window = Math.max(5, Number(row.window) || 20);
+  const threshold = Math.min(1, Math.max(0.1, (Number(row.threshold_pct) || 50) / 100));
+
+  const already = await query(
+    `SELECT 1 FROM executions
+     WHERE metadata->>'run_group' = $1 AND (metadata->>'rolling_fail_cancelled') = 'true' LIMIT 1`,
+    [runGroup]
+  );
+  if (already.rows.length) return;
+
+  const recent = await query(
+    `SELECT er.status FROM execution_results er
+     JOIN executions ex ON ex.id = er.execution_id
+     WHERE ex.metadata->>'run_group' = $1
+     ORDER BY er.created_at DESC
+     LIMIT $2`,
+    [runGroup, window]
+  );
+  if (recent.rows.length < window) return;
+  const failed = recent.rows.filter((r: any) => r.status !== 'passed' && r.status !== 'skipped').length;
+  if (failed / recent.rows.length <= threshold) return;
+
+  const cancelled = await query(
+    `UPDATE executions
+       SET status = 'cancelled',
+           finished_at = now(),
+           metadata = metadata || jsonb_build_object(
+             'rolling_fail_cancelled', 'true',
+             'rolling_fail_cancel_reason', $2::text
+           )
+     WHERE metadata->>'run_group' = $1 AND status IN ('queued','preparing')
+     RETURNING id`,
+    [runGroup, `rolling fail rate ${failed}/${recent.rows.length} > ${Math.round(threshold * 100)}%`]
+  );
+  if (cancelled.rowCount) {
+    console.warn(`[rolling-fail-cancel] run_group ${runGroup}: ${failed}/${recent.rows.length} failed; cancelled ${cancelled.rowCount} queued executions`);
+    // Nudge the infra lifecycle so the stack can tear down as soon as any
+    // still-running executions finish — teardown-after-run doesn't wait on
+    // the cancelled queue, same as a normal run that completes.
+    try {
+      const { infraTick } = await import('../infra.js');
+      await infraTick();
+    } catch { /* best effort — the periodic tick will catch it within 60s */ }
+  }
+}
+
+/**
  * Plan and queue "everything" for one application: one execution per
  * non-empty suite, grouped under a shared metadata.run_group id. Shared by
  * the console's "Run everything" button (`/api/v1/executions/run-all`) and
@@ -101,6 +171,11 @@ export async function runAllCases(b: Record<string, unknown>, actorId?: string |
   }
   if (!totalCases) return { status: 400, body: { error: 'Application has no runnable cases' } };
 
+  // Stamp application_version on every execution the "Run everything" planner creates,
+  // so the Test runs table can show + filter by it.
+  const applicationVersion = typeof b.application_version === 'string' && b.application_version.trim()
+    ? b.application_version.trim()
+    : null;
   const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
   const batchAt = new Date();
   const created: any[] = [];
@@ -116,7 +191,10 @@ export async function runAllCases(b: Record<string, unknown>, actorId?: string |
       [
         key, name, (b.requested_by as string) ?? actorId ?? null, p.suite_id, p.case_ids, environmentId,
         (b.trigger_source as string) || 'run-all',
-        JSON.stringify({ run_group: runGroup, suite_key: p.suite_key, application_key: application.key }),
+        JSON.stringify({
+          run_group: runGroup, suite_key: p.suite_key, application_key: application.key,
+          ...(applicationVersion ? { application_version: applicationVersion } : {}),
+        }),
       ]
     );
     created.push({ ...rows[0], suite_key: p.suite_key, suite_name: p.suite_name });
@@ -251,7 +329,19 @@ export async function executionRoutes(app: FastifyInstance) {
     // derived from the actual case/suite rather than trusted from the caller.
     const applicationKey = caseRows.rows[0]?.app_key ?? suiteRow.rows[0]?.app_key ?? null;
     const name = runName(caseNames, suiteName, new Date());
-    const metadata = { ...(b.metadata && typeof b.metadata === 'object' ? b.metadata : {}), ...(applicationKey ? { application_key: applicationKey } : {}) };
+    // application_version lets callers tag a run with a branch/tag/version so
+    // the Test runs table can show + filter by it. Accept it either on the top
+    // level or inside metadata; the top-level wins to make callers simpler.
+    const applicationVersion = typeof b.application_version === 'string' && b.application_version.trim()
+      ? b.application_version.trim()
+      : (b.metadata && typeof b.metadata === 'object' && typeof (b.metadata as any).application_version === 'string'
+          ? ((b.metadata as any).application_version as string).trim()
+          : null);
+    const metadata = {
+      ...(b.metadata && typeof b.metadata === 'object' ? b.metadata : {}),
+      ...(applicationKey ? { application_key: applicationKey } : {}),
+      ...(applicationVersion ? { application_version: applicationVersion } : {}),
+    };
 
     const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const { rows } = await query(
@@ -392,7 +482,7 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const exec = await query(
-        'SELECT id, status FROM executions WHERE id::text = $1 OR key = $1',
+        'SELECT id, status, metadata FROM executions WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
@@ -430,6 +520,16 @@ export async function executionRoutes(app: FastifyInstance) {
             ]
           );
         }
+      }
+
+      // Rolling fail-rate guard: if the group's recent window is more than
+      // half failing, cancel the rest of the run so nobody waits on obvious
+      // junk. See cancelOnRollingFailure() for the exact threshold + window.
+      const runGroup = (exec.rows[0].metadata && typeof exec.rows[0].metadata === 'object')
+        ? (exec.rows[0].metadata as Record<string, unknown>).run_group
+        : null;
+      if (typeof runGroup === 'string' && runGroup) {
+        try { await cancelOnRollingFailure(runGroup); } catch (err) { req.log.warn({ err }, 'rolling fail-rate cancel failed'); }
       }
 
       return reply.status(201).send({ data: rows[0] });

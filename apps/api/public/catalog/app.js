@@ -80,6 +80,7 @@ const state={
   coverage:null,
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
   runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsSel:new Set(),runsTab:null,
+  appVersion:'main',
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
   selectedTypes:new Set(),overviewTab:'summary',
@@ -324,6 +325,7 @@ async function loadRunsList(reset){
     const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+RUNS_PAGE+'&offset='+offset);
     const rows=reset?(res.data||[]):[...state.runsList.rows,...(res.data||[])];
     state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true,facets:res.facets||{triggers:[],versions:[]}};
+    if(typeof updateAppVersionDatalist==='function')updateAppVersionDatalist();
     if(reset)state.runsSel=new Set();
   }catch(e){state.runsList={...state.runsList,loading:false,loaded:true,error:e.message};}
   if(state.view==='history')renderCurrentView();
@@ -1221,7 +1223,7 @@ function scheduleWhen(s){
   return s.event_trigger?'On event · '+s.event_trigger:'—';
 }
 function openScheduleForm(preset){
-  state.schedForm={name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:state.envId||'',when:'once',at:'',cron:'0 2 * * *',...(preset||{})};
+  state.schedForm={name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:state.envId||'',when:'once',at:'',cron:'0 2 * * *',runType:'run_only',applicationVersion:(state.appVersion||'main'),...(preset||{})};
   state.schedFormOpen=true;
   if(state.view==='schedules')renderCurrentView();else location.hash='#/schedules';
 }
@@ -1231,8 +1233,20 @@ function readSchedForm(){
   const w=document.querySelector('input[name="schedWhen"]:checked');if(w)f.when=w.value;
   if(el('schedAt'))f.at=el('schedAt').value;
   if(el('schedCron'))f.cron=el('schedCron').value;
+  if(el('schedRunType'))f.runType=el('schedRunType').value;
+  if(el('schedVersion'))f.applicationVersion=el('schedVersion').value.trim()||'main';
   readScopeForm('sched',f);
 }
+// Run types shared with the Overview deploy bar — plus "run_only" which just
+// queues the run without touching the stack.
+const SCHED_RUN_TYPES=[
+  ['run_only','Just run (do not touch the stack)'],
+  ['deploy_run_teardown','Deploy, run, then tear down'],
+  ['deploy_run_teardown_loop','Loop: deploy, run, tear down × N'],
+  ['clean_cycle','Clean cycle: tear down + prune, then deploy–run–teardown × N'],
+  ['deploy_and_run','Deploy and run (stack stays up afterwards)'],
+  ['deploy_only','Deploy only (no run)'],
+];
 function scheduleFormHtml(){
   const f=state.schedForm;
   const n=scopeCases(f).length;
@@ -1241,10 +1255,14 @@ function scheduleFormHtml(){
   const whenDetail=f.when==='once'
     ?`<input type="datetime-local" id="schedAt" value="${esc(f.at)}"> <span class="muted small">your local time — runs once, then the schedule is done</span>`
     :`<input type="text" id="schedCron" value="${esc(f.cron)}" style="width:180px"> ${presets.map(([c,l])=>`<button class="btn small-btn" style="margin-top:0" data-action="sched-preset" data-cron="${esc(c)}">${esc(l)}</button>`).join(' ')}<div class="muted small" style="margin-top:6px">Five cron fields (minute hour day month weekday) in ${esc(tz)}, or every:N for every N minutes.</div>`;
+  const facetVersions=(state.runsList&&state.runsList.facets&&state.runsList.facets.versions)||[];
+  const versionOptions=['main',...facetVersions].filter((v,i,a)=>v&&a.indexOf(v)===i).map(v=>`<option value="${esc(v)}">`).join('');
   return `<div class="card" data-form="sched"><div class="card-head"><h2>Schedule a run</h2><span class="muted small">${esc(state.appKey||'')} · ${plural(n,'test case')} in this selection</span></div>
     <div class="form-row"><span class="form-label">Name</span><input type="text" id="schedName" value="${esc(f.name)}" placeholder="e.g. Nightly smoke on staging" style="width:min(520px,100%)"></div>
     ${scopePickerHtml('sched',f)}
     <div class="form-row"><span class="form-label">Environment</span><div><select id="schedEnv">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===f.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select></div></div>
+    <div class="form-row"><span class="form-label">Run type</span><div><select id="schedRunType">${SCHED_RUN_TYPES.map(([v,l])=>`<option value="${esc(v)}"${f.runType===v?' selected':''}>${esc(l)}</option>`).join('')}</select><div class="muted small" style="margin-top:4px">What the scheduler does when the time comes. "Just run" queues an execution; the others shape the deploy around it (same options as the Overview page).</div></div></div>
+    <div class="form-row"><span class="form-label">App version</span><div><input type="text" id="schedVersion" list="schedVersionList" value="${esc(f.applicationVersion||'main')}" placeholder="main" style="width:220px"><datalist id="schedVersionList">${versionOptions}</datalist><div class="muted small" style="margin-top:4px">Branch, tag or version string. Stamped on every run this schedule queues (shown in the App version column).</div></div></div>
     <div class="form-row"><span class="form-label">When</span><div><div class="radio-row"><label class="type-check"><input type="radio" name="schedWhen" value="once"${f.when==='once'?' checked':''}> Once, at a date and time</label><label class="type-check"><input type="radio" name="schedWhen" value="repeat"${f.when==='repeat'?' checked':''}> Repeating</label></div><div style="margin-top:8px">${whenDetail}</div></div></div>
     <div class="form-row"><span></span><div><button class="btn primary" data-action="sched-save">Save schedule</button> <button class="btn" data-action="sched-new">Cancel</button><div id="schedError" class="field-error" hidden></div></div></div>
   </div>`;
@@ -1271,6 +1289,12 @@ async function saveSchedule(btn){
   let scope={};
   if(f.kind==='suite'){const s=state.idx.suiteById.get(f.suiteId);scope={suites:[s.key],label:scopeLabel(f)};}
   else if(f.kind!=='all')scope={case_keys:cases.map(c=>c.key),label:scopeLabel(f)+(f.kind==='types'?' ('+plural(cases.length,'case')+')':'')};
+  // Capture the user's Run-type + App-version choices in scope. These are
+  // read by the scheduler when it fires: deploy_mode shapes the deploy, and
+  // application_version is stamped on each queued run (shown in the App
+  // version column + filter on Test runs).
+  if(f.runType)scope.run_type=f.runType;
+  if(f.applicationVersion&&f.applicationVersion.trim())scope.application_version=f.applicationVersion.trim();
   btn.disabled=true;
   try{
     await postJson('/api/v1/schedules',{name:f.name.trim(),application:state.appKey,environment:f.envId,scope,cron_expression:cron});
@@ -1526,11 +1550,24 @@ async function switchApplication(key){
 async function queueExecution(body,label){
   const environmentId=body.environment_id||state.envId;
   if(!environmentId){toast('No environment available.');return;}
+  // Stamp the version/branch picked in the top bar into the run's metadata.
+  // The App-version column on Test runs reads this; the facets dropdown
+  // auto-fills with any value that has been used before.
+  const version=currentAppVersion();
+  const meta={...(state.headed?{headless:false}:{}),...(version?{application_version:version}:{})};
+  const payload={...body,environment_id:environmentId,trigger_source:'manual'};
+  if(Object.keys(meta).length)payload.metadata=meta;
+  if(version)payload.application_version=version;
   try{
-    const res=await postJson('/api/v1/executions',{...body,environment_id:environmentId,trigger_source:'manual',...(state.headed?{metadata:{headless:false}}:{})});
+    const res=await postJson('/api/v1/executions',payload);
     toast('Queued '+label+' — '+(res.data.name||res.data.key),'#/run/'+res.data.id);
     pollLive();
   }catch(e){toast('Run failed: '+e.message);}
+}
+function currentAppVersion(){
+  const el=document.getElementById('appVersionInput');
+  const v=(el?el.value:state.appVersion||'').trim();
+  return v||null;
 }
 function runCases(ids,label,environmentId){if(ids.length&&!stackDownGuard(environmentId))queueExecution({test_case_ids:ids,...(environmentId?{environment_id:environmentId}:{})},label);}
 function runSuite(suiteId,ids,label){if(!stackDownGuard())queueExecution({test_suite_id:suiteId,test_case_ids:ids},label||'suite');}
@@ -1752,7 +1789,8 @@ async function runEverything(btn){
   if(!state.envId){toast('No environment available.');return;}
   if(btn)btn.disabled=true;
   try{
-    const res=await postJson('/api/v1/executions/run-all',{application_key:state.appKey,environment_id:state.envId});
+    const v=currentAppVersion();
+    const res=await postJson('/api/v1/executions/run-all',{application_key:state.appKey,environment_id:state.envId,...(v?{application_version:v}:{})});
     const d=res.data||{};
     if(d.deployment){
       // The stack was down: the engine deploys it first, the run follows, and it comes down again afterwards.
@@ -2185,6 +2223,21 @@ el('menuToggle').onclick=()=>el('sidebar').classList.toggle('open');
 el('refreshBtn').onclick=()=>refreshAll();
 el('envSelect').onchange=()=>switchEnvironment(el('envSelect').value);
 el('headedCheck').onchange=()=>{state.headed=el('headedCheck').checked;try{localStorage.setItem('te.headed',state.headed?'1':'');}catch{}};
+// Application version: top-bar input. Hydrates from localStorage (default "main"),
+// persists on change, feeds every run / schedule call via currentAppVersion().
+(function initAppVersion(){
+  const input=el('appVersionInput');if(!input)return;
+  try{const saved=localStorage.getItem('te.appVersion');if(saved)input.value=saved;else input.value=state.appVersion||'main';}catch{input.value=state.appVersion||'main';}
+  state.appVersion=input.value;
+  input.addEventListener('change',()=>{state.appVersion=input.value.trim()||'main';input.value=state.appVersion;try{localStorage.setItem('te.appVersion',state.appVersion);}catch{}});
+})();
+/** Fill the top-bar version datalist from facets the runs page already returns, so the user sees past versions used. */
+function updateAppVersionDatalist(){
+  const dl=document.getElementById('appVersionList');if(!dl)return;
+  const facets=state.runsList&&state.runsList.facets;
+  const versions=facets&&Array.isArray(facets.versions)?facets.versions.filter(Boolean):[];
+  dl.innerHTML=['main',...versions].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<option value="${esc(v)}">`).join('');
+}
 el('appSelect').onchange=()=>switchApplication(el('appSelect').value);
 el('globalSearch').oninput=debounce(e=>{state.search=e.target.value;state.rowLimit=ROWS;renderCurrentView();},120);
 el('sideNav').addEventListener('click',e=>{
