@@ -69,8 +69,15 @@ const CSS=`
 .tb-trend{display:flex;align-items:flex-end;gap:3px;height:70px}.tb-bar{flex:1;display:flex;flex-direction:column-reverse;height:100%}.tb-bar i{display:block;width:100%}.tb-bar .p{background:var(--viz-pass)}.tb-bar .f{background:var(--viz-fail)}
 .tb-mttr{font-size:26px;font-weight:600}
 .tb-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
-.tb-layout.with-detail{grid-template-columns:minmax(0,1fr) minmax(360px,440px)}
-@media(max-width:1100px){.tb-layout.with-detail{grid-template-columns:minmax(0,1fr)}}
+/* Two-pane: list + detail. The detail aside takes HALF of the content area. */
+.tb-layout.with-detail{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+/* Three-pane for Test suites: suites list | cases of the selected suite | case detail. */
+.tb-layout.suite-two{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.tb-layout.suite-three{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)}
+@media(max-width:1100px){
+  .tb-layout.with-detail,.tb-layout.suite-two{grid-template-columns:minmax(0,1fr)}
+  .tb-layout.suite-three{grid-template-columns:minmax(0,1fr)}
+}
 .tb-main-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
 .tb-sel{font-size:11px;letter-spacing:.06em;color:var(--muted)}
 .tb-more{display:flex;align-items:center;gap:10px;padding:12px 14px;border-top:1px solid var(--line);background:var(--panel2)}
@@ -116,8 +123,14 @@ const CSS=`
 .tb-validation{border-radius:10px;padding:12px 16px;display:none}.tb-validation.show{display:block}.tb-validation.err{background:var(--red-soft);border:1px solid var(--red)}.tb-validation.warn{background:var(--amber-soft);border:1px solid #5a431a}
 .tb-validation ul{margin:6px 0 0;padding-left:18px;font-size:12px}.tb-validation .e{color:var(--red)}.tb-validation .w{color:var(--amber)}
 .tb-status{font-size:12.5px;color:var(--green);min-height:1.2em;padding:4px 0}.tb-status.err{color:var(--red)}
-.tb-pick{max-height:380px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel2);margin-top:6px}
-.tb-pick label{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line-soft);font-size:12.5px;cursor:pointer}.tb-pick label:hover{background:var(--panel)}.tb-pick .cid{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--muted);margin-left:auto}
+.tb-pick{max-height:min(70vh,780px);overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel2);margin-top:6px}
+.tb-pick label{display:flex;gap:8px;align-items:center;padding:0 8px 0 10px;border-bottom:1px solid var(--line-soft);font-size:12.5px;cursor:pointer}
+.tb-pick label:hover{background:var(--panel)}
+.tb-pick label.pick-row.active{background:var(--gold-soft);color:var(--gold-text)}
+.tb-pick label.pick-row.active .pname{color:var(--gold-text)}
+.tb-pick .pick-open{flex:1;display:flex;align-items:center;gap:8px;background:transparent;border:0;color:inherit;text-align:left;padding:8px 2px;font:inherit;cursor:pointer;min-width:0}
+.tb-pick .pick-open .pname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-pick .cid{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--muted);margin-left:auto}
 .tb-run-remarks{margin:0;padding-left:18px;font-size:12.5px}.tb-run-remarks li{margin:3px 0}.tb-run-remarks li.fail{color:var(--red)}
 .tb-rc{border-bottom:1px solid var(--line-soft);padding:10px 16px}.tb-rc:last-child{border-bottom:none}.tb-rc .head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tb-addrem{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--line)}.tb-addrem input{flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px;color:var(--text)}
@@ -171,6 +184,7 @@ async function loadAnalytics(){try{S.analytics=await api('/api/v1/test-cases/ana
  *
  * First open on this view calls render() to add the aside next to the list;
  * every subsequent update uses renderDetailOnly() to swap just the aside.
+ * Works on both the Test cases list AND the Test suites 3-column layout.
  */
 function loadDetail(id){
   const asideMissing=!q('#tb-detail');
@@ -178,10 +192,12 @@ function loadDetail(id){
   const lite=S.cases.find(c=>c.id===id||c.key===id);
   if(lite)S.detail={...lite,partial:true};
   updateActiveRow(id);
-  if(state.view==='test-cases'){
-    if(asideMissing)render('test-cases'); else renderDetailOnly();
+  const inSuites=state.view==='test-suites';
+  const inCases=state.view==='test-cases';
+  if(inCases||inSuites){
+    if(asideMissing)render(state.view); else renderDetailOnly();
   }
-  const paintDetail=()=>{if(state.view!=='test-cases')return;if(!q('#tb-detail'))render('test-cases');else renderDetailOnly();};
+  const paintDetail=()=>{if(state.view!=='test-cases'&&state.view!=='test-suites')return;if(!q('#tb-detail'))render(state.view);else renderDetailOnly();};
   // Full case detail — the summary/steps need it; paint when it lands.
   api('/api/v1/test-cases/'+encodeURIComponent(id)+'?'+(state.envId?'environment_id='+encodeURIComponent(state.envId):''))
     .then(full=>{if(S.currentId!==id)return;S.detail=full.data;paintDetail();})
@@ -578,10 +594,20 @@ function suiteStatsHtml(){
 }
 function casePickHtml(members,filter,prefix){
   const f=(filter||'').toLowerCase().trim();
-  const rows=S.cases.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.key||'').toLowerCase().includes(f));
-  if(!S.cases.length)return `<p class="muted small" style="margin:6px 4px">No test cases exist yet. <a href="#/test-case-form">Create one</a> first.</p>`;
+  const onlyMembers=prefix==='detail';
+  // In the Test suites view we show ONLY the suite's current members by default
+  // (members Set) so operators see a focused list they can click into. The
+  // suite-create form (prefix='form') still lists every case for picking.
+  const pool=onlyMembers?S.cases.filter(c=>members.has(c.id)):S.cases;
+  const rows=pool.filter(c=>!f||(c.name||'').toLowerCase().includes(f)||(c.key||'').toLowerCase().includes(f));
+  if(!pool.length)return `<p class="muted small" style="margin:6px 4px">${onlyMembers?'This suite has no member cases yet.':'No test cases exist yet. <a href="#/test-case-form">Create one</a> first.'}</p>`;
   const sorted=rows.slice().sort((a,b)=>(members.has(b.id)-members.has(a.id))||(a.key||'').localeCompare(b.key||''));
-  return `<div class="tb-pick">${sorted.slice(0,600).map(c=>`<label><input type="checkbox" data-tb-member="${esc(c.id)}" data-prefix="${prefix}"${members.has(c.id)?' checked':''}><span>${esc(c.name)}</span><span class="cid">${esc(c.key)}</span></label>`).join('')}${sorted.length>600?`<p class="muted small" style="padding:6px 10px">${sorted.length-600} more — narrow the filter.</p>`:''}</div>`;
+  return `<div class="tb-pick">${sorted.slice(0,600).map(c=>{
+    const active=S.currentId===c.id?' active':'';
+    // Click the row body to open the case detail in the third column. The checkbox
+    // keeps toggling membership separately (its click doesn't bubble to the row).
+    return `<label class="pick-row${active}"><input type="checkbox" data-tb-member="${esc(c.id)}" data-prefix="${prefix}"${members.has(c.id)?' checked':''}><button type="button" class="pick-open" data-tb="open-case-inline" data-id="${esc(c.id)}" title="Open this case's detail"><span class="pname">${esc(c.name)}</span><span class="cid">${esc(c.key)}</span>${statusPill(c)}</button></label>`;
+  }).join('')}${sorted.length>600?`<p class="muted small" style="padding:6px 10px">${sorted.length-600} more — narrow the filter.</p>`:''}</div>`;
 }
 function suiteDetailHtml(){
   const s=S.suiteCurrent;if(!s)return '';
@@ -599,9 +625,9 @@ function renderTestSuites(){
   const table=rows.length?`<div class="table-wrap"><table><thead><tr><th><input type="checkbox" data-tb-suiteall="1"${all?' checked':''}></th><th>Suite</th><th>Cases</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>${rows.map(s=>`<tr class="tb-row${S.suiteCurrent&&S.suiteCurrent.id===s.id?' active':''}" data-tb="open-suite" data-id="${esc(s.id)}"><td><input type="checkbox" data-tb-suitepick="${esc(s.id)}"${S.suiteSel.has(s.id)?' checked':''}></td><td><div>${esc(s.name||'(untitled)')}</div><div class="key small">${esc(s.key)}</div></td><td>${plural((s.case_ids||[]).length,'case')}</td><td><span class="badge ${s.status==='active'?'passed':'never'}">${esc(s.status||'active')}</span></td><td class="muted small">${esc(when(s.created_at))}</td><td><div class="tb-actions"><button class="btn" data-tb="open-suite" data-id="${esc(s.id)}">Edit</button><a class="btn" href="#/type/${esc(s.suite_type||'other')}/suite/${esc(s.id)}" title="Open this suite's cases and run history">History</a></div></td></tr>`).join('')}</tbody></table></div>`:`<div class="tb-empty">${S.suites.length?'No suites match the search.':'No test suites yet. Group existing test cases into a suite to run them together.'}<br><a class="btn" href="#/test-suite-form" style="margin-top:8px;display:inline-block">New test suite</a></div>`;
   el('content').innerHTML=`<div class="group-head first"><h2>Test suites</h2><span class="muted small">Groups of test cases run together. Open a suite to edit membership or run it.</span></div>${suiteStatsHtml()}<p class="tb-status" id="tb-status" role="status"></p>
     <div class="tb-toolbar"><input type="search" id="tb-suite-search" value="${esc(S.suiteSearch)}" placeholder="Search suite name…" style="width:260px"><span class="spacer"></span><a class="btn" href="#/test-suite-form">New test suite</a></div>
-    <div class="tb-layout${S.suiteCurrent?' with-detail':''}"><section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.suiteSel.size).padStart(2,'0')} SELECTED</span><span class="spacer" style="flex:1"></span><button class="btn" data-tb="suite-clear-sel">Clear selection</button><button class="btn" data-tb="suite-run-selected"${S.suiteSel.size?'':' disabled'}>Run selected</button><button class="btn" data-tb="suite-compose"${S.suiteSel.size>1?'':' disabled'} title="Combine the selected suites' cases into one new suite">Compose from selected</button><button class="btn" data-tb="suite-delete-selected"${S.suiteSel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected</button></div>${table}</section>${suiteDetailHtml()}</div>`;
+    <div class="tb-layout${S.suiteCurrent?(S.detail?' suite-three':' suite-two'):''}"><section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.suiteSel.size).padStart(2,'0')} SELECTED</span><span class="spacer" style="flex:1"></span><button class="btn" data-tb="suite-clear-sel">Clear selection</button><button class="btn" data-tb="suite-run-selected"${S.suiteSel.size?'':' disabled'}>Run selected</button><button class="btn" data-tb="suite-compose"${S.suiteSel.size>1?'':' disabled'} title="Combine the selected suites' cases into one new suite">Compose from selected</button><button class="btn" data-tb="suite-delete-selected"${S.suiteSel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected</button></div>${table}</section>${suiteDetailHtml()}${S.detail?detailHtml():''}</div>`;
 }
-function openSuite(id){const s=S.suites.find(x=>x.id===id||x.key===id);if(!s)return;S.suiteCurrent=s;S.suiteName=s.name||'';S.members=new Set(s.case_ids||[]);S.memberFilter='';render('test-suites');}
+function openSuite(id){const s=S.suites.find(x=>x.id===id||x.key===id);if(!s)return;S.suiteCurrent=s;S.suiteName=s.name||'';S.members=new Set(s.case_ids||[]);S.memberFilter='';S.detail=null;S.currentId=null;S.detailRuns=null;S.detailAudit=null;render('test-suites');}
 function renderTestSuiteForm(){
   el('viewTitle').textContent='New test suite';
   if(!S.loaded){el('content').innerHTML='<div class="skel" style="height:300px"></div>';return;}
@@ -680,8 +706,20 @@ async function handle(action,node){
     case 'save-suite':saveSelectedAsSuite();break;
     case 'run-one':{const env=formVal('tb-detail-env')||formVal('tb-run-env')||state.envId;runOne(id,env);break;}
     case 'open-case':location.hash='#/test-cases/'+encodeURIComponent(id);break;
+    case 'open-case-inline':{
+      // In the Test suites 3-column layout we open the case detail in the
+      // right column without changing the URL / view away from test-suites.
+      if(S.currentId===id)return;
+      loadDetail(id);
+      break;
+    }
     case 'open-runs':location.hash='#/case/'+encodeURIComponent(id)+'/runs';break;
-    case 'close-detail':S.currentId=null;S.detail=null;location.hash='#/test-cases';break;
+    case 'close-detail':{
+      S.currentId=null;S.detail=null;S.detailRuns=null;S.detailAudit=null;
+      if(state.view==='test-suites')render('test-suites');
+      else location.hash='#/test-cases';
+      break;
+    }
     case 'toggle-remarks':if(S.detailOpenRemarks.has(id))S.detailOpenRemarks.delete(id);else S.detailOpenRemarks.add(id);renderDetailOnly();break;
     case 'save-triage':saveTriage(id);break;
     case 'draft-issue':{const c=S.detail||S.cases.find(x=>x.id===id);if(!c)return;const ok=await copyText(issueDraft(c));setStatus(ok?'Issue draft copied to clipboard':'Copy failed');break;}
@@ -706,7 +744,11 @@ async function handle(action,node){
     case 'save':saveForm(node.dataset.status||'active',node.dataset.run==='1',node.dataset.close==='1');break;
     // suites
     case 'open-suite':openSuite(id);break;
-    case 'suite-close':S.suiteCurrent=null;render('test-suites');break;
+    case 'suite-close':{
+      S.suiteCurrent=null;S.detail=null;S.currentId=null;S.detailRuns=null;S.detailAudit=null;
+      render('test-suites');
+      break;
+    }
     case 'suite-clear-sel':S.suiteSel=new Set();render('test-suites');break;
     case 'suite-save':{const name=formVal('tb-suite-name').trim();if(!name){setStatus('Suite name is required.',true);return;}setStatus('Saving…');try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({name,caseIds:[...S.members]})});setStatus('Saved.');await loadSuites(true);openSuite(id);await loadSummary();renderSideNav();}catch(e){setStatus('Save failed: '+e.message,true);}break;}
     case 'suite-delete':{if(!confirm('Delete this test suite? This cannot be undone.'))return;try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'DELETE'});toast('Suite deleted');S.suiteCurrent=null;await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');}catch(e){setStatus('Delete failed: '+e.message,true);}break;}
