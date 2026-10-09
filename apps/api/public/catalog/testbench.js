@@ -27,6 +27,11 @@ const STEP_TEMPLATES={
   api:[{text:'Ask the service for the record',expected:'It answers OK within the agreed time',testData:'see automation link'},{text:'Check the shape of the answer',expected:'Every expected field is present',testData:''}],
   form:[{text:'Fill the form with valid values and save',expected:'A confirmation is shown and the record exists',testData:''},{text:'Submit the form with invalid values',expected:'The errors are shown next to the fields',testData:''}],
 };
+// Page size for the Test cases list: only this many rows are rendered into
+// the DOM at once. "Show next 100" / "Show all" append more on demand. The
+// rest live in S.cases but never touch the DOM until asked for — the big
+// list render was the slowest part of this screen.
+const PAGE_SIZE=100;
 const S={
   appKey:null,envId:null,loaded:false,loading:false,error:null,cases:[],summary:{},analytics:null,
   search:'',filters:{status:new Set(),priority:new Set(),owner:new Set(),environment:new Set(),tag:new Set(),flakyOnly:false},
@@ -35,6 +40,7 @@ const S={
   suites:[],suitesLoaded:false,suiteSearch:'',suiteSel:new Set(),suiteCurrent:null,members:new Set(),memberFilter:'',suiteName:'',
   suiteForm:{name:'',members:new Set(),filter:''},
   form:null,
+  shown:PAGE_SIZE,
 };
 try{S.viewMode=localStorage.getItem('tb_view')||'compact';S.savedViews=JSON.parse(localStorage.getItem('tb_saved_views')||'[]');}catch{}
 
@@ -62,6 +68,8 @@ const CSS=`
 @media(max-width:1100px){.tb-layout.with-detail{grid-template-columns:minmax(0,1fr)}}
 .tb-main-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
 .tb-sel{font-size:11px;letter-spacing:.06em;color:var(--muted)}
+.tb-more{display:flex;align-items:center;gap:10px;padding:12px 14px;border-top:1px solid var(--line);background:var(--panel2)}
+.tb-more .muted{flex:1}
 .tb-pri{display:inline-flex;align-items:center;gap:6px;font-size:12px}.tb-pri i{width:7px;height:7px;border-radius:50%;display:inline-block}
 .tb-pri.Critical i{background:var(--red)}.tb-pri.High i{background:var(--gold)}.tb-pri.Medium i{background:#9d8cf1}.tb-pri.Low i{background:var(--muted2)}
 .tb-flaky{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-soft);border-radius:8px;padding:1px 6px;margin-left:6px}
@@ -150,20 +158,38 @@ async function loadCases(force){
   if(S.insightsOpen&&!S.analytics)loadAnalytics();
 }
 async function loadAnalytics(){try{S.analytics=await api('/api/v1/test-cases/analytics?'+appQ());}catch{S.analytics={trend:[],flaky:[],mttrHours:null};}if(state.view==='test-cases')render('test-cases');}
-async function loadDetail(id){
+/**
+ * Open a case's detail panel without blocking on anything. The summary and
+ * steps paint as soon as the case fetch returns; run history, defects and
+ * activity populate in-place as their fetches land. Opening a different case
+ * does NOT rebuild the 759-row list — only the aside re-renders.
+ */
+function loadDetail(id){
   S.currentId=id;S.detail=null;S.detailRuns=null;S.detailAudit=null;
   const lite=S.cases.find(c=>c.id===id||c.key===id);
   if(lite)S.detail={...lite,partial:true};
-  try{
-    const [full,runs]=await Promise.all([
-      api('/api/v1/test-cases/'+encodeURIComponent(id)+'?'+(state.envId?'environment_id='+encodeURIComponent(state.envId):'')),
-      api('/api/v1/test-cases/'+encodeURIComponent(id)+'/runs?limit=50'+(state.envId?'&environment_id='+encodeURIComponent(state.envId):'')).catch(()=>({data:[],totals:{}})),
-    ]);
-    if(S.currentId!==id)return;
-    S.detail=full.data;S.detailRuns=runs;
-    api('/api/v1/audit').then(a=>{if(S.currentId!==id)return;S.detailAudit=(a.data||[]).filter(r=>String(r.resource_id)===String(S.detail.id)||String(r.resource_id)===String(S.detail.key)).slice(0,20);if(state.view==='test-cases')renderDetailOnly();}).catch(()=>{S.detailAudit=[];});
-  }catch(e){if(S.currentId===id)S.detail={id,key:id,name:id,error:e.message};}
-  if(state.view==='test-cases')render('test-cases');
+  // Mark the newly-active row + un-mark the previously-active one, without rebuilding the list.
+  updateActiveRow(id);
+  if(state.view==='test-cases')renderDetailOnly();
+  // Full case detail — the summary/steps need it; paint when it lands.
+  api('/api/v1/test-cases/'+encodeURIComponent(id)+'?'+(state.envId?'environment_id='+encodeURIComponent(state.envId):''))
+    .then(full=>{if(S.currentId!==id)return;S.detail=full.data;if(state.view==='test-cases')renderDetailOnly();})
+    .catch(e=>{if(S.currentId!==id)return;S.detail={id,key:id,name:id,error:e.message};if(state.view==='test-cases')renderDetailOnly();});
+  // Run history — the Run history section already shows a skeleton while this is in flight.
+  api('/api/v1/test-cases/'+encodeURIComponent(id)+'/runs?limit=50'+(state.envId?'&environment_id='+encodeURIComponent(state.envId):''))
+    .then(runs=>{if(S.currentId!==id)return;S.detailRuns=runs;if(state.view==='test-cases')renderDetailOnly();})
+    .catch(()=>{if(S.currentId!==id)return;S.detailRuns={data:[],totals:{}};if(state.view==='test-cases')renderDetailOnly();});
+  // Activity — same pattern, lowest priority (goes through the broader audit log).
+  api('/api/v1/audit')
+    .then(a=>{if(S.currentId!==id)return;S.detailAudit=(a.data||[]).filter(r=>String(r.resource_id)===String((S.detail&&S.detail.id)||id)||String(r.resource_id)===String((S.detail&&S.detail.key)||id)).slice(0,20);if(state.view==='test-cases')renderDetailOnly();})
+    .catch(()=>{if(S.currentId!==id)return;S.detailAudit=[];if(state.view==='test-cases')renderDetailOnly();});
+}
+/** Flip the `active` class on the clicked row without rebuilding the list. */
+function updateActiveRow(id){
+  document.querySelectorAll('#content .tb-row.active, #content .tb-card.active').forEach(n=>n.classList.remove('active'));
+  if(!id)return;
+  const row=document.querySelector('#content [data-tb="open-case"][data-id="'+CSS.escape(String(id))+'"]');
+  if(row)row.classList.add('active');
 }
 async function loadSuites(force){
   if(S.suitesLoaded&&!force&&S.appKey===state.appKey)return;
@@ -279,8 +305,20 @@ function listHtml(){
   let body;
   if(!S.cases.length)body=`<div class="tb-empty">No test cases yet. Seed the catalog or create one directly.<br><a class="btn" href="#/test-case-form" style="margin-top:8px;display:inline-block">New test case</a></div>`;
   else if(!rows.length)body=`<div class="tb-empty">No test cases match the current filters.<br><button class="btn" data-tb="clear-filters" style="margin-top:8px">Clear filters</button></div>`;
-  else body=S.viewMode==='cards'?cardsHtml(rows):tableHtml(rows);
-  return `<section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.selected.size).padStart(2,'0')} SELECTED</span><span class="muted small">${plural(rows.length,'case')} shown</span><span class="spacer" style="flex:1"></span>
+  else {
+    const shown=Math.min(S.shown||PAGE_SIZE,rows.length);
+    const page=rows.slice(0,shown);
+    body=S.viewMode==='cards'?cardsHtml(page):tableHtml(page);
+    if(shown<rows.length){
+      const next=Math.min(PAGE_SIZE,rows.length-shown);
+      body+=`<div class="tb-more"><span class="muted small">${shown} of ${rows.length} shown</span><button class="btn" data-tb="show-more">Show next ${next}</button><button class="btn" data-tb="show-all">Show all (${rows.length})</button></div>`;
+    }else if(rows.length>PAGE_SIZE){
+      body+=`<div class="tb-more"><span class="muted small">${rows.length} of ${rows.length} shown</span></div>`;
+    }
+  }
+  const total=visibleRows().length;
+  const shownNow=Math.min(S.shown||PAGE_SIZE,total);
+  return `<section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.selected.size).padStart(2,'0')} SELECTED</span><span class="muted small">${shownNow} of ${plural(total,'case')} shown</span><span class="spacer" style="flex:1"></span>
       <button class="btn" data-tb="clear-sel">Clear selection</button>
       <select id="tb-run-env" title="Environment to run the selected cases against">${envOptions()}</select>
       <button class="btn" data-tb="save-suite"${S.selected.size?'':' disabled'}>Save selected as suite</button>
@@ -614,10 +652,12 @@ async function handle(action,node){
   switch(action){
     case 'toggle-filters':S.filtersOpen=!S.filtersOpen;render('test-cases');break;
     case 'toggle-insights':S.insightsOpen=!S.insightsOpen;if(S.insightsOpen&&!S.analytics)loadAnalytics();render('test-cases');break;
-    case 'filter':{const g=node.dataset.group,v=node.dataset.val;if(S.filters[g].has(v))S.filters[g].delete(v);else S.filters[g].add(v);render('test-cases');break;}
-    case 'flaky-only':S.filters.flakyOnly=!S.filters.flakyOnly;render('test-cases');break;
-    case 'clear-filters':clearFilters();render('test-cases');break;
+    case 'filter':{const g=node.dataset.group,v=node.dataset.val;if(S.filters[g].has(v))S.filters[g].delete(v);else S.filters[g].add(v);S.shown=PAGE_SIZE;render('test-cases');break;}
+    case 'flaky-only':S.filters.flakyOnly=!S.filters.flakyOnly;S.shown=PAGE_SIZE;render('test-cases');break;
+    case 'clear-filters':clearFilters();S.shown=PAGE_SIZE;render('test-cases');break;
     case 'sort-dir':S.sortDir=S.sortDir==='asc'?'desc':'asc';render('test-cases');break;
+    case 'show-more':S.shown=(S.shown||PAGE_SIZE)+PAGE_SIZE;render('test-cases');break;
+    case 'show-all':S.shown=S.cases.length;render('test-cases');break;
     case 'view-compact':S.viewMode='compact';try{localStorage.setItem('tb_view','compact');}catch{}render('test-cases');break;
     case 'view-cards':S.viewMode='cards';try{localStorage.setItem('tb_view','cards');}catch{}render('test-cases');break;
     case 'save-view':{const name=(prompt('Name this view:')||'').trim();if(!name)return;S.savedViews.push({name,search:S.search,filters:{status:[...S.filters.status],priority:[...S.filters.priority],owner:[...S.filters.owner],environment:[...S.filters.environment],tag:[...S.filters.tag],flakyOnly:S.filters.flakyOnly},sortKey:S.sortKey,sortDir:S.sortDir});try{localStorage.setItem('tb_saved_views',JSON.stringify(S.savedViews));}catch{}render('test-cases');setStatus('View saved: '+name);break;}
@@ -678,8 +718,8 @@ function wire(){
   });
   content.addEventListener('change',e=>{
     const t=e.target;
-    if(t.id==='tb-sort'){S.sortKey=t.value;render('test-cases');return;}
-    if(t.id==='tb-saved'){const v=S.savedViews[Number(t.value)];if(!v)return;S.search=v.search||'';S.filters={status:new Set(v.filters.status),priority:new Set(v.filters.priority),owner:new Set(v.filters.owner),environment:new Set(v.filters.environment),tag:new Set(v.filters.tag),flakyOnly:!!v.filters.flakyOnly};S.sortKey=v.sortKey||'lastRun';S.sortDir=v.sortDir||'desc';render('test-cases');return;}
+    if(t.id==='tb-sort'){S.sortKey=t.value;S.shown=PAGE_SIZE;render('test-cases');return;}
+    if(t.id==='tb-saved'){const v=S.savedViews[Number(t.value)];if(!v)return;S.search=v.search||'';S.filters={status:new Set(v.filters.status),priority:new Set(v.filters.priority),owner:new Set(v.filters.owner),environment:new Set(v.filters.environment),tag:new Set(v.filters.tag),flakyOnly:!!v.filters.flakyOnly};S.sortKey=v.sortKey||'lastRun';S.sortDir=v.sortDir||'desc';S.shown=PAGE_SIZE;render('test-cases');return;}
     if(t.dataset.tbPick){if(t.checked)S.selected.add(t.dataset.tbPick);else S.selected.delete(t.dataset.tbPick);render('test-cases');return;}
     if(t.dataset.tbPickall){visibleRows().forEach(c=>{if(t.checked)S.selected.add(c.id);else S.selected.delete(c.id);});render('test-cases');return;}
     if(t.dataset.tbSuitepick){if(t.checked)S.suiteSel.add(t.dataset.tbSuitepick);else S.suiteSel.delete(t.dataset.tbSuitepick);render('test-suites');return;}
@@ -689,7 +729,7 @@ function wire(){
   });
   content.addEventListener('input',e=>{
     const t=e.target;
-    if(t.id==='tb-search'){S.search=t.value;clearTimeout(S.searchTimer);S.searchTimer=setTimeout(()=>{S.focusSearch=true;render('test-cases');},180);return;}
+    if(t.id==='tb-search'){S.search=t.value;clearTimeout(S.searchTimer);S.searchTimer=setTimeout(()=>{S.shown=PAGE_SIZE;S.focusSearch=true;render('test-cases');},180);return;}
     if(t.id==='tb-suite-search'){S.suiteSearch=t.value;clearTimeout(S.searchTimer);S.searchTimer=setTimeout(()=>{render('test-suites');const n=q('#tb-suite-search');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}},180);return;}
     if(t.id==='tb-member-filter'){S.memberFilter=t.value;clearTimeout(S.searchTimer);S.searchTimer=setTimeout(()=>{const host=q('#tb-suite-detail .tb-pick');if(host){const w=document.createElement('div');w.innerHTML=casePickHtml(S.members,S.memberFilter,'detail');host.replaceWith(w.firstElementChild);}},180);return;}
     if(t.id==='tb-sf-filter'){S.suiteForm.filter=t.value;clearTimeout(S.searchTimer);S.searchTimer=setTimeout(()=>{const host=content.querySelector('.tb-pick');if(host){const w=document.createElement('div');w.innerHTML=casePickHtml(S.suiteForm.members,S.suiteForm.filter,'form');host.replaceWith(w.firstElementChild);}},180);return;}
