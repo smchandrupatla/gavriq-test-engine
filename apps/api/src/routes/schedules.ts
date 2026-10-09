@@ -37,7 +37,22 @@ function withNextRun(s: any, tz: string) {
 /** Queue whatever a schedule targets. Returns the HTTP status and body to answer with. */
 async function fire(s: any, opts: { requested_by: string; trigger_source: string; environment_id?: string | null; event?: string; metadata?: Record<string, unknown> }) {
   const environment = opts.environment_id || s.environment_id;
-  const meta = { schedule_id: s.id, schedule_name: s.name, ...(opts.event ? { event: opts.event } : {}), ...(opts.metadata || {}) };
+  // The schedule form writes two user-facing choices into scope: run_type
+  // (deploy mode, "run_only" by default) and application_version (branch/tag).
+  // Pull them out of scope here and stamp them onto every execution the
+  // schedule creates so they show in the App version column + filter and
+  // so a future deploy orchestrator can read the run_type from metadata.
+  const scope = s.scope && typeof s.scope === 'object' ? s.scope : {};
+  const runType = typeof scope.run_type === 'string' ? scope.run_type.trim() : '';
+  const appVersion = typeof scope.application_version === 'string' ? scope.application_version.trim() : '';
+  const scheduleMeta: Record<string, unknown> = {
+    schedule_id: s.id,
+    schedule_name: s.name,
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.metadata || {}),
+    ...(appVersion ? { application_version: appVersion } : {}),
+    ...(runType && runType !== 'run_only' ? { run_type: runType, run_type_pending_orchestrator: true } : runType ? { run_type: runType } : {}),
+  };
 
   if (s.application_id) {
     if (!environment) return { status: 400, body: { error: `Schedule "${s.name}" has no environment` } };
@@ -45,11 +60,11 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
       {
         application: s.application_id,
         environment,
-        scope: s.scope || {},
+        scope,
         reason: opts.event ? `${s.name} (${opts.event})` : s.name,
         trigger_source: opts.trigger_source,
         requested_by: opts.requested_by,
-        metadata: meta,
+        metadata: scheduleMeta,
       },
       opts.requested_by
     );
@@ -73,7 +88,7 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
        environment_id, status, trigger_source, metadata
      ) VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8::jsonb)
      RETURNING *`,
-    [key, opts.requested_by, s.test_plan_id, s.test_suite_id, caseIds, environment, opts.trigger_source, JSON.stringify(meta)]
+    [key, opts.requested_by, s.test_plan_id, s.test_suite_id, caseIds, environment, opts.trigger_source, JSON.stringify(scheduleMeta)]
   );
   await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
   return { status: 202, body: { data: exec.rows[0], message: 'Execution queued from schedule' } };
