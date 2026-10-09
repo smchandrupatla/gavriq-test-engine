@@ -54,6 +54,18 @@ input[type=date],input[type=datetime-local]{color-scheme:dark}
 .banner{margin:0 22px;padding:10px 14px;border-radius:8px;background:var(--amber-soft);border:1px solid #5a431a;color:var(--amber);font-size:13px}
 .content{padding:22px;flex:1}
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.app-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:14px}
+.app-tile{display:flex;flex-direction:column;gap:10px;padding:16px 18px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;color:var(--text);font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
+.app-tile:hover{border-color:var(--gold);border-left-color:var(--gold);background:var(--panel2);transform:translateY(-1px)}
+.app-tile.tone-green{border-left-color:var(--green)}
+.app-tile.tone-red{border-left-color:var(--red)}
+.app-tile.tone-amber{border-left-color:var(--amber)}
+.app-tile.tone-never{border-left-color:var(--muted2)}
+.app-tile-head .app-tile-title{font-size:16px;font-weight:600}
+.app-tile-head .app-tile-sub{font-size:11px;color:var(--muted);font-family:ui-monospace,Consolas,monospace;margin-top:2px}
+.app-tile-kpis{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.app-tile-kpis b{color:var(--text);font-weight:600}
+.app-tile-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:auto}
 .kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
 .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .kpi-value{font-size:24px;font-weight:600;margin-top:4px}
@@ -322,13 +334,13 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
 <body>
 <div class="shell">
   <aside class="sidebar" id="sidebar">
-    <div class="brand">
+    <a class="brand" href="#/home" title="Home — pick an application" style="text-decoration:none;color:inherit">
       <div class="brand-mark">TE</div>
       <div>
         <div class="brand-title">GAVRIQ Test Engine</div>
         <div class="brand-sub">Unified console</div>
       </div>
-    </div>
+    </a>
     <nav class="side-nav" id="sideNav"></nav>
     <div class="sidebar-foot">One URL · dashboard · catalog · SIT</div>
   </aside>
