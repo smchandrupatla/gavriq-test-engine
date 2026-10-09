@@ -79,7 +79,7 @@ const state={
   // Catalog coverage audit (plain-language fields missing/thin): populated by loadCoverage.
   coverage:null,
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
-  runsFilter:{environment_id:'',status:'',from:'',to:''},
+  runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsSel:new Set(),
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
   selectedTypes:new Set(),overviewTab:'summary',
@@ -309,6 +309,8 @@ function runsQuery(){
   let q=appQuery();
   if(f.environment_id)q+='&environment_id='+encodeURIComponent(f.environment_id);
   if(f.status)q+='&status='+encodeURIComponent(f.status);
+  if(f.trigger_source)q+='&trigger_source='+encodeURIComponent(f.trigger_source);
+  if(f.application_version)q+='&application_version='+encodeURIComponent(f.application_version);
   if(f.from)q+='&from='+encodeURIComponent(f.from);
   if(f.to)q+='&to='+encodeURIComponent(f.to);
   return q;
@@ -321,7 +323,8 @@ async function loadRunsList(reset){
   try{
     const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+RUNS_PAGE+'&offset='+offset);
     const rows=reset?(res.data||[]):[...state.runsList.rows,...(res.data||[])];
-    state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true};
+    state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true,facets:res.facets||{triggers:[],versions:[]}};
+    if(reset)state.runsSel=new Set();
   }catch(e){state.runsList={...state.runsList,loading:false,loaded:true,error:e.message};}
   if(state.view==='history')renderCurrentView();
 }
@@ -742,10 +745,17 @@ function runsFilterBarHtml(){
   const envOptions='<option value="">All environments</option>'+state.environments.map(e=>`<option value="${esc(e.id)}"${f.environment_id===e.id?' selected':''}>${esc(e.name||e.key)}</option>`).join('');
   const statuses=['','queued','preparing','running','passed','failed','skipped','blocked','cancelled','error','timed_out'];
   const statusOptions=statuses.map(s=>`<option value="${s}"${f.status===s?' selected':''}>${s?esc(s.replace(/_/g,' ')):'All statuses'}</option>`).join('');
-  const active=f.environment_id||f.status||f.from||f.to;
+  const facets=(state.runsList&&state.runsList.facets)||{triggers:[],versions:[]};
+  const triggers=['',...(facets.triggers||[])];
+  const triggerOptions=triggers.map(t=>`<option value="${esc(t)}"${f.trigger_source===t?' selected':''}>${t?esc(t):'All triggers'}</option>`).join('');
+  const versions=['',...(facets.versions||[])];
+  const versionOptions=versions.map(v=>`<option value="${esc(v)}"${f.application_version===v?' selected':''}>${v?esc(v):'All versions'}</option>`).join('');
+  const active=f.environment_id||f.status||f.trigger_source||f.application_version||f.from||f.to;
   return `<div class="toolbar" style="flex-wrap:wrap">
     <select id="runsEnvFilter" aria-label="Filter by environment">${envOptions}</select>
     <select id="runsStatusFilter" aria-label="Filter by status">${statusOptions}</select>
+    <select id="runsTriggerFilter" aria-label="Filter by trigger source">${triggerOptions}</select>
+    <select id="runsVersionFilter" aria-label="Filter by application version" title="e.g. main, a branch name, a tag — populated from past runs">${versionOptions}</select>
     <input type="date" id="runsFromFilter" value="${esc(f.from)}" aria-label="From date">
     <span class="muted small">to</span>
     <input type="date" id="runsToFilter" value="${esc(f.to)}" aria-label="To date">
@@ -755,17 +765,38 @@ function runsFilterBarHtml(){
 }
 function runsTableHtml(){
   const rl=state.runsList;
+  const sel=state.runsSel||new Set();
+  const allChecked=rl.rows.length>0&&rl.rows.every(e=>sel.has(e.id));
   const rows=rl.rows.map(e=>{
     const end=e.finished_at?ms(e.finished_at):null,start=ms(e.started_at||e.created_at);
     const running=ACTIVE.has(String(e.status));
     const durVal=running?`<span data-elapsed="${esc(e.started_at||e.created_at)}">${dur(serverNow()-start)}</span>`:end?dur(end-start):'—';
-    return `<tr class="clickable" data-run="${esc(e.id)}"><td>${esc(e.name||e.key)}<div class="key small">${esc(e.key)}</div></td><td>${badge(e.status)}</td><td style="min-width:150px">${progressHtml(e,'thin')}</td><td class="small nowrap">${countsHtml(e)}</td><td class="muted small">${esc(e.application_name||'—')}</td><td class="muted small">${esc(e.environment_name||'—')}</td><td class="muted small">${esc(e.trigger_source||'—')}</td><td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td><td class="muted small">${e.finished_at?esc(when(e.finished_at)):'—'}</td><td class="muted small">${durVal}</td></tr>`;
+    const picked=sel.has(e.id);
+    return `<tr class="clickable${picked?' row-picked':''}" data-run="${esc(e.id)}">
+      <td class="runs-pick" onclick="event.stopPropagation()"><input type="checkbox" data-run-pick="${esc(e.id)}"${picked?' checked':''} aria-label="Select run ${esc(e.key)}"></td>
+      <td>${esc(e.name||e.key)}<div class="key small">${esc(e.key)}</div></td>
+      <td>${badge(e.status)}</td>
+      <td style="min-width:150px">${progressHtml(e,'thin')}</td>
+      <td class="small nowrap">${countsHtml(e)}</td>
+      <td class="muted small">${esc(e.application_name||'—')}</td>
+      <td class="muted small">${esc(e.application_version||'—')}</td>
+      <td class="muted small">${esc(e.environment_name||'—')}</td>
+      <td class="muted small">${esc(e.trigger_source||'—')}</td>
+      <td class="muted small" title="${esc(when(e.created_at))}">${e.created_at?`<span data-ago="${esc(e.created_at)}">${ago(e.created_at)}</span>`:'—'}</td>
+      <td class="muted small">${e.finished_at?esc(when(e.finished_at)):'—'}</td>
+      <td class="muted small">${durVal}</td></tr>`;
   }).join('');
   if(rl.error)return `<div class="empty">Could not load runs: ${esc(rl.error)}</div>`;
   if(!rl.loaded)return '<div class="hp-loading"><div class="skel" style="height:160px"></div></div>';
   if(!rows)return '<div class="empty">No executions match these filters.</div>';
+  const batchBar=`<div class="toolbar" style="border:none;padding:6px 0 0;align-items:center">
+    <span class="muted small">${sel.size} selected</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn" data-action="runs-clear-sel"${sel.size?'':' disabled'}>Clear selection</button>
+    <button class="btn" data-action="runs-delete-selected"${sel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected${sel.size?' ('+sel.size+')':''}</button>
+  </div>`;
   const more=rl.rows.length<rl.total?`<div class="more"><button class="btn" data-action="runs-more"${rl.loading?' disabled':''}>${rl.loading?'Loading…':'Load more'}</button><span class="muted small">${rl.rows.length} of ${rl.total} shown</span></div>`:`<div class="more"><span class="muted small">${plural(rl.total,'run')} total</span></div>`;
-  return `<div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Application</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Ended</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
+  return `${batchBar}<div class="table-wrap"><table><thead><tr><th><input type="checkbox" data-run-pickall="1"${allChecked?' checked':''} aria-label="Select all shown runs"></th><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Application</th><th>App version</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Ended</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
 }
 function renderHistory(){
   el('viewTitle').textContent='Test runs';
@@ -1451,7 +1482,7 @@ async function switchEnvironment(id){
   // Every status on screen belongs to the previous environment — including the
   // Test Runs page's own filter, which otherwise silently keeps showing the old
   // environment (or "all") while every other view has already moved on.
-  Object.assign(state,{since:null,selected:new Set(),runsFilter:{environment_id:state.envId||'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false}});
+  Object.assign(state,{since:null,selected:new Set(),runsFilter:{environment_id:state.envId||'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},runsSel:new Set()});
   state.history.clear();
   state.deploy=null;state.deployStage=null;state.deployRun=null;state.deployLoop=null;state.cycleRun=null;
   await refreshAll();
@@ -1466,7 +1497,7 @@ async function switchApplication(key){
   state.appKey=key;
   try{localStorage.setItem('te.app',key);}catch{}
   // Full reset of app-scoped view state, including the environment: each application has its own targets.
-  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
+  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},runsSel:new Set(),
     schedFormOpen:false,report:{data:null,loading:false,error:null,busy:''},
     reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
     cycleRun:null,deployLoop:null});
@@ -1555,8 +1586,10 @@ function handleAction(action,node){
   else if(action==='save-timeouts')saveTimeouts(node);
   else if(action==='save-suite')saveAsSuite();
   else if(action==='apply-run-filters')applyRunFilters();
-  else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',from:'',to:''};loadRunsList(true);}
+  else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''};loadRunsList(true);}
   else if(action==='runs-more')loadRunsList(false);
+  else if(action==='runs-clear-sel'){state.runsSel=new Set();renderCurrentView();}
+  else if(action==='runs-delete-selected')deleteSelectedRuns();
   else if(action==='run-types')runSelectedTypes();
   else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
@@ -1607,10 +1640,27 @@ function applyRunFilters(){
   state.runsFilter={
     environment_id:el('runsEnvFilter').value,
     status:el('runsStatusFilter').value,
+    trigger_source:el('runsTriggerFilter')?el('runsTriggerFilter').value:'',
+    application_version:el('runsVersionFilter')?el('runsVersionFilter').value:'',
     from:el('runsFromFilter').value,
     to:el('runsToFilter').value,
   };
   loadRunsList(true);
+}
+async function deleteSelectedRuns(){
+  const ids=[...(state.runsSel||[])];
+  if(!ids.length)return;
+  const label=plural(ids.length,'run');
+  if(!confirm(`Delete ${label}? This also deletes their per-case results and remarks. This cannot be undone.`))return;
+  try{
+    const res=await postJson('/api/v1/executions/delete-batch',{ids});
+    const n=res&&res.data&&res.data.deleted!=null?res.data.deleted:ids.length;
+    toast(`Deleted ${plural(n,'run')}`);
+    state.runsSel=new Set();
+    await loadRunsList(true);
+  }catch(e){
+    toast('Delete failed: '+e.message);
+  }
 }
 async function runSelectedTypes(){
   const ids=[...new Set([...state.selectedTypes].flatMap(id=>casesForType(id).map(c=>c.id)))];
@@ -2155,10 +2205,26 @@ content.addEventListener('change',e=>{
     if(e.target.matches('input[type=radio],input[type=checkbox],select'))renderCurrentView();
     return;
   }
-  if(e.target.matches('#runsEnvFilter,#runsStatusFilter,#runsFromFilter,#runsToFilter')){applyRunFilters();return;}
+  if(e.target.matches('#runsEnvFilter,#runsStatusFilter,#runsTriggerFilter,#runsVersionFilter,#runsFromFilter,#runsToFilter')){applyRunFilters();return;}
   const typesel=e.target.closest('[data-typesel]');
   if(typesel){
     if(typesel.checked)state.selectedTypes.add(typesel.dataset.typesel);else state.selectedTypes.delete(typesel.dataset.typesel);
+    renderCurrentView();
+    return;
+  }
+  // Runs page: individual + select-all checkboxes.
+  const runPick=e.target.closest('[data-run-pick]');
+  if(runPick){
+    state.runsSel=state.runsSel||new Set();
+    if(runPick.checked)state.runsSel.add(runPick.dataset.runPick);else state.runsSel.delete(runPick.dataset.runPick);
+    renderCurrentView();
+    return;
+  }
+  const runAll=e.target.closest('[data-run-pickall]');
+  if(runAll){
+    state.runsSel=state.runsSel||new Set();
+    const ids=(state.runsList.rows||[]).map(r=>r.id);
+    if(runAll.checked)ids.forEach(id=>state.runsSel.add(id));else ids.forEach(id=>state.runsSel.delete(id));
     renderCurrentView();
     return;
   }

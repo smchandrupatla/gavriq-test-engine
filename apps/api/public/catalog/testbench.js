@@ -46,6 +46,7 @@ const S={
   suiteForm:{name:'',members:new Set(),filter:''},
   form:null,
   shown:PAGE_SIZE,
+  typeSel:null,
 };
 try{S.viewMode=localStorage.getItem('tb_view')||'compact';S.savedViews=JSON.parse(localStorage.getItem('tb_saved_views')||'[]');}catch{}
 
@@ -82,6 +83,14 @@ const CSS=`
 .tb-sel{font-size:11px;letter-spacing:.06em;color:var(--muted)}
 .tb-more{display:flex;align-items:center;gap:10px;padding:12px 14px;border-top:1px solid var(--line);background:var(--panel2)}
 .tb-more .muted{flex:1}
+.type-nav{display:flex;flex-direction:column;gap:2px;padding:8px}
+.type-nav .type-nav-item{display:flex;align-items:center;gap:8px;padding:9px 12px;background:transparent;border:1px solid transparent;border-radius:8px;color:var(--text);cursor:pointer;font:inherit;text-align:left}
+.type-nav .type-nav-item:hover{background:var(--panel2)}
+.type-nav .type-nav-item.active{background:var(--gold-soft);color:var(--gold-text);border-color:var(--gold)}
+.type-nav .type-nav-item .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.type-nav .type-nav-item .cnt{font-size:11.5px;color:var(--muted);background:var(--panel2);padding:1px 7px;border-radius:10px}
+.type-nav .type-nav-item.active .cnt{background:var(--gold);color:var(--panel);font-weight:600}
+.type-cases{padding:0 10px 10px}
 .tb-pri{display:inline-flex;align-items:center;gap:6px;font-size:12px}.tb-pri i{width:7px;height:7px;border-radius:50%;display:inline-block}
 .tb-pri.Critical i{background:var(--red)}.tb-pri.High i{background:var(--gold)}.tb-pri.Medium i{background:#9d8cf1}.tb-pri.Low i{background:var(--muted2)}
 .tb-flaky{font-size:10px;font-weight:700;color:var(--amber);background:var(--amber-soft);border-radius:8px;padding:1px 6px;margin-left:6px}
@@ -231,6 +240,7 @@ async function loadSuites(force){
 // ---------------------------------------------------------------------------
 function matchesFilters(c){
   const f=S.filters;
+  if(S.typeSel&&S.typeSel!=='__all'&&(c.test_type||'other')!==S.typeSel)return false;
   if(f.status.size&&!f.status.has(statusOf(c).label))return false;
   if(f.priority.size&&!f.priority.has(c.priority_label||'Medium'))return false;
   if(f.owner.size&&!f.owner.has(c.owner))return false;
@@ -441,13 +451,44 @@ function detailHtml(){
 }
 function renderDetailOnly(){const host=q('#tb-detail');if(!host)return;const wrap=document.createElement('div');wrap.innerHTML=detailHtml();host.replaceWith(wrap.firstElementChild);}
 
+// Types available for the Test cases browser — derived from `test_type` on each case
+// plus a pseudo-type "__all" that shows every case through the current filters.
+function titleizeType(id){return id==='__all'?'All cases':id.replace(/[-_]+/g,' ').replace(/\b\w/g,c=>c.toUpperCase());}
+function typesOfCases(){
+  const by=new Map();
+  for(const c of S.cases){const t=c.test_type||'other';by.set(t,(by.get(t)||0)+1);}
+  const entries=[...by.entries()].map(([id,count])=>({id,title:titleizeType(id),count}));
+  entries.sort((a,b)=>b.count-a.count||a.title.localeCompare(b.title));
+  return [{id:'__all',title:'All cases',count:S.cases.length}].concat(entries);
+}
+function typeNavHtml(){
+  const items=typesOfCases().map(t=>{
+    const active=(S.typeSel||'__all')===t.id?' active':'';
+    return `<button class="type-nav-item${active}" data-tb="type-nav" data-id="${esc(t.id)}" type="button"><span class="t">${esc(t.title)}</span><span class="cnt">${t.count}</span></button>`;
+  }).join('');
+  return `<section class="card" style="margin:0"><div class="tb-main-head"><h2 style="margin:0;font-size:14px;text-transform:none;letter-spacing:0">Test types</h2><span class="muted small">${plural(S.cases.length,'case')} total</span></div><nav class="type-nav">${items}</nav></section>`;
+}
 function renderTestCases(){
   el('viewTitle').textContent='Test cases';
   if(!S.loaded||S.loading&&!S.cases.length){el('content').innerHTML=`<div class="kpi-grid">${'<div class="skel" style="height:70px"></div>'.repeat(6)}</div><div class="skel" style="height:320px"></div>`;return;}
+  const typeSel=S.typeSel;
   const open=!!S.detail;
-  el('content').innerHTML=`<div class="group-head first"><h2>Test cases</h2><span class="muted small">Reusable checks available for test design and execution · ${esc(state.appKey||'')} on ${esc(envNameOf(state.envId))}</span><span style="flex:1"></span><a class="btn primary" href="#/test-case-form" title="Create a new test case">+ New test case</a></div>
-    ${stripHtml()}<p class="tb-status" id="tb-status" role="status" aria-live="polite"></p>${toolbarHtml()}${filtersHtml()}${activeFilterHtml()}${insightsHtml()}
-    <div class="tb-layout${open?' with-detail':''}">${listHtml()}${open?detailHtml():''}</div>`;
+  const head=`<div class="group-head first"><h2>Test cases</h2><span class="muted small">Reusable checks available for test design and execution · ${esc(state.appKey||'')} on ${esc(envNameOf(state.envId))}</span><span style="flex:1"></span><a class="btn primary" href="#/test-case-form" title="Create a new test case">+ New test case</a></div>${stripHtml()}<p class="tb-status" id="tb-status" role="status" aria-live="polite"></p>`;
+  // Three-state layout, same as Test suites:
+  //   (A) no type picked -> full-width types list
+  //   (B) type picked, no case open -> 50/50 (types / cases of type with the toolbar + filters)
+  //   (C) type picked + case open  -> 1/3 - 1/3 - 1/3 (types / cases / detail)
+  if(!typeSel){
+    el('content').innerHTML=head+`<div class="tb-layout">${typeNavHtml()}</div>`;
+    return;
+  }
+  const casesBody=`${toolbarHtml()}${filtersHtml()}${activeFilterHtml()}${insightsHtml()}${listHtml()}`;
+  const casesCol=`<section class="card" style="margin:0;padding:0 0 10px"><div class="tb-main-head"><div><div style="font-weight:600">${esc(titleizeType(typeSel))}</div><div class="muted small">${plural(visibleRows().length,'case')}${S.search?` matching “${esc(S.search)}”`:''}</div></div><span class="spacer" style="flex:1"></span><button class="btn" data-tb="type-nav" data-id="__all" title="See all cases">All</button></div><div class="type-cases">${casesBody}</div></section>`;
+  if(!open){
+    el('content').innerHTML=head+`<div class="tb-layout suite-two">${typeNavHtml()}${casesCol}</div>`;
+  }else{
+    el('content').innerHTML=head+`<div class="tb-layout suite-three">${typeNavHtml()}${casesCol}${detailHtml()}</div>`;
+  }
   const search=q('#tb-search');if(search&&document.activeElement!==search&&S.focusSearch){search.focus();S.focusSearch=false;}
 }
 
@@ -697,6 +738,15 @@ async function handle(action,node){
     case 'sort-dir':S.sortDir=S.sortDir==='asc'?'desc':'asc';render('test-cases');break;
     case 'show-more':S.shown=(S.shown||PAGE_SIZE)+PAGE_SIZE;render('test-cases');break;
     case 'show-all':S.shown=S.cases.length;render('test-cases');break;
+    case 'type-nav':{
+      const t=node.dataset.id;
+      S.typeSel=(t==='__all')?'__all':t;
+      S.shown=PAGE_SIZE;
+      // Opening a different type closes the current case detail.
+      S.detail=null;S.currentId=null;S.detailRuns=null;S.detailAudit=null;
+      render('test-cases');
+      break;
+    }
     case 'view-compact':S.viewMode='compact';try{localStorage.setItem('tb_view','compact');}catch{}render('test-cases');break;
     case 'view-cards':S.viewMode='cards';try{localStorage.setItem('tb_view','cards');}catch{}render('test-cases');break;
     case 'save-view':{const name=(prompt('Name this view:')||'').trim();if(!name)return;S.savedViews.push({name,search:S.search,filters:{status:[...S.filters.status],priority:[...S.filters.priority],owner:[...S.filters.owner],environment:[...S.filters.environment],tag:[...S.filters.tag],flakyOnly:S.filters.flakyOnly},sortKey:S.sortKey,sortDir:S.sortDir});try{localStorage.setItem('tb_saved_views',JSON.stringify(S.savedViews));}catch{}render('test-cases');setStatus('View saved: '+name);break;}
