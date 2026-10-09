@@ -617,7 +617,7 @@ async function saveForm(status,andRun,closeAfter){
     f.source=saved;f.saving=false;S.loaded=false;
     if(andRun){
       const env=state.envId;
-      try{const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(saved.id)+'/run',{environment:env});toast('Saved and run queued for '+saved.key,'#/run/'+r.run.id);pollLive();}
+      try{const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(saved.id)+'/run',{environment:env,...(v?{application_version:v}:{})});toast('Saved and run queued for '+saved.key,'#/run/'+r.run.id);pollLive();}
       catch(e){toast('Saved, but could not queue a run: '+e.message);}
     }
     toast('Saved '+saved.key);
@@ -698,7 +698,7 @@ function remarksHtml(r){
 // actions
 // ---------------------------------------------------------------------------
 async function runOne(id,envId){
-  try{const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(id)+'/run',{environment:envId||state.envId,headless:state.headed?false:undefined});toast('Run queued — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}
+  try{const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(id)+'/run',{environment:envId||state.envId,headless:state.headed?false:undefined,...(v?{application_version:v}:{})});toast('Run queued — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}
   catch(e){toast('Could not queue run: '+e.message);}
 }
 async function saveTriage(id){
@@ -752,7 +752,7 @@ async function handle(action,node){
     case 'save-view':{const name=(prompt('Name this view:')||'').trim();if(!name)return;S.savedViews.push({name,search:S.search,filters:{status:[...S.filters.status],priority:[...S.filters.priority],owner:[...S.filters.owner],environment:[...S.filters.environment],tag:[...S.filters.tag],flakyOnly:S.filters.flakyOnly},sortKey:S.sortKey,sortDir:S.sortDir});try{localStorage.setItem('tb_saved_views',JSON.stringify(S.savedViews));}catch{}render('test-cases');setStatus('View saved: '+name);break;}
     case 'export-csv':exportCsv();break;
     case 'clear-sel':S.selected=new Set();render('test-cases');break;
-    case 'run-selected':{const ids=[...S.selected];if(!ids.length)return;const env=formVal('tb-run-env')||state.envId;try{const r=await postJson('/api/v1/test-cases/run-batch',{ids,environment:env});toast('Queued '+plural(ids.length,'case'),r.runs&&r.runs[0]?'#/run/'+r.runs[0].id:undefined);pollLive();}catch(e){toast('Batch run failed: '+e.message);}break;}
+    case 'run-selected':{const ids=[...S.selected];if(!ids.length)return;const env=formVal('tb-run-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-cases/run-batch',{ids,environment:env,...(v?{application_version:v}:{})});toast('Queued '+plural(ids.length,'case'),r.runs&&r.runs[0]?'#/run/'+r.runs[0].id:undefined);pollLive();}catch(e){toast('Batch run failed: '+e.message);}break;}
     case 'save-suite':saveSelectedAsSuite();break;
     case 'run-one':{const env=formVal('tb-detail-env')||formVal('tb-run-env')||state.envId;runOne(id,env);break;}
     case 'open-case':location.hash='#/test-cases/'+encodeURIComponent(id);break;
@@ -802,8 +802,8 @@ async function handle(action,node){
     case 'suite-clear-sel':S.suiteSel=new Set();render('test-suites');break;
     case 'suite-save':{const name=formVal('tb-suite-name').trim();if(!name){setStatus('Suite name is required.',true);return;}setStatus('Saving…');try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({name,caseIds:[...S.members]})});setStatus('Saved.');await loadSuites(true);openSuite(id);await loadSummary();renderSideNav();}catch(e){setStatus('Save failed: '+e.message,true);}break;}
     case 'suite-delete':{if(!confirm('Delete this test suite? This cannot be undone.'))return;try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'DELETE'});toast('Suite deleted');S.suiteCurrent=null;await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');}catch(e){setStatus('Delete failed: '+e.message,true);}break;}
-    case 'suite-run':{const env=formVal('tb-suite-env')||state.envId;try{const r=await postJson('/api/v1/test-suites/'+encodeURIComponent(id)+'/run',{environment:env});toast('Queued '+plural(r.outcome.ranCases,'case')+' — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
-    case 'suite-run-selected':{const ids=[...S.suiteSel];if(!ids.length)return;try{const r=await postJson('/api/v1/test-suites/run-batch',{ids,environment:state.envId});toast('Queued '+plural(r.runs.length,'suite run'));pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
+    case 'suite-run':{const env=formVal('tb-suite-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-suites/'+encodeURIComponent(id)+'/run',{environment:env,...(v?{application_version:v}:{})});toast('Queued '+plural(r.outcome.ranCases,'case')+' — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
+    case 'suite-run-selected':{const ids=[...S.suiteSel];if(!ids.length)return;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-suites/run-batch',{ids,environment:state.envId,...(v?{application_version:v}:{})});toast('Queued '+plural(r.runs.length,'suite run'));pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
     case 'suite-compose':{if(S.suiteSel.size<2){setStatus('Select at least two test suites to compose.',true);return;}const name=(prompt('Name for the combined suite:','Combined suite')||'').trim();if(!name)return;try{const r=await postJson('/api/v1/test-suites/from-suites',{name,suiteIds:[...S.suiteSel]});setStatus('Composed “'+name+'” with '+plural((r.case_ids||[]).length,'case'));S.suiteSel=new Set();await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');}catch(e){setStatus('Compose failed: '+e.message,true);}break;}
     case 'suite-delete-selected':{const ids=[...S.suiteSel];if(!ids.length)return;if(!confirm('Delete '+ids.length+' selected test suite(s)? This cannot be undone.'))return;for(const sid of ids){await api('/api/v1/test-suites/'+encodeURIComponent(sid),{method:'DELETE'}).catch(()=>null);}S.suiteSel=new Set();if(S.suiteCurrent&&ids.includes(S.suiteCurrent.id))S.suiteCurrent=null;await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');setStatus('Deleted '+plural(ids.length,'suite'));break;}
     case 'suite-create':{const name=formVal('tb-sf-name').trim();if(!name){setStatus('Suite name is required.',true);q('#tb-sf-name').focus();return;}setStatus('Creating…');try{const r=await postJson('/api/v1/test-suites',{name,caseIds:[...S.suiteForm.members],application_key:state.appKey});S.suiteForm={name:'',members:new Set(),filter:''};S.suitesLoaded=false;await loadSummary();renderSideNav();location.hash='#/test-suites/'+encodeURIComponent(r.id||(r.data&&r.data.id));}catch(e){setStatus('Create failed: '+e.message,true);}break;}

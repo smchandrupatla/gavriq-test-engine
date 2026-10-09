@@ -121,7 +121,7 @@ function suiteView(s: any) {
 /** Queues one execution for the given cases (and optional suite), named the way the console names runs. */
 export async function queueCaseRun(
   req: FastifyRequest,
-  input: { caseIds: string[]; suiteId?: string | null; environment?: unknown; triggerSource?: string; requestedBy?: string | null; metadata?: Record<string, unknown> }
+  input: { caseIds: string[]; suiteId?: string | null; environment?: unknown; triggerSource?: string; requestedBy?: string | null; metadata?: Record<string, unknown>; applicationVersion?: string | null }
 ) {
   const envId = await resolveEnvironmentId(input.environment);
   const { rows: cases } = await query(
@@ -136,11 +136,17 @@ export async function queueCaseRun(
   const name = cases.length === 1 ? `${first.name} — ${stamp}` : suite ? `${suite.name} — ${stamp}` : `Run — ${stamp}`;
   const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
   const envRow = envId ? await query('SELECT key FROM environments WHERE id = $1', [envId]) : { rows: [] as any[] };
+  const applicationVersion = typeof input.applicationVersion === 'string' && input.applicationVersion.trim()
+    ? input.applicationVersion.trim()
+    : (input.metadata && typeof (input.metadata as any).application_version === 'string'
+        ? ((input.metadata as any).application_version as string).trim()
+        : null);
   const metadata = {
     ...(input.metadata || {}),
     application_key: first.app_key,
     ...(envRow.rows[0]?.key ? { environment_key: envRow.rows[0].key } : {}),
     ...(suite ? { suite_key: suite.key } : {}),
+    ...(applicationVersion ? { application_version: applicationVersion } : {}),
   };
   const { rows } = await query(
     `INSERT INTO executions (key, name, requested_by, test_suite_id, test_case_ids, environment_id, execution_location, status, trigger_source, metadata)
@@ -333,6 +339,78 @@ export async function testBenchRoutes(app: FastifyInstance) {
     });
   });
 
+  /**
+   * Catalog coverage — for every active case, which plain-language fields are missing or thin.
+   *   objective         < 40 chars
+   *   preconditions     empty
+   *   steps             empty
+   *   expected_results  empty
+   *   test_data         both test_data and test_data_ref empty
+   * Returns a summary and a row per case so the console can show what needs fleshing out.
+   */
+  app.get('/api/v1/test-cases/coverage', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const where: string[] = [`tc.lifecycle NOT IN ('archived','deprecated')`];
+    const params: unknown[] = [];
+    if (q.application_key) {
+      params.push(q.application_key);
+      where.push(`tc.application_id = (SELECT id FROM applications WHERE key = $${params.length})`);
+    }
+    const minObjective = Math.max(10, Math.min(Number(q.min_objective) || 40, 200));
+    const { rows } = await query(
+      `SELECT tc.id, tc.key, tc.name, tc.objective, tc.preconditions, tc.expected_results,
+              tc.test_data, tc.test_data_ref, tc.test_type::text AS test_type,
+              tc.execution_method, tc.script,
+              jsonb_array_length(COALESCE(tc.steps, '[]'::jsonb)) AS step_count,
+              a.key AS application_key, a.name AS application_name
+         FROM test_cases tc JOIN applications a ON a.id = tc.application_id
+         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY tc.key`,
+      params
+    );
+    type Row = { id: string; key: string; name: string; application_key: string; application_name: string;
+      test_type: string; execution_method: string | null; script: string | null; step_count: number;
+      objective: string | null; preconditions: string | null; expected_results: string | null;
+      test_data: string | null; test_data_ref: string | null };
+    const findings: Array<{ case_id: string; case_key: string; name: string; application: string; test_type: string;
+      missing: string[]; thin: string[]; severity: 'high' | 'medium' | 'low' }> = [];
+    let allClean = 0;
+    for (const r of rows as Row[]) {
+      const missing: string[] = [];
+      const thin: string[] = [];
+      // A script-driven case keeps its steps inside the script; the UI already covers that case.
+      const scriptDriven = !!(r.script && (!r.execution_method || r.execution_method === 'playwright' || r.execution_method === 'selenium'));
+      if (!r.objective) missing.push('objective');
+      else if (r.objective.trim().length < minObjective) thin.push(`objective (${r.objective.trim().length} chars)`);
+      if (!r.preconditions) missing.push('preconditions');
+      if (!scriptDriven && (!r.step_count || r.step_count < 1)) missing.push('steps');
+      if (!r.expected_results) missing.push('expected_results');
+      if (!r.test_data && !r.test_data_ref) missing.push('test_data');
+      if (!missing.length && !thin.length) { allClean++; continue; }
+      // Severity: a case missing more than one of (objective, steps, expected_results) is "high".
+      const criticalMissing = ['objective', 'steps', 'expected_results'].filter((f) => missing.includes(f));
+      const severity: 'high' | 'medium' | 'low' = criticalMissing.length >= 2 ? 'high' : criticalMissing.length === 1 || missing.length >= 3 ? 'medium' : 'low';
+      findings.push({
+        case_id: r.id, case_key: r.key, name: r.name, application: r.application_key,
+        test_type: r.test_type, missing, thin, severity,
+      });
+    }
+    return reply.send({
+      data: {
+        total: rows.length,
+        clean: allClean,
+        with_findings: findings.length,
+        by_severity: {
+          high: findings.filter((f) => f.severity === 'high').length,
+          medium: findings.filter((f) => f.severity === 'medium').length,
+          low: findings.filter((f) => f.severity === 'low').length,
+        },
+        min_objective_chars: minObjective,
+        findings,
+      },
+    });
+  });
+
   app.get<{ Params: { id: string } }>('/api/v1/test-cases/:id/suites', async (req, reply) => {
     const tc = await findCase(req.params.id);
     if (!tc) return reply.status(404).send({ error: 'Test case not found' });
@@ -404,6 +482,7 @@ export async function testBenchRoutes(app: FastifyInstance) {
       environment: b.environment ?? b.environment_id,
       triggerSource: typeof b.trigger_source === 'string' ? b.trigger_source : 'manual',
       metadata: b.headless === false ? { headless: false } : undefined,
+      applicationVersion: typeof b.application_version === 'string' ? b.application_version : null,
     });
     if (!run) return reply.status(404).send({ error: 'Test case not found' });
     return reply.status(202).send({ accepted: true, run });
@@ -416,7 +495,7 @@ export async function testBenchRoutes(app: FastifyInstance) {
     const { rows } = await query('SELECT id FROM test_cases WHERE id::text = ANY($1::text[]) OR key = ANY($1::text[])', [refs]);
     const ids = rows.map((r) => r.id as string);
     if (!ids.length) return reply.status(404).send({ error: 'No matching test cases' });
-    const run = await queueCaseRun(req, { caseIds: ids, environment: b.environment ?? b.environment_id, triggerSource: 'manual' });
+    const run = await queueCaseRun(req, { caseIds: ids, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
     return reply.status(202).send({ accepted: true, selected: ids.length, runs: run ? [run] : [] });
   });
 
@@ -518,7 +597,7 @@ export async function testBenchRoutes(app: FastifyInstance) {
     const ids: string[] = s.case_ids || [];
     if (!ids.length) return reply.status(400).send({ error: 'This suite has no member cases to run' });
     const b = req.body || {};
-    const run = await queueCaseRun(req, { caseIds: ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual' });
+    const run = await queueCaseRun(req, { caseIds: ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
     return reply.status(202).send({ accepted: true, run, outcome: { suiteId: s.id, ranCases: ids.length, queued: ids.length } });
   });
 
@@ -569,7 +648,7 @@ export async function testBenchRoutes(app: FastifyInstance) {
     for (const ref of ids) {
       const s = await findSuite(ref);
       if (!s || !(s.case_ids || []).length) continue;
-      const run = await queueCaseRun(req, { caseIds: s.case_ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual' });
+      const run = await queueCaseRun(req, { caseIds: s.case_ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
       if (run) runs.push(run);
     }
     return reply.status(202).send({ accepted: true, selected: ids.length, runs });
