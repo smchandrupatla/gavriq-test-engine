@@ -319,6 +319,23 @@ function runHistoryHtml(runs){
   const body=rows.length?rows.map(r=>{const open=S.detailOpenRemarks.has(r.id);return `<tr class="clickable" data-tb="toggle-remarks" data-id="${esc(r.id)}"><td><a href="#/run/${esc(r.execution_id)}" title="Open the run">${esc(r.run_id||r.execution_name||'')}</a></td><td>${resultBadge(r.result)}</td><td>${esc(r.environment||'—')}</td><td>${fmtDur(r.duration_ms)}</td><td class="muted">${rel(r.created_at)}</td></tr>${open?`<tr><td colspan="5"><div class="muted small">Triggered by ${esc(r.triggered_by||'—')} · ${esc(r.channel||'—')} runner · ${plural(r.evidence_count||0,'evidence item')}</div><ul class="tb-remarks">${(r.remarks||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>No remarks recorded.</li>'}</ul></td></tr>`:''}`;}).join(''):'<tr><td colspan="5" class="muted">No runs yet. Run this case to produce evidence.</td></tr>';
   return `<h3>Run history <span class="hint">${esc(summary)}</span></h3><table class="tb-mini"><thead><tr><th>Run</th><th>Result</th><th>Env</th><th>Duration</th><th>When</th></tr></thead><tbody>${body}</tbody></table><p class="muted small" style="margin:6px 0 0">Select a run to see its remarks.</p>`;
 }
+/** Defects raised against this test case: open the defect by key, jump to the run that raised it, see the fix ref. */
+function defectsHtml(defects){
+  if(defects===null)return '<div class="skel" style="height:60px"></div>';
+  if(!defects.length)return '<h3>Defects</h3><p class="muted small">No defects have been logged against this case. When a run fails, the engine files one automatically and sends it to the implementation manager.</p>';
+  const TONE={open:'failed',reopened:'failed',acknowledged:'blocked',in_fix:'blocked',fixed:'passed',verified:'passed',wont_fix:'never'};
+  const open=defects.filter(d=>d.status!=='verified'&&d.status!=='wont_fix').length;
+  const rows=defects.map(d=>{
+    const envLabel=d.environment_name||d.environment_key||'—';
+    const fix=d.fix_ref?`<a href="${esc(safeUrl(d.fix_ref))}" target="_blank" rel="noopener" title="Fix / commit">${esc(String(d.fix_ref).slice(-14))}</a>`:'—';
+    const runLink=d.execution_id?`<a href="#/run/${esc(d.execution_id)}">${esc(d.execution_key||String(d.execution_id).slice(0,8))}</a>`:'—';
+    const badge=`<span class="badge ${TONE[d.status]||'never'}">${esc(d.status||'—')}</span>`;
+    const reportLink=d.report_key?` <a class="muted small" href="#/defect-log?report=${esc(d.report_key)}" title="Open the defect report">${esc(d.report_key)}</a>`:'';
+    return `<tr><td><a href="#/defect-log?defect=${esc(d.key)}" title="Open the defect log">${esc(d.key)}</a>${reportLink}</td><td>${badge}</td><td>${esc(d.severity||'—')}</td><td>${esc(envLabel)}</td><td>${runLink}</td><td>${fix}</td><td class="muted small">${rel(d.updated_at||d.last_seen||d.created_at)}</td></tr>`;
+  }).join('');
+  const summary=`${defects.length} total · ${open} open`;
+  return `<h3>Defects <span class="hint">${esc(summary)}</span></h3><table class="tb-mini"><thead><tr><th>Key</th><th>Status</th><th>Severity</th><th>Env</th><th>Run</th><th>Fix</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
 function notesHtml(c){
   const notes=(c.notes||[]).slice().reverse();
   return `<div id="tb-notes">${notes.map(n=>`<div class="tb-note"><div class="who">${esc(n.author)} · ${rel(n.at)}</div>${esc(n.text)}</div>`).join('')||'<p class="muted small">No notes yet.</p>'}</div><div class="tb-triage"><input type="text" id="tb-new-note" placeholder="Add a note…" style="flex:1"><button class="btn" data-tb="add-note" data-id="${esc(c.id)}">Add</button></div>`;
@@ -334,6 +351,7 @@ function detailBodyHtml(c,opts){
     ${Array.isArray(c.steps)&&c.steps.length?`<div class="tb-section"><h3>Steps <span class="hint">what is done → what should happen</span></h3>${stepsListHtml(c.steps,hasTech)}</div>`:c.script?`<div class="tb-section"><h3>Steps</h3><p class="muted small">Automated script: <code>${esc(c.script)}</code> — the steps are inside the script.</p></div>`:''}
     <div class="tb-section"><h3>Triage <span class="hint">${esc(c.triage_status&&c.triage_status!=='None'?c.triage_status:'')}</span></h3>${triageHtml(c)}</div>
     <div class="tb-section">${runHistoryHtml(opts.runs)}</div>
+    <div class="tb-section">${defectsHtml(opts.defects===undefined?null:opts.defects)}</div>
     <div class="tb-section"><h3>Notes</h3>${notesHtml(c)}</div>
     <div class="tb-section"><h3>Watchers <span class="hint">${watchers.length?'('+watchers.length+' watching)':'(none yet)'}</span></h3><button class="btn" data-tb="toggle-watch" data-id="${esc(c.id)}" data-on="${watchers.includes('console')?'1':''}">${watchers.includes('console')?'Watching ✓':'Watch'}</button></div>
     <div class="tb-section"><h3>Suites containing this case</h3>${suites.length?suites.map(s=>`<a class="tb-chip" href="#/test-suites/${esc(s.id)}">${esc(s.name)}</a> `).join(''):'<span class="muted small">Not in any suite yet.</span>'}</div>
@@ -360,7 +378,7 @@ function renderTestCases(){
   el('viewTitle').textContent='Test cases';
   if(!S.loaded||S.loading&&!S.cases.length){el('content').innerHTML=`<div class="kpi-grid">${'<div class="skel" style="height:70px"></div>'.repeat(6)}</div><div class="skel" style="height:320px"></div>`;return;}
   const open=!!S.detail;
-  el('content').innerHTML=`<div class="group-head first"><h2>Test cases</h2><span class="muted small">Reusable checks available for test design and execution · ${esc(state.appKey||'')} on ${esc(envNameOf(state.envId))}</span></div>
+  el('content').innerHTML=`<div class="group-head first"><h2>Test cases</h2><span class="muted small">Reusable checks available for test design and execution · ${esc(state.appKey||'')} on ${esc(envNameOf(state.envId))}</span><span style="flex:1"></span><a class="btn primary" href="#/test-case-form" title="Create a new test case">+ New test case</a></div>
     ${stripHtml()}<p class="tb-status" id="tb-status" role="status" aria-live="polite"></p>${toolbarHtml()}${filtersHtml()}${activeFilterHtml()}${insightsHtml()}
     <div class="tb-layout${open?' with-detail':''}">${listHtml()}${open?detailHtml():''}</div>`;
   const search=q('#tb-search');if(search&&document.activeElement!==search&&S.focusSearch){search.focus();S.focusSearch=false;}
@@ -731,15 +749,25 @@ async function route(view,mode,arg){
 /** The Details tab body of #/case/:id, in the Test cases screen representation. */
 function caseBodyHtml(c,extras){
   ensureCss();
-  return `<div class="tb-dhead" style="border-bottom:none"><div class="row">${statusPill(c)}${priPill(c.priority_label)}<span class="muted small">v${esc(c.version||1)} · ${esc(c.status||c.lifecycle||'')} · ${esc(c.execution_method||'')}</span><span style="flex:1"></span><a class="btn" href="#/test-case-form/edit/${esc(c.id)}">Edit</a><a class="btn" href="#/test-case-form/clone/${esc(c.id)}">New from this case</a></div></div>${detailBodyHtml(c,extras||{})}`;
+  // Snapshot the case key on the extras cache so defect queries can scope by case_key (indexed).
+  if(S.caseExtras&&S.caseExtras.id===c.id&&!S.caseExtras.caseKey)S.caseExtras.caseKey=c.key;
+  const appChip=c.application?`<a class="tb-chip" href="#/overview" title="Application">📦 ${esc(c.application.name||c.application.key)}</a>`:'';
+  return `<div class="tb-dhead" style="border-bottom:none"><div class="row">${statusPill(c)}${priPill(c.priority_label)}<span class="muted small">v${esc(c.version||1)} · ${esc(c.status||c.lifecycle||'')} · ${esc(c.execution_method||'')}</span>${appChip}<span style="flex:1"></span><a class="btn" href="#/test-case-form/edit/${esc(c.id)}">Edit</a><a class="btn" href="#/test-case-form/clone/${esc(c.id)}">New from this case</a></div></div>${detailBodyHtml(c,extras||{})}`;
 }
-/** Run history + audit for #/case/:id: returns what is cached now and re-renders the page when the rest arrives. */
+/** Run history + defects + audit for #/case/:id: returns what is cached now and re-renders the page when the rest arrives. */
 function loadCaseExtras(id){
   if(S.caseExtras&&S.caseExtras.id===id)return S.caseExtras;
-  const extras={id,runs:null};
+  const extras={id,runs:null,defects:null};
   S.caseExtras=extras;S.currentId=id;S.detailAudit=null;
   (async()=>{
     try{extras.runs=await api('/api/v1/test-cases/'+encodeURIComponent(id)+'/runs?limit=50'+(state.envId?'&environment_id='+encodeURIComponent(state.envId):''));}catch{extras.runs={data:[],totals:{}};}
+    if(state.view==='case'&&state.caseId===id)renderCurrentView();
+    // Defects raised by this case's runs. Scope by case_key when available so the API can hit the index.
+    try{
+      const q=S.caseExtras&&S.caseExtras.caseKey?('case_key='+encodeURIComponent(S.caseExtras.caseKey)):('test_case_id='+encodeURIComponent(id));
+      const res=await api('/api/v1/defects?'+q+'&limit=200');
+      extras.defects=res.data||[];
+    }catch{extras.defects=[];}
     if(state.view==='case'&&state.caseId===id)renderCurrentView();
     try{const a=await api('/api/v1/audit');S.detailAudit=(a.data||[]).filter(r=>String(r.resource_id)===String(id)).slice(0,20);}catch{S.detailAudit=[];}
     if(state.view==='case'&&state.caseId===id)renderCurrentView();
