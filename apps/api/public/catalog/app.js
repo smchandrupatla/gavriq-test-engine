@@ -79,7 +79,7 @@ const state={
   // Catalog coverage audit (plain-language fields missing/thin): populated by loadCoverage.
   coverage:null,
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
-  runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsSel:new Set(),
+  runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsSel:new Set(),runsTab:null,
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
   selectedTypes:new Set(),overviewTab:'summary',
@@ -802,11 +802,23 @@ function renderHistory(){
   el('viewTitle').textContent='Test runs';
   const live=activeRuns();
   const hot=live.filter(e=>!isStalled(e)).length;
-  let h=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><div class="hp-actions"><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span>${live.length?'<button class="btn" data-action="cancel-all-runs">Cancel all</button>':''}</div></div>`;
-  h+=live.length?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`:'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
-  if(state.loaded)h+=`<div class="group-head"><h2>History</h2><span class="muted small">every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',cases:state.cases},{fixed:true});
-  h+=`<div class="card"><div class="card-head"><h2>All runs</h2><span class="muted small">select a run for per-case results</span></div>${runsFilterBarHtml()}${runsTableHtml()}</div>`;
-  el('content').innerHTML=h;
+  // Default tab = Running now if there is anything in flight, else All runs.
+  if(!state.runsTab)state.runsTab=live.length?'live':'all';
+  const tab=state.runsTab;
+  const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="runs-tab" data-tab="${id}">${label}</button>`;
+  const tabs=`<div class="tabs" style="margin-bottom:16px">${t('live','Running now'+(hot?' ('+hot+')':''))}${t('history','History')}${t('all','All runs'+(state.runsList&&state.runsList.total?' ('+state.runsList.total+')':''))}</div>`;
+  let body;
+  if(tab==='live'){
+    const head=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><div class="hp-actions"><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span>${live.length?'<button class="btn" data-action="cancel-all-runs">Cancel all</button>':''}</div></div>`;
+    body=head+(live.length?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`:'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>');
+  }else if(tab==='history'){
+    body=state.loaded
+      ?`<div class="group-head first"><h2>History</h2><span class="muted small">every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',cases:state.cases},{fixed:true})
+      :'<div class="hp-loading"><div class="skel" style="height:220px"></div></div>';
+  }else{
+    body=`<div class="group-head first"><h2>All runs</h2><span class="muted small">select a run for per-case results</span></div><div class="card"><div class="card-head"><h2>Filters</h2></div>${runsFilterBarHtml()}${runsTableHtml()}</div>`;
+  }
+  el('content').innerHTML=tabs+body;
 }
 function renderRun(){
   const r=state.run;
@@ -1590,6 +1602,7 @@ function handleAction(action,node){
   else if(action==='runs-more')loadRunsList(false);
   else if(action==='runs-clear-sel'){state.runsSel=new Set();renderCurrentView();}
   else if(action==='runs-delete-selected')deleteSelectedRuns();
+  else if(action==='runs-tab'){state.runsTab=node.dataset.tab;renderCurrentView();}
   else if(action==='run-types')runSelectedTypes();
   else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
