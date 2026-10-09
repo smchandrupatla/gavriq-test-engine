@@ -28,6 +28,7 @@
  */
 import { pool, query, migrate } from './db/client.js';
 import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
+import { SANDBENCH_PORTAL_CASES, SANDBENCH_PORTAL_SUITES } from './catalog/sandbench-portal-cases.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 import { screenFields, type AppContext } from './catalog/plain-language.js';
@@ -141,6 +142,26 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
     suiteIds.set(s.key, rows[0]!.id);
   }
 
+  // Prune orphan cases: anything that was previously seeded by this script into
+  // this application but is no longer in the catalog (renamed, removed, split)
+  // is archived so it stops polluting suite case counts and run-group verdicts.
+  if (WITH_SUITES && cases.length) {
+    const liveKeys = cases.map((c) => c.key);
+    const { rowCount } = await query(
+      `UPDATE test_cases SET lifecycle = 'archived', updated_at = now(), updated_by = 'realistic-catalog-prune'
+       WHERE application_id = $1 AND created_by = 'realistic-catalog'
+         AND lifecycle = 'active' AND NOT (key = ANY($2::text[]))`,
+      [appId, liveKeys]
+    );
+    if (rowCount) console.log(`[seed] pruned ${rowCount} orphan ${appKey} cases to archived (no longer in catalog)`);
+    await query(
+      `DELETE FROM test_case_suites tcs
+       USING test_cases tc
+       WHERE tcs.test_case_id = tc.id AND tc.application_id = $1 AND tc.lifecycle <> 'active'`,
+      [appId]
+    );
+  }
+
   let n = 0;
   for (const c of cases) {
     const suiteId = suiteIds.get(c.suiteKey);
@@ -203,11 +224,11 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
        RETURNING id`,
       [
         c.key, c.name, c.description, appId, c.testType,
-        c.preconditions,
+        sf.preconditions,
         `${c.dataProfile.profile}: ${c.dataProfile.data} (source: ${c.dataProfile.source})`,
         c.method,
         JSON.stringify(sf.steps),
-        c.expected,
+        sf.expected_results,
         JSON.stringify(validationRules),
         c.timeoutSeconds || 60,
         c.severity, c.priority, c.tags,
@@ -272,14 +293,16 @@ async function main() {
   // 4) Applications, each with the environment it is developed on and its suites + cases.
   const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
   if (wanted('sand-bench')) {
+    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES];
+    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES];
     const sbId = await upsertApplication(
       'sand-bench', 'Sand Bench',
       'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
-      SANDBENCH_TYPES, SANDBENCH_SUITES, SANDBENCH_CASES
+      SANDBENCH_TYPES, allSuites, allCases
     );
     await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
-    const sbCount = await seedSuitesAndCases(sbId, 'sand-bench', SANDBENCH_SUITES, SANDBENCH_CASES);
-    console.log(`Seeded ${sbCount} Sand Bench cases across ${SANDBENCH_SUITES.length} ${grouping}.`);
+    const sbCount = await seedSuitesAndCases(sbId, 'sand-bench', allSuites, allCases);
+    console.log(`Seeded ${sbCount} Sand Bench cases across ${allSuites.length} ${grouping}.`);
   }
   if (wanted('gavriq-test-engine')) {
     const teId = await upsertApplication(

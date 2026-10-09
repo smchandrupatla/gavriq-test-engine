@@ -35,6 +35,10 @@ const SURFACES: Record<string, string> = {
   testhub: 'the test hub (the external-system simulator)',
   dbviewer: 'the database viewer',
   engine: 'the test engine',
+  apiportal: 'the API portal (the application-side desk the application API talks to)',
+  ftpportal: 'the FTP portal (the file-drop desk Sand Bench lands files on)',
+  kafkaportal: 'the Kafka portal (the Kafka-side desk Sand Bench exchanges messages with)',
+  mqportal: 'the MQ portal (the MQ-side desk Sand Bench exchanges messages with)',
 };
 
 /** Possessive form of a surface ("the application API's reply"). */
@@ -44,7 +48,14 @@ const SURFACE_SHORT: Record<string, string> = {
   testhub: 'the test hub',
   dbviewer: 'the database viewer',
   engine: 'the test engine',
+  apiportal: 'the API portal',
+  ftpportal: 'the FTP portal',
+  kafkaportal: 'the Kafka portal',
+  mqportal: 'the MQ portal',
 };
+
+/** Regex alternation of every surface placeholder we understand. */
+const SURFACE_RE = 'api|web|testhub|dbviewer|engine|apiPortal|ftpPortal|kafkaPortal|mqPortal';
 
 /** Screen names for the static pages a case opens (file name → screen). */
 const PAGE_TITLES: Record<string, string> = {
@@ -400,14 +411,23 @@ const endDot = (s: string) => (/[.!?]$/.test(s.trim()) ? s.trim() : s.trim() + '
 /** Replaces {{var}} placeholders inside free text with words. */
 export function plainText(s: string | undefined | null): string {
   if (!s) return '';
-  return String(s)
-    .replace(/\{\{\s*(api|web|testhub|dbviewer|engine)\s*\}\}\s*base URL/gi, (_m, v) => `${SURFACE_SHORT[v.toLowerCase()]} address`)
-    .replace(/\{\{\s*(api|web|testhub|dbviewer|engine)\s*\}\}/gi, (_m, v) => SURFACE_SHORT[v.toLowerCase()] || v)
+  const surfaceBase = new RegExp(`\\{\\{\\s*(${SURFACE_RE})\\s*\\}\\}\\s*base URL`, 'gi');
+  const surfaceOnly = new RegExp(`\\{\\{\\s*(${SURFACE_RE})\\s*\\}\\}`, 'gi');
+  let out = String(s)
+    .replace(surfaceBase, (_m, v) => `${SURFACE_SHORT[String(v).toLowerCase()]} address`)
+    .replace(surfaceOnly, (_m, v) => SURFACE_SHORT[String(v).toLowerCase()] || v)
     .replace(/\{\{\s*username\s*\}\}/g, 'the demo operator username')
     .replace(/\{\{\s*password\s*\}\}/g, 'the demo password')
     .replace(/\{\{\s*tenant\s*\}\}/g, 'the demo tenant')
     .replace(/\{\{\s*(ts|rand)\s*\}\}/g, 'a unique run stamp')
     .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m, v) => `the ${v.replace(/_/g, ' ')} captured earlier`);
+  // Rewrite "returns 404" / "returns 200" and bare "404 on …" into words.
+  out = out.replace(/\b(returns|answers with|replies with|returning|replying)\s+(\d{3})\b/gi, (_m, _verb, code) => `${plainStatus(code)}`);
+  out = out.replace(/\b(\d{3})\s+on\s+/g, (_m, code) => `${plainStatus(code)} on `);
+  out = out.replace(/\bHTTP\s+(\d{3})\b/gi, (_m, code) => `${plainStatus(code)}`);
+  // "200 with …" (bare status at the start of a clause) → the plain phrase.
+  out = out.replace(/(^|[.;]\s*)(\d{3})\s+with\s+/g, (_m, pre, code) => `${pre}${cap(plainStatus(code))} and `);
+  return out;
 }
 
 /** A {{var}} value inside request data, in words. */
@@ -450,7 +470,8 @@ function plainBody(body: unknown): string {
 
 /** "GET {{api}}/api/v1/x?y" → { surface, path }. */
 function splitUrl(raw: string): { surface: string | null; path: string; page: string | null } {
-  const m = String(raw || '').match(/^\{\{\s*(api|web|testhub|dbviewer|engine)\s*\}\}(.*)$/i);
+  const surfaceRe = new RegExp(`^\\{\\{\\s*(${SURFACE_RE})\\s*\\}\\}(.*)$`, 'i');
+  const m = String(raw || '').match(surfaceRe);
   let surface: string | null = null;
   let rest = String(raw || '');
   if (m) { surface = m[1]!.toLowerCase(); rest = m[2]!; }
@@ -491,6 +512,15 @@ export function describePath(path: string, surface?: string | null): string {
   if (surface === 'engine') for (const [re, phrase] of ENGINE_PATH_GLOSSARY) if (re.test(norm)) return phrase;
   for (const [re, phrase] of PATH_GLOSSARY) if (re.test(norm)) return phrase;
   return humanSegments(norm);
+}
+
+/** Does the glossary have a specific phrase for this path (as opposed to falling back to `humanSegments`)? */
+function pathIsKnown(path: string, surface?: string | null): boolean {
+  const norm = normalizePath(path);
+  if (surface === 'engine') for (const [re] of ENGINE_PATH_GLOSSARY) if (re.test(norm)) return true;
+  for (const [re] of PATH_GLOSSARY) if (re.test(norm)) return true;
+  // Known top-level endpoints: /health, /ready, /app/*, /hub/*.
+  return /^\/(health|ready)$/.test(norm) || /^\/app\//.test(norm) || /^\/hub\//.test(norm);
 }
 
 /** Route → what a POST to it sends ("a message for the application"). */
@@ -592,8 +622,13 @@ function requestText(step: Step): string {
   const who = surface ? SURFACES[surface]! : 'the target';
   const whoShort = surface ? SURFACE_SHORT[surface]! : 'the target';
   const desc = typeof step.description === 'string' ? step.description.trim() : '';
-  const descIsRoute = !desc || /^\/|^(GET|POST|PUT|PATCH|DELETE)\b|^\{\{|^[a-z]+\/[a-z-]+$/.test(desc) || (/^[a-z-]+$/.test(desc) && desc.length < 12);
-  const route = `${method} ${path}`;
+  // Routes/route-ish hints the author put in `description` as a reminder — not plain language. Strip.
+  const descIsRoute = !desc
+    || /^\/|^(GET|POST|PUT|PATCH|DELETE)\b|^\{\{|^[a-z]+\/[a-z-]+$/.test(desc)
+    || /^[a-z]+\s+\/[a-z-]+(?:\/[a-z-]+)*$/i.test(desc) // "portal /health", "api /ready"
+    || /^(portal|api|host|console|hub|service)\b/i.test(desc)
+    || (/^[a-z-]+$/.test(desc) && desc.length < 12);
+  const route = `${method} ${plainMarkers(path)}`;
 
   // Sign-in has its own wording wherever it appears.
   if (/\/session\/login$/.test(path) && method === 'POST') {
@@ -603,8 +638,14 @@ function requestText(step: Step): string {
     return bad ? `Try to sign in to ${whoShort} with ${desc && !descIsRoute ? desc : 'invalid details'} (${route})` : `Sign in to ${whoShort} ${who2} (${route})`;
   }
 
+  // A 404 probe against a path the glossary does not know is almost always
+  // "the test deliberately asks for an unmapped resource" — read as such.
+  const expectCode = Array.isArray(step.expected_status) ? step.expected_status[0] : step.expected_status;
+  const unmapped404 = Number(expectCode) === 404 && !pathIsKnown(path, surface);
+
   let what: string;
-  if (page !== null) what = describePage(page, surface);
+  if (unmapped404) what = `an unmapped path "${path}"`;
+  else if (page !== null) what = describePage(page, surface);
   else what = describePath(path, surface);
 
   let verb: string;
@@ -614,7 +655,8 @@ function requestText(step: Step): string {
   else if (method === 'OPTIONS' || method === 'TRACE') verb = `Send a ${method} request for ${what} to ${whoShort}`;
   else verb = `Send ${describePost(path, surface)} to ${whoShort}`;
 
-  const extra = desc && !descIsRoute && !/^(load screen|load current|load host screen)/i.test(desc) ? ` — ${desc}` : '';
+  const cleanDesc = plainText(desc);
+  const extra = cleanDesc && !descIsRoute && !/^(load screen|load current|load host screen)/i.test(cleanDesc) ? ` — ${cleanDesc}` : '';
   let text = `${verb}${extra} (${route})`;
   if (step.poll) text = `Keep asking until the expected answer appears, for up to ${Math.round((step.poll.timeout_ms ?? 8000) / 1000)} s: ${text[0]!.toLowerCase()}${text.slice(1)}`;
   if (step.precondition) text = `Check the target is ready for this test — ${text[0]!.toLowerCase()}${text.slice(1)}. If not, the test is skipped rather than failed`;
@@ -732,8 +774,9 @@ export interface AppContext {
 
 function surfacesTouched(c: CaseDef): Set<string> {
   const out = new Set<string>();
+  const re = new RegExp(`\\{\\{\\s*(${SURFACE_RE})\\s*\\}\\}`, 'gi');
   const scan = (v: unknown) => {
-    if (typeof v === 'string') for (const m of v.matchAll(/\{\{\s*(api|web|testhub|dbviewer|engine)\s*\}\}/gi)) out.add(m[1]!.toLowerCase());
+    if (typeof v === 'string') for (const m of v.matchAll(re)) out.add(m[1]!.toLowerCase());
     else if (Array.isArray(v)) v.forEach(scan);
     else if (v && typeof v === 'object') Object.values(v as object).forEach(scan);
   };
@@ -862,6 +905,10 @@ export interface ScreenFields {
   common_failure_causes: string;
   triage_status: string;
   assignee: string | null;
+  /** The author's preconditions with surface placeholders resolved. */
+  preconditions: string;
+  /** The author's one-line expected outcome, cleaned up for the reader. */
+  expected_results: string;
   /** Executable steps with the person-facing fields merged in. */
   steps: Array<Step & HumanStep>;
 }
@@ -890,7 +937,7 @@ export function screenFields(c: CaseDef, suite: SuiteDef | undefined, ctx: AppCo
     estimated_duration: deriveDuration(c),
     visibility: c.visibility || 'Team',
     automation_link: c.automationLink || `apps/api/src/catalog/${c.sourceFile || 'sandbench-cases.ts'}#${c.key} (${c.method} runner)`,
-    test_data: c.testData || plainText(c.dataProfile.data),
+    test_data: plainText(c.testData || c.dataProfile.data) || 'None — the request contents and headers are listed on each step.',
     attachments: deriveAttachments(c),
     dependency_ids: c.dependencyIds || [],
     flakiness_notes: triage.flakinessNotes!,
@@ -898,8 +945,38 @@ export function screenFields(c: CaseDef, suite: SuiteDef | undefined, ctx: AppCo
     common_failure_causes: triage.commonFailureCauses!,
     triage_status: triage.triageStatus,
     assignee: triage.assignee,
+    preconditions: plainText(c.preconditions) || defaultPreconditions(c, ctx),
+    expected_results: plainExpected(c.expected, steps),
     steps,
   };
+}
+
+/**
+ * Written-out expected outcome for the detail screen.
+ * Cleans the author's `c.expected` (surface placeholders → words), and falls
+ * back to the last step's expected sentence when the author left it empty.
+ */
+function plainExpected(authorExpected: string | undefined, steps: Array<Step & HumanStep>): string {
+  const own = plainText(authorExpected);
+  if (own && own.trim()) return endDot(cap(own.trim()));
+  const last = steps[steps.length - 1];
+  if (last && last.expected) return endDot(cap(String(last.expected).trim()));
+  return 'The step above completes without error.';
+}
+
+/**
+ * A sentence for cases that forgot to say what must be true before running.
+ * Says who the target is, that it must be reachable, and when sign-in is
+ * needed, that the demo identity must be enabled.
+ */
+function defaultPreconditions(c: CaseDef, ctx: AppContext): string {
+  const touched = Array.from(surfacesTouched(c));
+  const names = touched.map((s) => SURFACE_SHORT[s] || s);
+  const list = names.length ? names.join(', ') : 'the application';
+  const authRequired = c.tags.map((t) => t.toLowerCase()).includes('auth-required') || JSON.stringify(c.steps || []).includes('/session/login');
+  const parts = [`${cap(list)} ${names.length > 1 ? 'are' : 'is'} up and reachable from the worker on ${ctx.defaultEnvironment}`];
+  if (authRequired) parts.push('the demo identity is enabled and its password is the demo password');
+  return cap(parts.join('; ')) + '.';
 }
 
 /* ------------------------------------------------------------------------ */
