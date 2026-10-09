@@ -556,7 +556,10 @@ function toggleNavSection(id){
   renderSideNav();
 }
 function navSection(id,label,items,forceOpen){
-  const col=!forceOpen&&navCollapsedSet().has(id);
+  // On the Home view every section is collapsed by default — the home board
+  // is the point of the landing, the sidebar is just a map of what's inside.
+  const atHome=state.view==='home';
+  const col=atHome||(!forceOpen&&navCollapsedSet().has(id));
   return '<button class="nav-sec'+(col?' collapsed':'')+'" data-sec="'+id+'" aria-expanded="'+(!col)+'"><span class="nav-caret">'+(col?'▸':'▾')+'</span><span class="nav-label">'+esc(label)+'</span></button>'
     +'<div class="nav-group"'+(col?' hidden':'')+'>'+items+'</div>';
 }
@@ -937,6 +940,53 @@ async function loadCoverage(){
     state.coverage={...d,loading:false,error:null};
   }catch(e){state.coverage={loading:false,error:e.message};}
   if(state.view==='catalog-coverage'){renderSideNav();renderCurrentView();}
+}
+// Home view — a board of per-application tiles. Lands here when the user
+// clicks the GAVRIQ logo in the top-left or lands on /catalog/ without a
+// hash. Each tile shows the application's case + run metrics; clicking a
+// tile switches the console context to that application and opens its
+// Overview.
+async function loadApplicationBoard(){
+  if(state.appBoard&&state.appBoard.loading)return;
+  state.appBoard={...(state.appBoard||{}),loading:true};
+  try{
+    const apps=state.applications&&state.applications.length?state.applications:((await api('/api/v1/applications')).data||[]);
+    const perApp=await Promise.all(apps.map(async(a)=>{
+      const [summary,runs]=await Promise.all([
+        api('/api/v1/test-cases/summary?application_key='+encodeURIComponent(a.key)).catch(()=>null),
+        api('/api/v1/ui/runs?application_key='+encodeURIComponent(a.key)+'&limit=1').catch(()=>null),
+      ]);
+      return {app:a, summary:summary||{}, runsTotal:(runs&&runs.total)||0, lastRun:runs&&runs.data&&runs.data[0]||null};
+    }));
+    state.appBoard={rows:perApp,loading:false,loaded:true,error:null};
+  }catch(e){state.appBoard={loading:false,loaded:true,error:e.message};}
+  if(state.view==='home')renderHomeView();
+}
+function renderHomeView(){
+  el('viewTitle').textContent='Home';
+  const b=state.appBoard;
+  if(!b){loadApplicationBoard();el('content').innerHTML=skeletonHtml();return;}
+  if(b.loading&&!b.rows){el('content').innerHTML=skeletonHtml();return;}
+  if(b.error){el('content').innerHTML=`<div class="card empty">Could not load the application board: ${esc(b.error)} <button class="btn" data-action="home-refresh">Retry</button></div>`;return;}
+  const rows=b.rows||[];
+  const total={apps:rows.length,cases:rows.reduce((n,r)=>n+((r.summary&&r.summary.total)||0),0),runs:rows.reduce((n,r)=>n+(r.runsTotal||0),0)};
+  const kpis=`<div class="kpi-grid">${kpi('Applications',total.apps,'onboarded')}${kpi('Test cases',total.cases,'across every application')}${kpi('Test runs',total.runs,'executed so far')}</div>`;
+  const tiles=rows.map(r=>{
+    const s=r.summary||{};
+    const t=s.total||0,p=s.passing||0,f=s.failing||0;
+    const rate=t?Math.round(p/t*100):null;
+    const tone=f?'red':p===t&&t>0?'green':t?'amber':'never';
+    const last=r.lastRun?`Last run ${esc(when(r.lastRun.created_at))} · ${esc(r.lastRun.status||'')}`:'No runs yet';
+    return `<button type="button" class="app-tile tone-${tone}" data-action="home-pick" data-app="${esc(r.app.key)}">
+      <div class="app-tile-head"><div class="app-tile-title">${esc(r.app.name||r.app.key)}</div><div class="app-tile-sub">${esc(r.app.key)}</div></div>
+      <div class="app-tile-kpis"><span><b>${t}</b> cases</span><span><b>${p}</b> passing</span><span><b>${f}</b> failing</span><span><b>${r.runsTotal||0}</b> runs</span></div>
+      <div class="app-tile-foot">${rate!=null?`<span class="chip chip-${tone}">${rate}% passing</span>`:'<span class="muted small">no runs yet</span>'}<span class="muted small">${last}</span></div>
+    </button>`;
+  }).join('')||'<div class="card empty">No applications onboarded yet. Add one in Settings → Applications.</div>';
+  el('content').innerHTML=`<div class="group-head first"><h2>GAVRIQ Test Engine</h2><span class="muted small">Pick an application to open its catalog. ${esc(envName())} is selected · ${plural(total.apps,'application')} onboarded.</span><span style="flex:1"></span><button class="btn" data-action="home-refresh" title="Reload the board">Refresh</button></div>
+    ${kpis}
+    <div class="app-tiles">${tiles}</div>
+    <p class="muted small" style="margin-top:14px">Click an application tile above to switch the console's context to it — the sidebar menus will populate with that application's test cases, suites, and runs.</p>`;
 }
 function renderCoverageView(){
   el('viewTitle').textContent='Catalog coverage · plain-language fields';
@@ -1439,7 +1489,8 @@ function renderCurrentView(){
   state.tiles=new Map();state.charts=new Map();state.panels=new Set();state.section=null;
   state.live=liveCaseState();
   const v=state.view;
-  if(v==='history')renderHistory();
+  if(v==='home')renderHomeView();
+  else if(v==='history')renderHistory();
   else if(v==='run')renderRun();
   else if(v==='builds')renderBuilds();
   else if(v==='case')renderCaseView();
@@ -1640,6 +1691,8 @@ function handleAction(action,node){
   else if(action==='runs-clear-sel'){state.runsSel=new Set();renderCurrentView();}
   else if(action==='runs-delete-selected')deleteSelectedRuns();
   else if(action==='runs-tab'){state.runsTab=node.dataset.tab;renderCurrentView();}
+  else if(action==='home-refresh'){state.appBoard=null;loadApplicationBoard();renderCurrentView();}
+  else if(action==='home-pick'){const key=node.dataset.app;if(key)switchApplication(key);location.hash='#/overview';}
   else if(action==='run-types')runSelectedTypes();
   else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
@@ -2185,8 +2238,8 @@ function renderInfraView(){
 // Routing + wiring (event delegation: bound once, survives re-renders)
 // ---------------------------------------------------------------------------
 function parseHash(){
-  const parts=(location.hash||'#/overview').replace(/^#\/?/,'').split('/').map(p=>p?decodeURIComponent(p):p);
-  const v=parts[0]||'overview',arg=parts[1]||null;
+  const parts=(location.hash||'#/home').replace(/^#\/?/,'').split('/').map(p=>p?decodeURIComponent(p):p);
+  const v=parts[0]||'home',arg=parts[1]||null;
   Object.assign(state,{typeId:null,sitGroupId:null,runId:null,suiteId:null,tile:null,selected:new Set(),rowLimit:ROWS,caseId:null,caseTab:'details',methodName:null,tagName:null,tbMode:null,tbArg:null});
   if(v==='type'&&arg){state.view='type';state.typeId=arg;if(parts[2]==='suite'&&parts[3])state.suiteId=parts[3];}
   // Test bench (testbench.js): #/test-cases[/<id>], #/test-case-form[/new|edit/<id>|clone/<id>], #/test-suites[/<id>], #/test-suite-form
@@ -2198,7 +2251,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage')state.view=v;
+  else if(v==='home'||v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
