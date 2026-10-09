@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query } from '../db/client.js';
+import { currentDeployLoop } from '../deploy-loop.js';
+import { currentCycle } from '../cycle-run.js';
 
 /**
  * Lean read models for the unified console (apps/api/public/catalog).
@@ -218,9 +220,16 @@ export async function uiRoutes(app: FastifyInstance) {
       // The selected environment's stack state (config.deployment: up/down/deploying…) so the console's
       // chip follows a deploy or teardown without reloading the summary.
       envId
-        ? query(`SELECT config->'deployment' AS deployment FROM environments WHERE id = $1::uuid`, [envId])
+        ? query(`SELECT config->'deployment' AS deployment, key FROM environments WHERE id = $1::uuid`, [envId])
         : Promise.resolve({ rows: [] as any[] }),
     ]);
+
+    // Deploy-failure loop for this app+env (if one is open): the console banners
+    // it, so the user sees retries in flight and the parked state at the cap.
+    const envKey = envDeployment.rows[0]?.key as string | undefined;
+    const [deployLoop, cycleRun] = envKey
+      ? await Promise.all([currentDeployLoop(appKey, envKey), currentCycle(appKey, envKey)])
+      : [null, null];
 
     return reply.send({
       data: {
@@ -230,6 +239,8 @@ export async function uiRoutes(app: FastifyInstance) {
         workers: workers.rows,
         changed: changed.rows,
         environment_deployment: envId ? (envDeployment.rows[0]?.deployment ?? null) : undefined,
+        environment_deploy_loop: envId ? deployLoop : undefined,
+        environment_cycle_run: envId ? cycleRun : undefined,
       },
     });
   });
@@ -335,6 +346,10 @@ export async function uiRoutes(app: FastifyInstance) {
     const appKey = q.application_key || 'sand-bench';
     const envId = await resolveEnvironmentId(q.environment_id);
     const status = typeof q.status === 'string' && STATUSES.has(q.status) ? q.status : null;
+    const trigger = typeof q.trigger_source === 'string' && q.trigger_source.trim() ? q.trigger_source.trim() : null;
+    // Application version: stored in executions.metadata.application_version
+    // (e.g. "main", a branch name, or a tag). Empty filter matches any value.
+    const version = typeof q.application_version === 'string' && q.application_version.trim() ? q.application_version.trim() : null;
     const from = parseSince(q.from);
     const to = parseSince(q.to);
     const limit = clampInt(q.limit, 50, 200);
@@ -344,11 +359,13 @@ export async function uiRoutes(app: FastifyInstance) {
     const params: unknown[] = [appKey];
     if (envId) { params.push(envId); clauses.push(`e.environment_id = $${params.length}`); }
     if (status) { params.push(status); clauses.push(`e.status = $${params.length}::execution_status`); }
+    if (trigger) { params.push(trigger); clauses.push(`e.trigger_source = $${params.length}`); }
+    if (version) { params.push(version); clauses.push(`e.metadata->>'application_version' = $${params.length}`); }
     if (from) { params.push(from); clauses.push(`e.created_at >= $${params.length}::timestamptz`); }
     if (to) { params.push(to); clauses.push(`e.created_at <= $${params.length}::timestamptz`); }
     const where = clauses.join(' AND ');
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, facets] = await Promise.all([
       query(
         `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.environment_id,
                 env.name AS environment_name, e.created_at, e.started_at, e.finished_at,
@@ -356,7 +373,8 @@ export async function uiRoutes(app: FastifyInstance) {
                 COALESCE(r.done, 0)::int AS done,
                 COALESCE(r.passed, 0)::int AS passed,
                 COALESCE(r.failed, 0)::int AS failed,
-                COALESCE(app.name, e.metadata->>'application_key') AS application_name
+                COALESCE(app.name, e.metadata->>'application_key') AS application_name,
+                e.metadata->>'application_version' AS application_version
          FROM executions e
          LEFT JOIN environments env ON env.id = e.environment_id
          LEFT JOIN applications app ON app.key = e.metadata->>'application_key'
@@ -372,9 +390,38 @@ export async function uiRoutes(app: FastifyInstance) {
         params
       ),
       query(`SELECT count(*)::int AS c FROM executions e WHERE ${where}`, params),
+      // Facet lists for the filter dropdowns: distinct trigger sources and
+      // application versions seen for this application. Scoped by app only so
+      // the dropdowns do not go empty when the user picks a different status.
+      query(
+        `SELECT array_agg(DISTINCT e.trigger_source) FILTER (WHERE e.trigger_source IS NOT NULL) AS triggers,
+                array_agg(DISTINCT e.metadata->>'application_version') FILTER (WHERE e.metadata ? 'application_version') AS versions
+         FROM executions e WHERE e.metadata->>'application_key' = $1`,
+        [appKey]
+      ),
     ]);
 
-    return reply.send({ data: rows.rows, total: total.rows[0]?.c ?? 0, limit, offset });
+    return reply.send({
+      data: rows.rows,
+      total: total.rows[0]?.c ?? 0,
+      limit, offset,
+      facets: {
+        triggers: facets.rows[0]?.triggers || [],
+        versions: facets.rows[0]?.versions || [],
+      },
+    });
+  });
+
+  // Delete executions in bulk. Hard-delete: execution_results and remarks
+  // cascade; evidence rows are set to NULL. Caller must send a non-empty
+  // {ids: [uuid, ...]} body — refuses an empty list so an accidental
+  // POST with no body does not wipe runs.
+  app.post<{ Body: { ids?: unknown } }>('/api/v1/executions/delete-batch', async (req, reply) => {
+    const raw = Array.isArray((req.body as any)?.ids) ? ((req.body as any).ids as unknown[]) : [];
+    const ids = raw.filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x));
+    if (!ids.length) return reply.code(400).send({ error: 'ids array required (uuids)' });
+    const { rowCount } = await query(`DELETE FROM executions WHERE id = ANY($1::uuid[])`, [ids]);
+    return reply.send({ data: { deleted: rowCount || 0 } });
   });
 
   app.get('/api/v1/ui/build-history', async (req, reply) => {
