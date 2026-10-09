@@ -596,16 +596,21 @@ function renderSideNav(){
     navItem('config-envs',null,'Environments',state.environments.length||null)+
     navItem('config-infra',null,'Infrastructure',null,infraNavDot()),
     ['config-retention','config-apps','config-envs','config-infra'].includes(V));
-  h+=navSection('qa',CAT.qa,
-    tl.filter(t=>t.category==='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join(''));
+  // The engine's own self-test cases are a single body of QC — they verify
+  // the engine itself. Collapse every one of them under Quality control
+  // regardless of their test_type's declared category. Any other application
+  // keeps the usual QA/QC split.
+  const engineOnly=state.appKey==='gavriq-test-engine';
+  const typeItem=t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));};
+  const qaItems=engineOnly?'':tl.filter(t=>t.category==='qa').map(typeItem).join('');
+  const qcTypeItems=engineOnly?tl.map(typeItem).join(''):tl.filter(t=>t.category!=='qa').map(typeItem).join('');
+  if(qaItems)h+=navSection('qa',CAT.qa,qaItems);
   // SIT console lives under Quality control. The entries are always shown — an empty list
   // when nothing is seeded is fine; the entry explains what is here.
   const sitAllN=sitCases().length;
   const sitItems=navItem('sit-all',null,'All SIT cases',sitAllN||null,sitAllN?'blue':null,'active-sit')+
     SIT_GROUPS.map(g=>{const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];return navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}).join('');
-  h+=navSection('qc',CAT.qc,
-    tl.filter(t=>t.category!=='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join('')+sitItems,
-    V==='sit'||V==='sit-all');
+  h+=navSection('qc',CAT.qc,qcTypeItems+sitItems,V==='sit'||V==='sit-all');
   if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+=navSection('baseline','Selenium Baseline',navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl)),V==='baseline');}
   el('sideNav').innerHTML=h;
 }
@@ -619,11 +624,17 @@ function overviewGroups(){
   if(other.length)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:other,href:'#/type/other'});
   const groups=[];
   if(sitCases().length)groups.push({title:'SIT console',sub:'Post-deploy packs by area',tiles:SIT_GROUPS.map(g=>({key:'sit:'+g.id,title:g.title,sub:g.summary,cases:(state.idx&&state.idx.sitGroupCases.get(g.id))||[],href:'#/sit/'+g.id,accent:'sit'}))});
-  groups.push(
-    {title:CAT.qa,tiles:tl.filter(t=>t.category==='qa').map(typeTile)},
-    {title:CAT.qc,tiles:tl.filter(t=>t.category!=='qa').map(typeTile)},
-    {title:'Baselines & builds',tiles:more},
-  );
+  // Engine self-test cases all sit under QC on the Overview tile board, same as the sidebar.
+  const engineOnly=state.appKey==='gavriq-test-engine';
+  if(engineOnly){
+    groups.push({title:CAT.qc,sub:'Engine self-tests',tiles:tl.map(typeTile)});
+  }else{
+    groups.push(
+      {title:CAT.qa,tiles:tl.filter(t=>t.category==='qa').map(typeTile)},
+      {title:CAT.qc,tiles:tl.filter(t=>t.category!=='qa').map(typeTile)},
+    );
+  }
+  groups.push({title:'Baselines & builds',tiles:more});
   return groups;
 }
 function overviewTabsHtml(live){
