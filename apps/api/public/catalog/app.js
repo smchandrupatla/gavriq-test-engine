@@ -588,16 +588,16 @@ function renderSideNav(){
     navItem('config-envs',null,'Environments',state.environments.length||null)+
     navItem('config-infra',null,'Infrastructure',null,infraNavDot()),
     ['config-retention','config-apps','config-envs','config-infra'].includes(V));
-  if(sitCases().length){
-    h+=navSection('sit','SIT console',
-      navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit')+
-      SIT_GROUPS.map(g=>{const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];return navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}).join(''),
-      V==='sit'||V==='sit-all');
-  }
   h+=navSection('qa',CAT.qa,
     tl.filter(t=>t.category==='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join(''));
+  // SIT console lives under Quality control. The entries are always shown — an empty list
+  // when nothing is seeded is fine; the entry explains what is here.
+  const sitAllN=sitCases().length;
+  const sitItems=navItem('sit-all',null,'All SIT cases',sitAllN||null,sitAllN?'blue':null,'active-sit')+
+    SIT_GROUPS.map(g=>{const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];return navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}).join('');
   h+=navSection('qc',CAT.qc,
-    tl.filter(t=>t.category!=='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join(''));
+    tl.filter(t=>t.category!=='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join('')+sitItems,
+    V==='sit'||V==='sit-all');
   if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+=navSection('baseline','Selenium Baseline',navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl)),V==='baseline');}
   el('sideNav').innerHTML=h;
 }
