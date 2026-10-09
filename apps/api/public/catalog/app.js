@@ -60,6 +60,10 @@ const state={
   run:null,buildRows:null,
   // Deploy to the selected environment: null until triggered, then polled to a terminal status (and through its teardown).
   deploy:null,deployMode:'deploy_run_teardown',
+  // Deploy, run, tear down — repeated N times. Comes from /api/v1/ui/live and survives refresh.
+  cycleRun:null,cycleIterations:3,
+  // Deploy-failure loop for the selected app+env (null when quiet). Comes from /api/v1/ui/live.
+  deployLoop:null,
   // Configuration · Infrastructure (managed Docker stacks, lifecycle policy, jobs)
   infra:null,infraSig:'',infraOpenJob:null,
   // Configuration · Applications / Environments maintenance pages
@@ -72,6 +76,8 @@ const state={
   methodName:null,tagName:null,
   // Configuration page (run retention)
   settings:null,
+  // Catalog coverage audit (plain-language fields missing/thin): populated by loadCoverage.
+  coverage:null,
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
   runsFilter:{environment_id:'',status:'',from:'',to:''},
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
@@ -229,6 +235,26 @@ async function applyLive(d){
   let dirty=false;
   // The selected environment's stack state (up/down/deploying…) rides along with the live poll.
   if(d.environment_deployment!==undefined){const env=currentEnv();if(env&&JSON.stringify(env.deployment||null)!==JSON.stringify(d.environment_deployment)){env.deployment=d.environment_deployment;renderEnvSelect();dirty=true;}}
+  // Deploy-failure loop for this app+env (null when quiet): drives the banner so the operator
+  // sees retries in flight and the parked state once the cap is reached.
+  if(d.environment_deploy_loop!==undefined){
+    const prev=state.deployLoop;const next=d.environment_deploy_loop||null;
+    if(JSON.stringify(prev||null)!==JSON.stringify(next)){state.deployLoop=next;renderBanner();dirty=true;}
+  }
+  // Cycle run (deploy, run, tear down — repeated N times) for this app+env.
+  if(d.environment_cycle_run!==undefined){
+    const prev=state.cycleRun;const next=d.environment_cycle_run||null;
+    if(JSON.stringify(prev||null)!==JSON.stringify(next)){
+      state.cycleRun=next;
+      // When a cycle just completed/failed/cancelled, pick up the latest deployment so stages reflect it.
+      if(prev&&prev.status==='running'&&next&&next.status!=='running')loadActiveDeployment();
+      // When a new iteration begins (deployment id changed) pull the new deployment in.
+      if(prev&&next&&prev.current_deployment_id!==next.current_deployment_id)loadActiveDeployment();
+      // Clean-cycle preparation just completed → iteration 1's deploy has started: pick it up.
+      if(prev&&next&&prev.preparation_phase&&!next.preparation_phase)loadActiveDeployment();
+      renderBanner();dirty=true;
+    }
+  }
   if(state.view==='config-infra')loadInfra(true);
   for(const r of d.changed||[]){
     const c=state.idx&&state.idx.caseById.get(r.test_case_id);
@@ -508,38 +534,71 @@ function navItem(view,id,label,count,dot,cls){
   return '<button class="nav-item '+(active?(cls||'active'):'')+'" data-view="'+view+'" data-id="'+esc(id||'')+'">'+(dot!=null?'<span class="nav-dot '+dot+'"></span>':'')+'<span class="nav-label">'+esc(label)+'</span>'+(count!=null?'<span class="nav-count">'+count+'</span>':'')+'</button>';
 }
 const toneDot=cases=>TONES[tileStats({cases}).tone].dot;
+// Collapsible left-nav sections. The long test-type lists start collapsed so the menu is short;
+// the user's open/closed choices are remembered. A section with the active view is forced open.
+const NAV_LS='te_nav_collapsed';
+let navCollapsed=null;
+function navCollapsedSet(){
+  if(navCollapsed)return navCollapsed;
+  try{const s=JSON.parse(localStorage.getItem(NAV_LS)||'null');navCollapsed=new Set(Array.isArray(s)?s:['qa','qc','sit','baseline']);}
+  catch(e){navCollapsed=new Set(['qa','qc','sit','baseline']);}
+  return navCollapsed;
+}
+function toggleNavSection(id){
+  const s=navCollapsedSet();
+  if(s.has(id))s.delete(id);else s.add(id);
+  try{localStorage.setItem(NAV_LS,JSON.stringify([...s]));}catch(e){}
+  renderSideNav();
+}
+function navSection(id,label,items,forceOpen){
+  const col=!forceOpen&&navCollapsedSet().has(id);
+  return '<button class="nav-sec'+(col?' collapsed':'')+'" data-sec="'+id+'" aria-expanded="'+(!col)+'"><span class="nav-caret">'+(col?'▸':'▾')+'</span><span class="nav-label">'+esc(label)+'</span></button>'
+    +'<div class="nav-group"'+(col?' hidden':'')+'>'+items+'</div>';
+}
 function renderSideNav(){
   const tl=typeList();
   const live=activeRuns().filter(e=>!isStalled(e)).length;
-  let h='<div class="nav-section">Workspace</div>';
-  h+=navItem('overview',null,'Overview');
-  h+=navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null);
-  // Test bench: the Test cases / Test suites screens in the Sand Bench representation (testbench.js)
-  h+='<div class="nav-section">Test bench</div>';
-  h+=navItem('test-cases',null,'Test cases',state.cases.length||null);
-  h+=navItem('test-case-form',null,'New test case');
-  h+=navItem('test-suites',null,'Test suites',state.suites.length||null);
-  h+=navItem('test-suite-form',null,'New test suite');
-  h+='<div class="nav-section">Builds &amp; planning</div>';
-  h+=navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot);
-  h+=navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null);
-  h+=navItem('reports',null,'Reports');
-  h+=navItem('insights',null,'Quality insights');
-  h+='<div class="nav-section">Configuration</div>';
-  h+=navItem('config-retention',null,'Run retention');
-  h+=navItem('config-apps',null,'Applications',state.applications.length||null);
-  h+=navItem('config-envs',null,'Environments',state.environments.length||null);
-  h+=navItem('config-infra',null,'Infrastructure',null,infraNavDot());
+  const V=state.view;
+  // Tests: everything about test content (cases, suites, coverage).
+  // "New test case" is now a + New button on the Test cases page.
+  let h=navSection('tests','Tests',
+    navItem('test-cases',null,'Test cases',state.cases.length||null)+
+    navItem('test-suites',null,'Test suites',state.suites.length||null)+
+    navItem('test-suite-form',null,'New test suite')+
+    navItem('catalog-coverage',null,'Catalog coverage',state.coverage?state.coverage.with_findings||null:null,state.coverage&&state.coverage.by_severity.high?'red':state.coverage&&state.coverage.by_severity.medium?'amber':null),
+    ['test-cases','test-case-form','test-suites','test-suite-form','catalog-coverage'].includes(V));
+  // Runs: everything about running cases (overview, history, schedules, builds).
+  h+=navSection('runs','Runs',
+    navItem('overview',null,'Overview')+
+    navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null)+
+    navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null)+
+    navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot),
+    ['overview','history','run','schedules','builds'].includes(V));
+  // Reports: reports, insights and the defect log (defects are the engine's "findings" report).
+  h+=navSection('reports','Reports',
+    navItem('reports',null,'Reports')+
+    navItem('insights',null,'Quality insights')+
+    '<a class="nav-item" href="/defect-log" style="text-decoration:none"><span class="nav-label">Defect log</span></a>'+
+    '<a class="nav-item" href="/defect-log#dashboard" style="text-decoration:none"><span class="nav-label">Defect dashboard</span></a>',
+    ['reports','insights'].includes(V));
+  // Settings: retention, applications, environments, infrastructure.
+  h+=navSection('settings','Settings',
+    navItem('config-retention',null,'Run retention')+
+    navItem('config-apps',null,'Applications',state.applications.length||null)+
+    navItem('config-envs',null,'Environments',state.environments.length||null)+
+    navItem('config-infra',null,'Infrastructure',null,infraNavDot()),
+    ['config-retention','config-apps','config-envs','config-infra'].includes(V));
   if(sitCases().length){
-    h+='<div class="nav-section">SIT console</div>';
-    h+=navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit');
-    for(const g of SIT_GROUPS){const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];h+=navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}
+    h+=navSection('sit','SIT console',
+      navItem('sit-all',null,'All SIT cases',sitCases().length,'blue','active-sit')+
+      SIT_GROUPS.map(g=>{const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];return navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}).join(''),
+      V==='sit'||V==='sit-all');
   }
-  h+='<div class="nav-section">'+CAT.qa+'</div>';
-  for(const t of tl.filter(t=>t.category==='qa')){const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,toneDot(cs));}
-  h+='<div class="nav-section">'+CAT.qc+'</div>';
-  for(const t of tl.filter(t=>t.category!=='qa')){const cs=casesForType(t.id);h+=navItem('type',t.id,t.title,cs.length,toneDot(cs));}
-  if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+='<div class="nav-section">Selenium Baseline</div>';h+=navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl));}
+  h+=navSection('qa',CAT.qa,
+    tl.filter(t=>t.category==='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join(''));
+  h+=navSection('qc',CAT.qc,
+    tl.filter(t=>t.category!=='qa').map(t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));}).join(''));
+  if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+=navSection('baseline','Selenium Baseline',navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl)),V==='baseline');}
   el('sideNav').innerHTML=h;
 }
 function overviewGroups(){
@@ -564,15 +623,47 @@ function overviewTabsHtml(live){
   const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="overview-tab" data-tab="${id}">${label}</button>`;
   return `<div class="tabs" style="margin-bottom:16px">${t('summary','Summary')}${t('running','Running now'+(live.length?' ('+live.length+')':''))}${t('types','Run by test type')}</div>`;
 }
+// Deploy actions bar + current deployment progress — shared across every
+// overview tab (summary, running, types) so the user never loses sight of the
+// current deploy→run→teardown stage, whichever tab they are on. Clicking a
+// stage opens its live log or per-case progress right under the bar.
+function overviewActionsAndStatusHtml({runAllCount}={}){
+  const all=runAllCount==null?tileStats({cases:state.cases}).total:runAllCount;
+  const live=activeRuns();
+  const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
+  const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null,ref=(managed&&env.infra.default_ref)||'main';
+  const mode=state.deployMode||'deploy_run_teardown';
+  const opt=(v,l,t)=>`<option value="${v}"${mode===v?' selected':''} title="${esc(t)}">${l}</option>`;
+  const tearBtn=managed&&(stackSt==='up'||stackSt==='failed'||stackSt==='unknown')?`<button class="btn" data-action="infra-teardown" data-id="${esc(env.id)}" data-name="${esc(env.name||env.key)}" data-active="${live.length}" title="Take the Docker stack down now — it is deployed again on the next deploy or run">⏏ Tear down</button>`:'';
+  const cyc=state.cycleRun&&state.cycleRun.status==='running';
+  const cancelBtn=live.length?`<button class="btn" data-action="cancel-all-runs" title="Cancel every run in progress for ${esc(appName)} on ${esc(envName())}">⏹ Cancel runs (${live.length})</button>`:'';
+  const iters=Math.max(1,Math.min(100,state.cycleIterations||3));
+  const isLoop=mode==='deploy_run_teardown_loop'||mode==='clean_cycle';
+  const iterInput=isLoop||cyc?`<label class="muted small" style="display:inline-flex;align-items:center;gap:4px">× <input type="number" id="cycleIterations" min="1" max="100" value="${iters}" style="width:56px" aria-label="iterations" title="How many deploy → run → tear down cycles"${cyc?' disabled':''}></label>`:'';
+  const deployBtnLabel=mode==='clean_cycle'?`▶ Clean cycle (${iters}×)`
+    :mode==='deploy_run_teardown_loop'?`▶ Start cycle (${iters}×)`
+    :`⇪ Deploy ${esc(ref)}`;
+  const deployBtnTitle=mode==='clean_cycle'
+    ?`Tear down whatever is there, prune Docker (dangling images, old build cache, stopped containers), then deploy ${esc(ref)} (with every dependency the compose stack brings up), run everything, tear down — repeat ${iters} times`
+    :mode==='deploy_run_teardown_loop'
+    ?`Deploy ${esc(ref)}, run everything, tear down — repeat ${iters} times (cancel any time)`
+    :`Deploy ${esc(ref)} to the selected environment`;
+  const head=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment${managed?'. A stack that is down is deployed first and torn down after the run':''}">▶ Run everything (${all})</button><button class="btn" data-action="schedule" data-what="all"${all?'':' disabled'}>Schedule…</button>${cancelBtn}<select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds"${cyc?' disabled':''}>${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_run_teardown_loop','Loop: deploy, run, tear down ×N','Deploy, run everything, tear down — then repeat the whole thing N times. Cancel any time.')}${opt('clean_cycle','Clean cycle: teardown + prune, then deploy–run–teardown ×N','Starts clean: tears down whatever is up, prunes Docker (stopped containers, dangling images, build cache), then runs the normal deploy–run–teardown ×N. Dependencies (Kafka, MQ, portals, …) come up as part of the compose deploy.')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select>${iterInput}<button class="btn" data-action="deploy-main"${state.envId&&!cyc?'':' disabled'} title="${esc(deployBtnTitle)}">${deployBtnLabel}</button>${tearBtn}</div></div>`;
+  return head+cycleRunHtml()+deployStatusHtml();
+}
 function renderOverview(){
   el('viewTitle').textContent='Overview';
   if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
   const tab=state.overviewTab||'summary';
   const live=activeRuns();
   let h=overviewTabsHtml(live);
+  // Shared across every tab: the deploy actions + deploy progress bar — so
+  // the deploy→run→teardown stages stay in sight on Running now and Run by
+  // test type too, with the same clickable per-stage detail.
+  h+=overviewActionsAndStatusHtml();
   if(tab==='running'){
     h+=live.length
-      ?`<div class="hp-actions" style="margin-bottom:12px"><button class="btn" data-action="cancel-all-runs">Cancel all (${live.length})</button></div><div class="live-board">${live.map(liveCardHtml).join('')}</div>`
+      ?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`
       :'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
   }else if(tab==='types'){
     h+=typeRunSelectorHtml();
@@ -580,13 +671,6 @@ function renderOverview(){
     const all=tileStats({cases:state.cases});
     const hot=live.filter(e=>!isStalled(e)).length;
     const b=state.build;
-    const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
-    const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null,ref=(managed&&env.infra.default_ref)||'main';
-    const mode=state.deployMode||'deploy_run_teardown';
-    const opt=(v,l,t)=>`<option value="${v}"${mode===v?' selected':''} title="${esc(t)}">${l}</option>`;
-    const tearBtn=managed&&(stackSt==='up'||stackSt==='failed'||stackSt==='unknown')?`<button class="btn" data-action="infra-teardown" data-id="${esc(env.id)}" data-name="${esc(env.name||env.key)}" data-active="${activeRuns().length}" title="Take the Docker stack down now — it is deployed again on the next deploy or run">⏏ Tear down</button>`:'';
-    h+=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions"><button class="btn primary" data-action="run-all"${all.total?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment${managed?'. A stack that is down is deployed first and torn down after the run':''}">▶ Run everything (${all.total})</button><button class="btn" data-action="schedule" data-what="all"${all.total?'':' disabled'}>Schedule…</button><select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds">${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select><button class="btn" data-action="deploy-main"${state.envId?'':' disabled'} title="Deploy ${esc(ref)} to the selected environment">⇪ Deploy ${esc(ref)}</button>${tearBtn}</div></div>`;
-    h+=deployStatusHtml();
     h+='<div class="kpi-grid">'+
       kpi('All cases',all.total,'in repository')+
       kpi('Passing',all.passed,'latest result passed',all.passed?'green':'')+
@@ -769,7 +853,7 @@ function renderCaseView(){
       <dt>Method</dt><dd>${c.execution_method?`<a href="#/method/${encodeURIComponent(c.execution_method)}">${esc(c.execution_method)}</a>`:'—'}</dd>
       <dt>Suites</dt><dd>${suites.map(s=>`<a class="tag" href="${esc(suiteHref(s))}">${esc(s.name)}</a>`).join(' ')||'—'}</dd>
     </dl><div class="run-case-bar"><select id="runCaseEnv" aria-label="Environment to run in">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===state.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select><button class="btn primary" data-action="run-case" data-id="${esc(c.id)}" data-label="${esc(c.key)}"${c.execution_method==='manual'?' disabled title="A manual case is run by hand: record the outcome as a note"':''}>Run this case</button><button class="btn" data-action="schedule" data-what="case" data-key="${esc(c.key)}">Schedule…</button><button class="btn" data-action="report-case" data-key="${esc(c.key)}">Report…</button></div></div>
-    ${TB.caseBodyHtml({...c,suites:c.suites||suites},{runs:(extras&&extras.runs)||null})}`;
+    ${TB.caseBodyHtml({...c,suites:c.suites||suites},{runs:(extras&&extras.runs)||null,defects:extras?extras.defects:null})}`;
   }
   el('content').innerHTML=`<div class="card">${head}${tabs}${body}</div>`;
 }
@@ -784,6 +868,33 @@ function renderTagView(name){
   if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
   const cases=state.cases.filter(c=>(c.tags||[]).includes(name));
   el('content').innerHTML=caseSectionHtml({title:'#'+name,cases,label:name});
+}
+// Catalog coverage: an audit of every active case against the plain-language fields
+// (objective, preconditions, steps, expected result, test data) — so the operator can
+// see at a glance which cases need more detail.
+async function loadCoverage(){
+  if(state.coverage&&state.coverage.loading)return;
+  state.coverage={...(state.coverage||{}),loading:true};
+  try{
+    const d=(await api('/api/v1/test-cases/coverage?application_key='+encodeURIComponent(state.appKey||'sand-bench'))).data||{};
+    state.coverage={...d,loading:false,error:null};
+  }catch(e){state.coverage={loading:false,error:e.message};}
+  if(state.view==='catalog-coverage'){renderSideNav();renderCurrentView();}
+}
+function renderCoverageView(){
+  el('viewTitle').textContent='Catalog coverage · plain-language fields';
+  const c=state.coverage;
+  if(!c){loadCoverage();el('content').innerHTML=skeletonHtml();return;}
+  if(c.loading&&!c.findings){el('content').innerHTML=skeletonHtml();return;}
+  if(c.error){el('content').innerHTML=`<div class="card empty">Could not load coverage: ${esc(c.error)}</div>`;return;}
+  const sev=(f)=>f.severity==='high'?'red':f.severity==='medium'?'amber':'';
+  const rows=(c.findings||[]).map(f=>{
+    const miss=f.missing.length?`<span class="chip chip-fail">missing: ${esc(f.missing.join(', '))}</span>`:'';
+    const thin=f.thin.length?`<span class="chip chip-warn">thin: ${esc(f.thin.join(', '))}</span>`:'';
+    return `<tr><td><a href="#/case/${esc(f.case_id)}">${esc(f.case_key)}</a></td><td>${esc(f.name)}</td><td class="muted small">${esc(f.application)} · ${esc(f.test_type)}</td><td>${miss} ${thin}</td><td><span class="chip chip-${sev(f)||'idle'}">${esc(f.severity)}</span></td></tr>`;
+  }).join('')||'<tr><td colspan="5" class="empty">Every active case passes the plain-language audit.</td></tr>';
+  const sum=`<div class="kpi-grid">${kpi('Cases audited',c.total,'active cases')}${kpi('Clean',c.clean,'all plain-language fields present',c.clean?'green':'')}${kpi('With findings',c.with_findings,'need review',c.with_findings?'amber':'')}${kpi('High severity',c.by_severity.high,'missing two or more of objective / steps / expected',c.by_severity.high?'red':'')}</div>`;
+  el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Catalog coverage</h2><button class="btn" data-action="coverage-refresh">Refresh</button></div><div class="hp-body"><p class="muted small">Every active case is checked for the plain-language fields the Test cases screen expects: <b>Objective</b> (≥ ${esc(c.min_objective_chars)} characters), <b>Preconditions</b>, <b>Steps</b>, <b>Expected result</b>, and <b>Test data</b> (either <code>test_data</code> or <code>test_data_ref</code>). Script-driven cases skip the steps check — their steps live in the automation script. Click a case key to open it and fill in the gaps.</p>${sum}<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Case</th><th>Name</th><th>Application · Type</th><th>Findings</th><th>Severity</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
 }
 function renderConfigView(){
   el('viewTitle').textContent='Configuration · Run retention';
@@ -1259,6 +1370,7 @@ function renderCurrentView(){
   else if(v==='config-apps')renderConfigAppsView();
   else if(v==='config-envs')renderConfigEnvsView();
   else if(v==='config-infra')renderInfraView();
+  else if(v==='catalog-coverage')renderCoverageView();
   else if(v==='test-cases'||v==='test-case-form'||v==='test-suites'||v==='test-suite-form')TB.render(v);   // testbench.js
   else if(v==='schedules')renderSchedulesView();
   else if(v==='reports')renderReportsView();
@@ -1274,7 +1386,38 @@ function renderWorkerPill(){const live=state.workers.filter(workerFresh).length;
 function renderBanner(){
   if(state.loaded&&!state.cases.length)return banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');
   if(state.liveLoaded&&!state.workers.some(workerFresh))return banner('No live worker (no heartbeat in the last 90s) — queued runs will wait until one connects.');
+  const dl=state.deployLoop;
+  if(dl){
+    const envName=dl.environment_name||dl.environment_key;
+    if(dl.parked){
+      const err=dl.last_error?' Last error: '+String(dl.last_error).slice(0,180):'';
+      return banner('Deploy to '+envName+' failed '+dl.retry_count+' times (cap '+dl.retry_cap+'). The loop is paused for offline investigation. Open '+dl.report_key+' for the full timeline.'+err);
+    }
+    const left=dl.attempts_remaining;const n=dl.retry_count;
+    return banner('Deploy to '+envName+' is failing: '+n+' failed attempt'+(n===1?'':'s')+' handed to the implementation manager (report '+dl.report_key+'). '+left+' retry'+(left===1?'':'ies')+' left before the loop is parked.');
+  }
   banner(null);
+}
+// Cycle run status banner (its own strip, so the stage bar stays visible).
+function cycleRunHtml(){
+  const c=state.cycleRun;if(!c)return'';
+  const total=c.iterations_total,done=c.iterations_done;
+  const envLabel=c.environment_name||c.environment_key||envName();
+  if(c.status==='running'){
+    const i=Math.min(total,done+1);
+    const prep=c.preparation_phase;
+    const phase=prep==='tearing_down'?`Preparation 1/2: tearing the stack down`
+      :prep==='pruning'?`Preparation 2/2: pruning Docker (stopped containers, dangling images, build cache)`
+      :prep==='ready'?`Preparation complete — queuing iteration 1`
+      :`Iteration ${i} of ${total} in flight · ${done} completed`;
+    const cleanTag=c.clean_start?' <span class="chip">Clean cycle</span>':'';
+    return `<div class="banner" style="margin:0 0 12px;background:var(--amber-50,#fff7ed);border-color:var(--amber,#e0a826)">Cycle ${esc(c.key)} on ${esc(envLabel)}${cleanTag}: ${esc(phase)}. <button class="btn" data-action="cancel-cycle" data-id="${esc(c.id)}">Cancel cycle</button></div>`;
+  }
+  if(c.status==='completed')return `<div class="banner" style="margin:0 0 12px;background:var(--green-50,#ecfdf5);border-color:var(--green,#17a673)">Cycle ${esc(c.key)} completed: ${total} iteration${total===1?'':'s'} finished on ${esc(envLabel)}.</div>`;
+  if(c.status==='failed'){const err=c.last_error?' — '+esc(String(c.last_error).slice(0,180)):'';
+    return `<div class="banner" style="margin:0 0 12px;background:var(--red-50,#fef2f2);border-color:var(--red,#d64545)">Cycle ${esc(c.key)} failed at iteration ${done+1} of ${total}${err}</div>`;}
+  if(c.status==='cancelled')return `<div class="banner" style="margin:0 0 12px">Cycle ${esc(c.key)} cancelled after ${done} of ${total} iterations.</div>`;
+  return '';
 }
 function renderEnvSelect(){
   if(!state.envId||!state.environments.some(e=>e.id===state.envId)){
@@ -1298,7 +1441,9 @@ async function switchEnvironment(id){
   // environment (or "all") while every other view has already moved on.
   Object.assign(state,{since:null,selected:new Set(),runsFilter:{environment_id:state.envId||'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false}});
   state.history.clear();
+  state.deploy=null;state.deployStage=null;state.deployRun=null;state.deployLoop=null;state.cycleRun=null;
   await refreshAll();
+  loadActiveDeployment();
 }
 function renderAppSelect(){
   const sel=el('appSelect');if(!sel)return;
@@ -1311,7 +1456,8 @@ async function switchApplication(key){
   // Full reset of app-scoped view state, including the environment: each application has its own targets.
   Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
     schedFormOpen:false,report:{data:null,loading:false,error:null,busy:''},
-    reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false}});
+    reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
+    cycleRun:null,deployLoop:null});
   state.history.clear();
   location.hash='#/overview';
   renderSideNav();renderCurrentView();
@@ -1412,7 +1558,10 @@ function handleAction(action,node){
   else if(action==='report-download')downloadReport(node.dataset.format);
   else if(action==='report-case'){state.reportForm={...state.reportForm,title:'',appScope:'current',kind:'case',caseText:node.dataset.key,caseKeys:[],runSel:'date_range',from:'',to:'',status:'all',details:true,evidence:true};state.report={data:null,loading:false,error:null,busy:''};location.hash='#/reports';}
   else if(action==='cancel-all-runs')cancelAllRuns(node);
+  else if(action==='cancel-cycle')cancelCycleRun(node.dataset.id,node);
+  else if(action==='coverage-refresh'){state.coverage=null;loadCoverage();renderCurrentView();}
   else if(action==='deploy-main')deployMain(node);
+  else if(action==='deploy-stage'){state.deployStage=state.deployStage===node.dataset.stage?null:node.dataset.stage;renderCurrentView();}
   else if(action==='app-new'){state.appFormOpen=!state.appFormOpen;if(state.appFormOpen)state.appForm={key:'',name:'',description:'',status:'active'};renderCurrentView();}
   else if(action==='app-save')saveApplication(node);
   else if(action==='env-new'){if(state.envFormOpen){state.envFormOpen=false;renderCurrentView();}else openEnvForm(null);}
@@ -1547,35 +1696,148 @@ async function runEverything(btn){
 
 // Deploy to the selected environment, then optionally run once it succeeds and tear the stack down after that run.
 let deployPollTimer=null;
+// The staged progress of a deploy→run→teardown request, shown on the overview. Each stage is a
+// colour-coded segment; clicking one opens its live log (deploy/teardown) or per-case run progress.
+// What the engine's cancel rules currently say about this run_group: a short
+// chip row the user can glance at to know whether the rolling fail-rate guard
+// is quiet, close to tripping, or has fired. Driven by state.settings and the
+// run_group's live totals in state.deployRun.
+function rollingFailRuleHtml(sum){
+  const s=state.settings||{};
+  const enabled=s.rolling_fail_cancel_enabled!==false;
+  const window=Number(s.rolling_fail_cancel_window)||20;
+  const threshold=Number(s.rolling_fail_cancel_threshold_pct)||50;
+  const consec=Number(s.consecutive_failure_limit)||20;
+  const t=(sum&&sum.totals)||{};
+  const reported=Number(t.reported)||0;
+  const failed=Number(t.failed)||0;
+  const inconc=Number(t.inconclusive)||0;
+  const failRate=reported?Math.round(((failed+inconc)/reported)*100):0;
+  const belowWindow=reported<window;
+  const tripped=enabled&&!belowWindow&&failRate>threshold;
+  // Chip tones follow the standard pass/warn/fail palette.
+  const rollingTone=!enabled?'muted':tripped?'fail':failRate>=Math.max(10,threshold-10)?'warn':'pass';
+  const rollingLabel=!enabled?'disabled':tripped?`tripped — ${failed+inconc}/${reported} failing (${failRate}% > ${threshold}%)`
+    :belowWindow?`armed · ${reported}/${window} reported so far (${failRate}% failing)`
+    :`still good · ${failRate}% failing of last ${reported} (threshold ${threshold}%)`;
+  return `<div class="pbar-rules" title="Rules that cancel the run before every suite has finished">
+    <div class="rule-title">Cancel rules</div>
+    <div class="rule-chips">
+      <span class="rule-chip rule-${rollingTone}"><b>Rolling fail rate</b><span>${esc(rollingLabel)}</span></span>
+      <span class="rule-chip rule-muted"><b>Consecutive failures</b><span>cancel at ${consec} in a row</span></span>
+    </div>
+  </div>`;
+}
+function deployStages(d){
+  const stages=[];
+  const dep = d.status==='failed' ? {tone:'fail',state:'failed',label:'Deploy failed'}
+    : d.status==='succeeded' ? {tone:'pass',state:'done',label:'Deployed'+(d.commit?' '+String(d.commit).slice(0,8):'')}
+    : d.status==='deploying' ? {tone:'warn',state:'active',label:'Deploying '+(d.ref||'main')+'…'}
+    : {tone:'',state:'pending',label:d.agent_online===false?'Waiting for an infra agent':'Queued for the infra agent…'};
+  stages.push({key:'deploy',name:'Deploy',...dep});
+
+  if(d.mode==='deploy_and_run'){
+    const live=activeRuns().find(e=>e.id===d.run_id);
+    const sum=state.deployRun&&state.deployRun.run_id===d.run_id?state.deployRun:null;
+    let run;
+    if(d.status==='failed') run={tone:'',state:'pending',label:'Not started — deploy failed'};
+    else if(d.status!=='succeeded') run={tone:'',state:'pending',label:'Waiting for deploy'};
+    else if(!d.run_id) run={tone:'fail',state:'failed',label:'No run was queued'};
+    else if(live){
+      const total=Math.max(live.total||0,live.done||0);
+      const pct=total?Math.round((live.done||0)/total*100):0;
+      const cur=live.current_case_id&&state.idx&&state.idx.caseById.get(live.current_case_id);
+      const suite=live.test_suite_id&&state.idx&&state.idx.suiteById.get(live.test_suite_id);
+      const elapsed=live.started_at?dur(serverNow()-ms(live.started_at)):null;
+      // "Running — <suite> · case X/Y · <elapsed> · <current case>"
+      const parts=[];
+      if(suite)parts.push(esc(suite.name||suite.key));
+      parts.push(`case ${live.done||0}/${total}`);
+      if(elapsed)parts.push(elapsed);
+      if(cur)parts.push(esc(cur.name));
+      run={tone:'warn',state:'active',pct,label:'Running — '+parts.join(' · ')};
+    }
+    else if(sum){const t=sum.totals||{};const failed=(t.failed||0)+(t.inconclusive||0);run=failed?{tone:'fail',state:'done',label:`Ran ${t.reported||0}/${t.cases||0} · ${failed} failed`}:{tone:'pass',state:'done',label:`Ran ${t.reported||0}/${t.cases||0} · all passed`};}
+    else run={tone:'warn',state:'active',label:'Run queued…'};
+    stages.push({key:'run',name:'Run',...run});
+  }
+
+  if(d.teardown_after_run){
+    const td=d.teardown;
+    let tear;
+    if(d.status!=='succeeded') tear={tone:'',state:'pending',label:'Waiting'};
+    else if(!td) tear={tone:'',state:'pending',label:'Tears down after the run'};
+    else if(td.status==='queued'||td.status==='running') tear={tone:'warn',state:'active',label:'Tearing down…'};
+    else if(td.status==='succeeded') tear={tone:'pass',state:'done',label:'Torn down'};
+    else tear={tone:'fail',state:'failed',label:'Teardown '+td.status};
+    stages.push({key:'teardown',name:'Tear down',...tear});
+  }
+  return stages;
+}
+function deployStageDetail(d,key,stages){
+  const s=stages.find(x=>x.key===key);if(!s)return'';
+  let body='';
+  if(key==='deploy'){
+    const log=d.job&&d.job.log_tail?esc(String(d.job.log_tail).trim()):'';
+    body=(d.error?`<div class="small" style="color:var(--red)">${esc(d.error)}</div>`:'')+(log?`<pre class="pbar-log">${log}</pre>`:'<span class="muted small">No deploy log yet.</span>');
+  }else if(key==='run'){
+    const live=activeRuns().find(e=>e.id===d.run_id);
+    const sum=state.deployRun&&state.deployRun.run_id===d.run_id?state.deployRun:null;
+    const rulesHtml=rollingFailRuleHtml(sum);
+    if(live){
+      const total=Math.max(live.total||0,live.done||0);
+      const cur=live.current_case_id&&state.idx&&state.idx.caseById.get(live.current_case_id);
+      const suite=live.test_suite_id&&state.idx&&state.idx.suiteById.get(live.test_suite_id);
+      const elapsed=live.started_at?dur(serverNow()-ms(live.started_at)):'0s';
+      const facts=`<div class="pbar-facts"><span><span class="muted small">Suite</span><b>${esc(suite?(suite.name||suite.key):'—')}</b></span><span><span class="muted small">Elapsed</span><b data-elapsed="${esc(live.started_at||live.created_at)}">${elapsed}</b></span><span><span class="muted small">Current case</span><b>${esc(cur?cur.name:(live.status==='queued'?'Waiting for a worker':'Finishing up'))}</b></span></div>`;
+      body=`${facts}${progressHtml(live,'big')}<div class="live-meta"><span><b>${live.done||0}</b> / ${total} cases done</span>${countsHtml(live)}</div>${rulesHtml}<a class="small" href="#/run/${esc(live.id)}">Open the live run →</a>`;
+    }else if(d.run_id){const t=(sum&&sum.totals)||{};
+      body=`<div class="muted small">${sum?`Reported ${t.reported||0} of ${t.cases||0} · ${t.passed||0} passed · ${(t.failed||0)+(t.inconclusive||0)} failed`:'Run finished.'}</div>${rulesHtml}<a class="small" href="#/run/${esc(d.run_id)}">Open the run →</a>`;
+    }else body='<span class="muted small">No run was queued for this deployment.</span>';
+  }else if(key==='teardown'){
+    const td=d.teardown;const log=td&&td.log_tail?esc(String(td.log_tail).trim()):'';
+    body=(td&&td.error?`<div class="small" style="color:var(--red)">${esc(td.error)}</div>`:'')+(log?`<pre class="pbar-log">${log}</pre>`:`<span class="muted small">${td?'Teardown '+esc(td.status)+'.':'Teardown runs once every execution of the run has finished.'}</span>`);
+  }
+  return `<div class="pbar-detail"><div class="pbar-detail-head"><b>${esc(s.name)}</b> — ${esc(s.label)}</div>${body}</div>`;
+}
 function deployStatusHtml(){
   const d=state.deploy;if(!d)return'';
-  const pending=d.status==='queued'||d.status==='deploying';
-  const tone=d.status==='succeeded'?'pass':d.status==='failed'?'fail':'warn';
-  const label=d.status==='succeeded'?'Deployed'+(d.commit?' '+esc(String(d.commit).slice(0,8)):'')
-    :d.status==='failed'?'Deploy failed'
-    :d.status==='deploying'?'Deploying '+esc(d.ref||'main')+'…'
-    :d.agent_online===false?'Waiting for an infra agent (none online)':'Queued for the infra agent…';
-  const pulse=pending?'<span class="pulse'+(d.status==='queued'?' queued':'')+'"></span> ':'';
-  const runLink=d.run_id?` <a href="#/history">View run →</a>`:(d.status==='succeeded'&&d.mode==='deploy_and_run'?' <span class="muted">no run queued</span>':'');
-  let after='';
-  if(d.status==='succeeded'&&d.teardown_after_run){
-    const td=d.teardown;
-    if(!td)after=' <span class="chip" title="The stack comes down once every execution of the run has finished">tears down after the run</span>';
-    else if(td.status==='queued'||td.status==='running')after=' <span class="pulse"></span> <span class="chip chip-warn">Tearing down…</span>';
-    else if(td.status==='succeeded')after=' <span class="chip">Torn down</span>';
-    else after=` <span class="chip chip-fail">Teardown ${esc(td.status)}</span>`;
-  }
-  const err=d.error?`<div class="muted small" style="color:var(--red)">${esc(d.error)}</div>`:'';
-  const log=pending&&d.job&&d.job.log_tail?`<pre class="muted small" style="white-space:pre-wrap;max-height:110px;overflow:auto;margin:4px 0 0;padding:6px 10px;background:var(--panel2);border-radius:6px">${esc(String(d.job.log_tail).trim().split('\n').slice(-4).join('\n'))}</pre>`:'';
-  return `<div class="muted small" style="margin:-4px 0 12px">${pulse}<span class="chip chip-${tone}">${label}</span>${runLink}${after}${err}${log}</div>`;
+  const stages=deployStages(d);
+  const segs=stages.map(s=>{
+    const open=state.deployStage===s.key;
+    const pulse=s.state==='active'?'<span class="pulse"></span> ':'';
+    const fill=(s.state==='active'&&s.pct!=null)?`<span class="seg-fill" style="width:${s.pct}%"></span>`:'';
+    return `<button class="pstage pstage-${s.tone||'idle'} st-${s.state}${open?' open':''}" data-action="deploy-stage" data-stage="${s.key}" title="${esc(s.label)} — click for detail">${fill}<span class="pstage-body">${pulse}<b>${esc(s.name)}</b><span class="pstage-label">${esc(s.label)}</span></span></button>`;
+  }).join('<span class="pstage-arrow">›</span>');
+  const detail=state.deployStage?deployStageDetail(d,state.deployStage,stages):'';
+  return `<div class="pbar-wrap"><div class="pbar">${segs}</div>${detail}</div>`;
+}
+// Pick up a deployment already in flight for the current environment (started this session, via
+// the API, or by the feedback loop) so the overview progress bar shows it and survives a refresh.
+async function loadActiveDeployment(){
+  if(!state.envId)return;
+  try{
+    const res=await api('/api/v1/deployments?limit=12');
+    const latest=(res.data||[]).filter(d=>d.environment_id===state.envId)[0];
+    if(!latest)return;
+    const full=(await api('/api/v1/deployments/'+encodeURIComponent(latest.id))).data;
+    const td=full.teardown;
+    const runLive=full.run_id&&activeRuns().some(e=>e.id===full.run_id);
+    const active=full.status==='queued'||full.status==='deploying'
+      ||(full.status==='succeeded'&&(runLive||(full.teardown_after_run&&(!td||td.status==='queued'||td.status==='running'))));
+    if(active){state.deploy=full;state.deployStage=null;state.deployRun=null;if(!FORM_VIEWS.has(state.view))renderCurrentView();pollDeployment();}
+  }catch(e){/* best effort */}
 }
 async function deployMain(btn){
   if(!state.envId){toast('No environment available.');return;}
   const sel=el('deployMode');
   const choice=(sel&&sel.value)||state.deployMode||'deploy_run_teardown';
   state.deployMode=choice;
+  if(choice==='deploy_run_teardown_loop'){return startCycleRun(btn,{clean_start:false});}
+  if(choice==='clean_cycle'){return startCycleRun(btn,{clean_start:true});}
   const body={environment_id:state.envId,application:state.appKey,mode:choice==='deploy_only'?'deploy_only':'deploy_and_run',teardown_after_run:choice==='deploy_run_teardown'};
   if(btn)btn.disabled=true;
+  state.deployStage=null;state.deployRun=null;
   try{
     const res=await postJson('/api/v1/deployments',body);
     state.deploy=res.data;
@@ -1586,7 +1848,41 @@ async function deployMain(btn){
   }catch(e){toast('Deploy failed: '+e.message);}
   finally{if(btn)btn.disabled=false;}
 }
-const deploySig=d=>JSON.stringify([d.status,d.run_id,d.error,d.teardown&&d.teardown.status,d.job&&d.job.log_tail]);
+async function startCycleRun(btn,opts){
+  const clean=!!(opts&&opts.clean_start);
+  const inp=el('cycleIterations');
+  const iterations=Math.max(1,Math.min(100,Number(inp&&inp.value)||state.cycleIterations||3));
+  state.cycleIterations=iterations;
+  const prompt=clean
+    ?'Clean cycle on '+envName()+': tear down whatever is there, prune Docker (stopped containers, dangling images, old build cache), then deploy–run–tear down '+iterations+' times. Start?'
+    :'Start cycle: deploy, run, tear down — repeated '+iterations+' times on '+envName()+'?';
+  if(!confirm(prompt))return;
+  if(btn)btn.disabled=true;
+  state.deployStage=null;state.deployRun=null;
+  try{
+    const res=await postJson('/api/v1/cycle-runs',{application:state.appKey,environment:state.envId,iterations,clean_start:clean});
+    state.cycleRun=res.data;
+    toast(res.message||('Cycle started: '+iterations+' iterations'));
+    // For a normal cycle the server has already queued the first deployment; pick it up so the
+    // stage bar follows it. For a clean cycle we wait for preparation (teardown + prune) first;
+    // once that finishes, the live poll's environment_cycle_run picks up the fresh deployment.
+    if(!clean)loadActiveDeployment();
+    renderCurrentView();
+  }catch(e){toast('Cycle failed to start: '+e.message);}
+  finally{if(btn)btn.disabled=false;}
+}
+async function cancelCycleRun(id,btn){
+  if(!id||!confirm('Cancel this cycle? Any live run is cancelled; the current teardown is left to finish so the stack lands clean.'))return;
+  if(btn)btn.disabled=true;
+  try{
+    const res=await postJson('/api/v1/cycle-runs/'+encodeURIComponent(id)+'/cancel',{});
+    state.cycleRun=res.data;
+    toast('Cycle cancelled'+(res.cancelled_runs?' · '+res.cancelled_runs+' run'+(res.cancelled_runs===1?'':'s')+' cancelled':''));
+    pollLive();renderCurrentView();
+  }catch(e){toast('Cancel failed: '+e.message);}
+  finally{if(btn)btn.disabled=false;}
+}
+const deploySig=d=>JSON.stringify([d.status,d.run_id,d.error,d.teardown&&d.teardown.status,d.teardown&&d.teardown.log_tail,d.job&&d.job.log_tail,state.deployStage,state.deployRun&&state.deployRun.totals,activeRuns().find(e=>e.id===d.run_id)]);
 async function pollDeployment(){
   if(deployPollTimer)clearTimeout(deployPollTimer);
   const d=state.deploy;
@@ -1595,6 +1891,8 @@ async function pollDeployment(){
   try{
     const res=await api('/api/v1/deployments/'+encodeURIComponent(d.id));
     state.deploy=res.data;
+    // Pull the run's own progress so the Run stage can show how far along it is.
+    if(state.deploy.run_id){try{const rr=await api('/api/v1/runs/'+encodeURIComponent(state.deploy.run_id));state.deployRun=rr.data;}catch(e){}}
     if(deploySig(state.deploy)!==before&&!FORM_VIEWS.has(state.view))renderCurrentView();
   }catch(e){/* transient — keep last known state and retry */}
   const s=state.deploy;
@@ -1605,8 +1903,10 @@ async function pollDeployment(){
     else toast('Deploy failed: '+(s.error||'unknown error'));
     loadSummary().then(renderCurrentView);
   }
-  // A deploy that tears down after its run is followed until that teardown has finished.
+  // Keep following while the run is still going, or until the teardown has finished.
   const td=s.teardown;
+  const runLive=s.run_id&&activeRuns().some(e=>e.id===s.run_id);
+  if(s.status==='succeeded'&&runLive){deployPollTimer=setTimeout(pollDeployment,3000);return;}
   if(s.status==='succeeded'&&s.teardown_after_run&&(!td||td.status==='queued'||td.status==='running')){deployPollTimer=setTimeout(pollDeployment,15000);return;}
   if(td&&td.status==='succeeded'&&!(d.teardown&&d.teardown.status==='succeeded')){toast(envName()+' torn down after the run','#/config-infra');loadSummary().then(renderCurrentView);}
 }
@@ -1785,7 +2085,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights')state.view=v;
+  else if(v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
@@ -1813,7 +2113,10 @@ el('headedCheck').onchange=()=>{state.headed=el('headedCheck').checked;try{local
 el('appSelect').onchange=()=>switchApplication(el('appSelect').value);
 el('globalSearch').oninput=debounce(e=>{state.search=e.target.value;state.rowLimit=ROWS;renderCurrentView();},120);
 el('sideNav').addEventListener('click',e=>{
+  const sec=e.target.closest('.nav-sec');
+  if(sec){toggleNavSection(sec.dataset.sec);return;}
   const b=e.target.closest('.nav-item');if(!b)return;
+  if(b.tagName==='A')return; // a real link (e.g. Defect log) — let the browser follow its href
   const v=b.dataset.view,id=b.dataset.id;
   location.hash=v==='type'?'#/type/'+encodeURIComponent(id):v==='sit'?'#/sit/'+encodeURIComponent(id):v==='sit-all'?'#/sit':v==='overview'?'#/overview':'#/'+v;
   el('sidebar').classList.remove('open');
@@ -1830,7 +2133,8 @@ content.addEventListener('click',e=>{
 });
 content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
 content.addEventListener('change',e=>{
-  if(e.target.id==='deployMode'){state.deployMode=e.target.value;return;}
+  if(e.target.id==='deployMode'){state.deployMode=e.target.value;renderCurrentView();return;}
+  if(e.target.id==='cycleIterations'){const n=Math.max(1,Math.min(100,Number(e.target.value)||3));state.cycleIterations=n;e.target.value=String(n);return;}
   if(e.target.closest('#infraPolicy')){readInfraPolicyForm();return;}
   const form=e.target.closest('[data-form]');
   if(form){
@@ -1874,4 +2178,5 @@ setInterval(()=>{
   loadHealth();setInterval(loadHealth,60000);
   try{await loadApplications();await Promise.all([loadSummary(),pollLive()]);}catch(e){banner('Failed to load: '+e.message);return;}
   renderBanner();onRoute();
+  loadActiveDeployment();
 })();
