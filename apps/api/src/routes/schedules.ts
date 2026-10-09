@@ -12,6 +12,8 @@ import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
 import { defaultTimeZone, isValidExpression, nextFire, parseOneTime } from '../cron.js';
 import { queueRun } from './trigger.js';
+import { createDeployment } from '../infra.js';
+import { startCycleRun } from '../cycle-run.js';
 
 async function resolveId(table: 'applications' | 'environments', ref: unknown): Promise<string | null | undefined> {
   if (ref === null) return null;
@@ -51,17 +53,72 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
     ...(opts.event ? { event: opts.event } : {}),
     ...(opts.metadata || {}),
     ...(appVersion ? { application_version: appVersion } : {}),
-    ...(runType && runType !== 'run_only' ? { run_type: runType, run_type_pending_orchestrator: true } : runType ? { run_type: runType } : {}),
+    ...(runType ? { run_type: runType } : {}),
   };
+  const reason = opts.event ? `${s.name} (${opts.event})` : s.name;
 
   if (s.application_id) {
     if (!environment) return { status: 400, body: { error: `Schedule "${s.name}" has no environment` } };
+    // Resolve the schedule's application_id to the key — deployments.application
+    // and cycle_runs.application are text columns that downstream consumers
+    // expect to hold the key (not the UUID).
+    const appKey = s.application_key || (await query<{ key: string }>(`SELECT key FROM applications WHERE id = $1`, [s.application_id])).rows[0]?.key || s.application_id;
+    // Dispatch on run_type. The three "deploy around a run" modes
+    // (deploy_run_teardown, deploy_and_run, deploy_only) go through
+    // createDeployment with the application_version as the git ref. The two
+    // repeating modes (deploy_run_teardown_loop, clean_cycle) go through
+    // startCycleRun. "run_only" and anything unknown fall through to the
+    // plain queueRun() path.
+    if (runType === 'deploy_only' || runType === 'deploy_and_run' || runType === 'deploy_run_teardown') {
+      const runRequest = runType === 'deploy_only'
+        ? null
+        : {
+            application: appKey,
+            environment,
+            scope,
+            reason,
+            trigger_source: opts.trigger_source,
+            requested_by: opts.requested_by,
+            metadata: scheduleMeta,
+          };
+      const dep = await createDeployment(
+        {
+          application: appKey,
+          environment,
+          mode: runType === 'deploy_only' ? 'deploy_only' : 'deploy_and_run',
+          ref: appVersion || null,
+          teardown_after_run: runType === 'deploy_run_teardown' ? true : runType === 'deploy_and_run' ? false : null,
+          requested_by: opts.requested_by,
+          reason: `scheduled: ${reason}`,
+          run_request: runRequest,
+        },
+        opts.requested_by
+      );
+      if (dep.status < 300) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+      return { status: dep.status, body: dep.body };
+    }
+    if (runType === 'deploy_run_teardown_loop' || runType === 'clean_cycle') {
+      const iterations = Math.max(1, Math.min(100, Number(scope.iterations) || 1));
+      const outcome = await startCycleRun(
+        {
+          application: appKey,
+          environment,
+          iterations,
+          clean_start: runType === 'clean_cycle',
+          requestedBy: opts.requested_by,
+        },
+        opts.requested_by
+      );
+      if (outcome.status < 300) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+      return { status: outcome.status, body: outcome.body };
+    }
+    // run_only (default) or an unknown run_type — plain queueRun path.
     const outcome = await queueRun(
       {
         application: s.application_id,
         environment,
         scope,
-        reason: opts.event ? `${s.name} (${opts.event})` : s.name,
+        reason,
         trigger_source: opts.trigger_source,
         requested_by: opts.requested_by,
         metadata: scheduleMeta,
