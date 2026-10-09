@@ -17,6 +17,11 @@
  * badge, when, ago, dur, plural, ms, serverNow, currentEnv, queueExecution).
  */
 const TB=(()=>{
+// Local debounce — app.js also defines one, but it loads AFTER testbench.js,
+// so the IIFE here cannot rely on app.js's debounce being defined yet (that
+// would make this whole module fail with "debounce is not defined", which in
+// turn leaves TB undefined and silently breaks every testbench screen).
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
 const PRIORITIES=['Critical','High','Medium','Low'];
 const DURATIONS=['Under 1m','1-5m','5-15m','15-60m','60m+'];
 const VISIBILITIES=['Public','Team','Private'];
@@ -163,32 +168,40 @@ async function loadAnalytics(){try{S.analytics=await api('/api/v1/test-cases/ana
  * steps paint as soon as the case fetch returns; run history, defects and
  * activity populate in-place as their fetches land. Opening a different case
  * does NOT rebuild the 759-row list — only the aside re-renders.
+ *
+ * First open on this view calls render() to add the aside next to the list;
+ * every subsequent update uses renderDetailOnly() to swap just the aside.
  */
 function loadDetail(id){
+  const asideMissing=!q('#tb-detail');
   S.currentId=id;S.detail=null;S.detailRuns=null;S.detailAudit=null;
   const lite=S.cases.find(c=>c.id===id||c.key===id);
   if(lite)S.detail={...lite,partial:true};
-  // Mark the newly-active row + un-mark the previously-active one, without rebuilding the list.
   updateActiveRow(id);
-  if(state.view==='test-cases')renderDetailOnly();
+  if(state.view==='test-cases'){
+    if(asideMissing)render('test-cases'); else renderDetailOnly();
+  }
+  const paintDetail=()=>{if(state.view!=='test-cases')return;if(!q('#tb-detail'))render('test-cases');else renderDetailOnly();};
   // Full case detail — the summary/steps need it; paint when it lands.
   api('/api/v1/test-cases/'+encodeURIComponent(id)+'?'+(state.envId?'environment_id='+encodeURIComponent(state.envId):''))
-    .then(full=>{if(S.currentId!==id)return;S.detail=full.data;if(state.view==='test-cases')renderDetailOnly();})
-    .catch(e=>{if(S.currentId!==id)return;S.detail={id,key:id,name:id,error:e.message};if(state.view==='test-cases')renderDetailOnly();});
+    .then(full=>{if(S.currentId!==id)return;S.detail=full.data;paintDetail();})
+    .catch(e=>{if(S.currentId!==id)return;S.detail={id,key:id,name:id,error:e.message};paintDetail();});
   // Run history — the Run history section already shows a skeleton while this is in flight.
   api('/api/v1/test-cases/'+encodeURIComponent(id)+'/runs?limit=50'+(state.envId?'&environment_id='+encodeURIComponent(state.envId):''))
-    .then(runs=>{if(S.currentId!==id)return;S.detailRuns=runs;if(state.view==='test-cases')renderDetailOnly();})
-    .catch(()=>{if(S.currentId!==id)return;S.detailRuns={data:[],totals:{}};if(state.view==='test-cases')renderDetailOnly();});
+    .then(runs=>{if(S.currentId!==id)return;S.detailRuns=runs;paintDetail();})
+    .catch(()=>{if(S.currentId!==id)return;S.detailRuns={data:[],totals:{}};paintDetail();});
   // Activity — same pattern, lowest priority (goes through the broader audit log).
   api('/api/v1/audit')
-    .then(a=>{if(S.currentId!==id)return;S.detailAudit=(a.data||[]).filter(r=>String(r.resource_id)===String((S.detail&&S.detail.id)||id)||String(r.resource_id)===String((S.detail&&S.detail.key)||id)).slice(0,20);if(state.view==='test-cases')renderDetailOnly();})
-    .catch(()=>{if(S.currentId!==id)return;S.detailAudit=[];if(state.view==='test-cases')renderDetailOnly();});
+    .then(a=>{if(S.currentId!==id)return;S.detailAudit=(a.data||[]).filter(r=>String(r.resource_id)===String((S.detail&&S.detail.id)||id)||String(r.resource_id)===String((S.detail&&S.detail.key)||id)).slice(0,20);paintDetail();})
+    .catch(()=>{if(S.currentId!==id)return;S.detailAudit=[];paintDetail();});
 }
-/** Flip the `active` class on the clicked row without rebuilding the list. */
+/** Flip the `active` class on the clicked row without rebuilding the list.
+ * The module's local `CSS` constant shadows the global, so we use window.CSS.escape. */
 function updateActiveRow(id){
   document.querySelectorAll('#content .tb-row.active, #content .tb-card.active').forEach(n=>n.classList.remove('active'));
   if(!id)return;
-  const row=document.querySelector('#content [data-tb="open-case"][data-id="'+CSS.escape(String(id))+'"]');
+  const esc=(window.CSS&&window.CSS.escape)?window.CSS.escape(String(id)):String(id).replace(/["\\]/g,'\\$&');
+  const row=document.querySelector('#content [data-tb="open-case"][data-id="'+esc+'"]');
   if(row)row.classList.add('active');
 }
 async function loadSuites(force){
