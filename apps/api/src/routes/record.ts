@@ -91,6 +91,7 @@ async function createRecordedCase(opts: {
   actor: string | null;
   source: string;
   browser: Browser;
+  lifecycle?: 'draft' | 'active';
 }) {
   const base = opts.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'recording';
   const key = `REC-${base.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
@@ -110,7 +111,7 @@ async function createRecordedCase(opts: {
          $1, $2, $3, $4, $5::test_type, 'system',
          $6, 'playwright', $7::jsonb, $8,
          'medium', 'p2', $9::text[], $10, 'record-and-play', 'record-and-play',
-         'automated', 'active',
+         'automated', $15::test_lifecycle,
          $11, NULL, 'Team', $12,
          $13, $14::jsonb
        ) RETURNING *`,
@@ -129,6 +130,7 @@ async function createRecordedCase(opts: {
         opts.source,
         notes,
         JSON.stringify({ browser: opts.browser }),
+        opts.lifecycle || 'active',
       ]
     );
     await client.query(
@@ -145,6 +147,59 @@ async function createRecordedCase(opts: {
   });
 
   return caseView(row);
+}
+
+/** Promote an auto-saved draft case to active and apply any user edits from the review panel. */
+async function promoteDraftCase(opts: {
+  caseId: string;
+  name?: string;
+  preconditions?: string;
+  steps?: RecordedStep[];
+  objective?: string;
+  warnings?: string[];
+  actor: string | null;
+}) {
+  const notes = opts.warnings?.length ? `Codegen lines that were not translated into runnable steps:\n- ${opts.warnings.join('\n- ')}` : null;
+  const row = await withTransaction(async (client) => {
+    const curr = await client.query('SELECT * FROM test_cases WHERE id = $1::uuid', [opts.caseId]);
+    if (!curr.rows[0]) return null;
+    const prev = curr.rows[0];
+    const newName = opts.name && opts.name !== prev.name ? await uniqueCaseName(opts.name) : prev.name;
+    const newVersion = Number(prev.version || 1) + 1;
+    const { rows } = await client.query(
+      `UPDATE test_cases SET
+         name = $2,
+         lifecycle = 'active',
+         preconditions = COALESCE($3, preconditions),
+         steps = COALESCE($4::jsonb, steps),
+         expected_results = COALESCE($5, expected_results),
+         objective = COALESCE($6, objective),
+         known_workarounds = COALESCE($7, known_workarounds),
+         version = $8,
+         updated_at = now(),
+         updated_by = COALESCE($9, 'record-and-play')
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [
+        opts.caseId,
+        newName,
+        opts.preconditions ?? null,
+        opts.steps ? JSON.stringify(opts.steps) : null,
+        opts.steps?.length ? `All ${opts.steps.length} recorded steps replay without an error.` : null,
+        opts.objective ?? null,
+        notes,
+        newVersion,
+        opts.actor,
+      ]
+    );
+    await client.query(
+      `INSERT INTO test_case_versions (test_case_id, version, snapshot, change_summary, created_by)
+       VALUES ($1, $2, $3::jsonb, 'Reviewed and committed', $4)`,
+      [opts.caseId, newVersion, JSON.stringify(rows[0]), opts.actor]
+    );
+    return rows[0];
+  });
+  return row ? caseView(row) : null;
 }
 
 async function waitForSession(id: string, isDone: (state: string) => boolean, timeoutMs: number): Promise<void> {
@@ -260,7 +315,6 @@ export async function recordRoutes(app: FastifyInstance) {
       const steps = Array.isArray(b.steps) && b.steps.length ? b.steps : defaultSteps;
       if (!steps.length) return reply.status(422).send({ error: 'the recording captured no runnable actions', data: viewSession(s) });
 
-      const suiteId = await ensureRecordSuite(appRef.id, appRef.key);
       const startUrl = parsed.startUrl || s.url;
       const title = (b.title || '').trim() || recordingTitle(startUrl, 'Recorded flow');
       const extra = (b.preconditions || '').trim();
@@ -269,21 +323,43 @@ export async function recordRoutes(app: FastifyInstance) {
         ? `Before the recording began the page at ${startUrl} showed “${snap.title || '(no title)'}”${snap.summary ? ` — opening text: ${snap.summary.slice(0, 240)}${snap.summary.length > 240 ? '…' : ''}` : ''}.`
         : '';
       const precondBody = extra || 'The user has whatever access the recorded flow needed (sign-in, permissions, pre-existing data).';
-      const createdCase = await createRecordedCase({
-        applicationId: appRef.id,
-        suiteId,
-        name: title,
-        startUrl,
-        steps,
-        objective: `Replay the ${steps.length} action${steps.length === 1 ? '' : 's'} a user performed on ${startUrl} and confirm each one still works.`,
-        preconditions: [`The application is reachable at ${startUrl}.`, precondBody, snapLine].filter(Boolean).join(' '),
-        warnings: parsed.warnings,
-        actor: req.actor?.id ?? null,
-        source: 'codegen',
-        browser: s.browser,
-      });
+      const objective = `Replay the ${steps.length} action${steps.length === 1 ? '' : 's'} a user performed on ${startUrl} and confirm each one still works.`;
+      const preconditions = [`The application is reachable at ${startUrl}.`, precondBody, snapLine].filter(Boolean).join(' ');
+
+      // If /finished already auto-saved a draft, promote it (keeps the key the
+      // user has been looking at and preserves the version history); otherwise
+      // insert fresh (import path, or a session predating the auto-draft code).
+      let result;
+      if (s.draftCaseId) {
+        result = await promoteDraftCase({
+          caseId: s.draftCaseId,
+          name: title,
+          preconditions,
+          steps,
+          objective,
+          warnings: parsed.warnings,
+          actor: req.actor?.id ?? null,
+        });
+        if (!result) return reply.status(409).send({ error: 'the auto-saved draft is missing from the catalog; nothing to commit' });
+      } else {
+        const suiteId = await ensureRecordSuite(appRef.id, appRef.key);
+        result = await createRecordedCase({
+          applicationId: appRef.id,
+          suiteId,
+          name: title,
+          startUrl,
+          steps,
+          objective,
+          preconditions,
+          warnings: parsed.warnings,
+          actor: req.actor?.id ?? null,
+          source: 'codegen',
+          browser: s.browser,
+          lifecycle: 'active',
+        });
+      }
       dropSession(s.id);
-      return reply.status(201).send({ data: createdCase, warnings: parsed.warnings });
+      return reply.status(201).send({ data: result, warnings: parsed.warnings });
     }
   );
 
@@ -365,11 +441,50 @@ export async function recordRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const s = finishSession(req.params.id, { output: typeof b.output === 'string' ? b.output : undefined, error: typeof b.error === 'string' ? b.error : undefined, snapshot: b.snapshot });
-      if (s && Array.isArray(b.auto_assertions)) {
-        updateSession(req.params.id, { autoAssertions: b.auto_assertions });
-      }
       if (!s) return reply.status(404).send({ error: 'No such recording session.' });
-      return reply.send({ data: viewSession(s) });
+      if (Array.isArray(b.auto_assertions)) updateSession(req.params.id, { autoAssertions: b.auto_assertions });
+
+      // Auto-save the recording as a draft the moment the agent delivers it.
+      // The case is persisted even if the user never clicks Save in the console;
+      // /commit then promotes the draft to active with any amendments.
+      if (s.state === 'done' && s.output) {
+        try {
+          const parsed = parseCodegen(s.output);
+          const steps = [...parsed.steps, ...((b.auto_assertions as RecordedStep[] | undefined) || [])];
+          if (steps.length) {
+            const appRef = await query('SELECT id, key FROM applications WHERE key = $1', [s.applicationKey]);
+            if (appRef.rows[0]) {
+              const applicationId = appRef.rows[0].id as string;
+              const applicationKey = appRef.rows[0].key as string;
+              const suiteId = await ensureRecordSuite(applicationId, applicationKey);
+              const startUrl = parsed.startUrl || s.url;
+              const title = recordingTitle(startUrl, 'Recorded flow');
+              const snap = b.snapshot;
+              const snapLine = snap
+                ? `Before the recording began the page at ${startUrl} showed “${snap.title || '(no title)'}”${snap.summary ? ` — opening text: ${snap.summary.slice(0, 240)}${snap.summary.length > 240 ? '…' : ''}` : ''}.`
+                : '';
+              const draft = await createRecordedCase({
+                applicationId,
+                suiteId,
+                name: title,
+                startUrl,
+                steps,
+                objective: `Replay the ${steps.length} action${steps.length === 1 ? '' : 's'} a user performed on ${startUrl} and confirm each one still works.`,
+                preconditions: [`The application is reachable at ${startUrl}.`, 'The user has whatever access the recorded flow needed (sign-in, permissions, pre-existing data).', snapLine].filter(Boolean).join(' '),
+                warnings: parsed.warnings,
+                actor: null,
+                source: 'codegen-auto-draft',
+                browser: s.browser,
+                lifecycle: 'draft',
+              });
+              updateSession(req.params.id, { draftCaseId: draft.id, draftCaseKey: draft.key });
+            }
+          }
+        } catch (err) {
+          req.log?.warn?.({ err: (err as Error).message }, 'auto-draft creation failed');
+        }
+      }
+      return reply.send({ data: viewSession(getSession(req.params.id) || s) });
     }
   );
 }

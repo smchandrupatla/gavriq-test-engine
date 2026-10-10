@@ -50,6 +50,9 @@ export interface RecordSession {
   liveSteps?: LiveStep[];
   /** Agent-generated auto-assertion steps to append (serialized as recorded steps on commit). */
   autoAssertions?: unknown[];
+  /** The engine auto-saves a draft case the moment the agent delivers /finished, so the recording is persisted even when the user never clicks Save. The commit route promotes the draft to active in place. */
+  draftCaseId?: string;
+  draftCaseKey?: string;
 }
 
 const sessions = new Map<string, RecordSession>();
@@ -186,5 +189,7 @@ export function viewSession(s: RecordSession) {
     live_step_count: s.liveStepCount ?? null,
     live_steps: s.liveSteps ?? [],
     has_auto_assertions: Array.isArray(s.autoAssertions) && s.autoAssertions.length > 0,
+    draft_case_id: s.draftCaseId ?? null,
+    draft_case_key: s.draftCaseKey ?? null,
   };
 }
