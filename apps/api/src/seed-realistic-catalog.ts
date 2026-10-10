@@ -29,6 +29,8 @@
 import { pool, query, migrate } from './db/client.js';
 import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
 import { SANDBENCH_PORTAL_CASES, SANDBENCH_PORTAL_SUITES } from './catalog/sandbench-portal-cases.js';
+import { SANDBENCH_API_COVERAGE_CASES, SANDBENCH_API_COVERAGE_SUITE } from './catalog/sandbench-api-coverage-cases.js';
+import { SANDBENCH_EVENT_RT_CASES, SANDBENCH_EVENT_RT_SUITES } from './catalog/sandbench-event-roundtrip-cases.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
 import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from './catalog/record-and-play-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
@@ -294,8 +296,8 @@ async function main() {
   // 4) Applications, each with the environment it is developed on and its suites + cases.
   const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
   if (wanted('sand-bench')) {
-    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, recordAndPlaySuite('sand-bench')];
-    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES];
+    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, SANDBENCH_API_COVERAGE_SUITE, ...SANDBENCH_EVENT_RT_SUITES, recordAndPlaySuite('sand-bench')];
+    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES, ...SANDBENCH_API_COVERAGE_CASES, ...SANDBENCH_EVENT_RT_CASES];
     const sbId = await upsertApplication(
       'sand-bench', 'Sand Bench',
       'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
