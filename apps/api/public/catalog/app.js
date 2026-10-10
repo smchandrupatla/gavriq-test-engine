@@ -89,6 +89,12 @@ const state={
   runsPageSize:25,
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
+  // Fast counts (per-type + per-suite + total), loaded before the full summary
+  // so the sidebar and Overview tiles paint instantly even on a 12k-case app.
+  catalogCounts:null,
+  // Server-paged case list for the Type page (and Baseline). Keyed by typeId+suiteId
+  // so switching selection resets the pager.
+  typePage:null,
   selectedTypes:new Set(),overviewTab:'summary',
   // Within the Summary tab the user flips between QA, QC, SIT console and Baselines sub-tabs.
   summarySub:'qa',
@@ -189,6 +195,24 @@ function indexSummary(){
 const casesForType=id=>(state.idx&&state.idx.casesByType.get(id))||[];
 const casesInSuite=id=>(state.idx&&state.idx.casesBySuite.get(id))||[];
 const sitCases=()=>casesForType('sit');
+// Fast counts: prefer the counts endpoint when it has arrived, so the sidebar
+// paints with the real number even before the heavier /ui/summary completes.
+// Falls back to the full-array length once state.idx is ready.
+const countForType=id=>{
+  const c=state.catalogCounts;
+  if(c&&c.by_type&&Object.prototype.hasOwnProperty.call(c.by_type,id))return Number(c.by_type[id])||0;
+  return casesForType(id).length;
+};
+const countForSuite=id=>{
+  const c=state.catalogCounts;
+  if(c&&c.by_suite&&Object.prototype.hasOwnProperty.call(c.by_suite,id))return Number(c.by_suite[id])||0;
+  return casesInSuite(id).length;
+};
+const totalCases=()=>{
+  const c=state.catalogCounts;
+  if(c&&Number.isFinite(c.total))return Number(c.total);
+  return state.cases.length;
+};
 function filterCases(list){const q=state.search.trim().toLowerCase();if(!q)return list;return list.filter(c=>String(c.name||'').toLowerCase().includes(q)||String(c.key||'').toLowerCase().includes(q));}
 
 // ---------------------------------------------------------------------------
@@ -208,6 +232,17 @@ async function loadApplications(){
       :(state.applications.some(a=>a.key==='sand-bench')?'sand-bench':(state.applications[0]&&state.applications[0].key)||'sand-bench');
   }
   renderAppSelect();
+}
+// Catalog-counts loads before summary so the sidebar + Overview tiles have
+// numbers the moment the first paint happens, instead of waiting for the full
+// summary (which, with 12k+ cases, downloads in the megabytes). The summary
+// still populates state.cases afterwards for the pages that iterate individual
+// cases.
+async function loadCatalogCounts(){
+  try{
+    const d=(await api('/api/v1/ui/catalog-counts'+appQuery())).data||{};
+    state.catalogCounts={total:Number(d.total||0),by_type:d.by_type||{},by_suite:d.by_suite||{}};
+  }catch(e){state.catalogCounts=null;}
 }
 async function loadSummary(retry){
   if(!state.envId&&!retry){try{state.envId=localStorage.getItem(envStoreKey())||null;}catch{}}
@@ -395,8 +430,15 @@ function tileStats(tile){
     const r=state.live.inRun.get(c.id);
     if(r==='running'||(r&&!running))running=r;
   }
-  const tone=!cases.length?'empty':failed?'fail':passed?'pass':other?'warn':'never';
-  return {total:cases.length,passed,failed,other,never,lastAt,running,tone};
+  // The total prefers the counts-endpoint number so a tile shows the real size
+  // even before /ui/summary finishes streaming the per-case rows. Once summary
+  // lands, cases.length catches up and the two agree.
+  const total=Number.isFinite(tile.total)?Math.max(Number(tile.total),cases.length):cases.length;
+  // When summary has not arrived (we have a total but no cases to classify),
+  // 'never' absorbs the unknown ones so the tone stays accurate.
+  if(!cases.length&&total>0){never=total;}
+  const tone=!total?'empty':failed?'fail':passed?'pass':other?'warn':'never';
+  return {total,passed,failed,other,never,lastAt,running,tone};
 }
 
 // ---------------------------------------------------------------------------
@@ -592,7 +634,7 @@ function renderSideNav(){
   // Tests: everything about test content (cases, suites, coverage).
   // "New test case" is now a + New button on the Test cases page.
   let h=navSection('tests','Tests',
-    navItem('test-cases',null,'Test cases',state.cases.length||null)+
+    navItem('test-cases',null,'Test cases',totalCases()||null)+
     navItem('test-suites',null,'Test suites',state.suites.length||null)+
     navItem('test-suite-form',null,'New test suite')+
     navItem('catalog-coverage',null,'Catalog coverage',state.coverage?state.coverage.with_findings||null:null,state.coverage&&state.coverage.by_severity.high?'red':state.coverage&&state.coverage.by_severity.medium?'amber':null),
@@ -623,7 +665,10 @@ function renderSideNav(){
   // regardless of their test_type's declared category. Any other application
   // keeps the usual QA/QC split.
   const engineOnly=state.appKey==='gavriq-test-engine';
-  const typeItem=t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,cs.length,toneDot(cs));};
+  // Sidebar counts come from the fast counts endpoint when it has arrived so
+  // the number is right the moment the sidebar paints — toneDot still looks at
+  // the full case list for its colour because that needs per-case status.
+  const typeItem=t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,countForType(t.id),toneDot(cs));};
   const qaItems=engineOnly?'':tl.filter(t=>t.category==='qa').map(typeItem).join('');
   const qcTypeItems=engineOnly?tl.map(typeItem).join(''):tl.filter(t=>t.category!=='qa').map(typeItem).join('');
   if(qaItems)h+=navSection('qa',CAT.qa,qaItems);
@@ -638,12 +683,15 @@ function renderSideNav(){
 }
 function overviewGroups(){
   const tl=typeList();
-  const typeTile=t=>({key:'type:'+t.id,title:t.title,sub:t.summary,cases:casesForType(t.id),href:'#/type/'+encodeURIComponent(t.id)});
+  // Each tile carries both the array (used for per-case status breakdown once
+  // /ui/summary has arrived) and a fast total from the counts endpoint — the
+  // total shows up on first paint even before summary loads.
+  const typeTile=t=>({key:'type:'+t.id,title:t.title,sub:t.summary,cases:casesForType(t.id),total:countForType(t.id),href:'#/type/'+encodeURIComponent(t.id)});
   const more=[];
-  if(!tl.some(t=>t.id==='selenium-baseline'))more.push({key:'baseline',title:'Selenium Baseline',sub:'Selenium GUI automation baseline checks.',cases:casesForType('selenium-baseline'),href:'#/baseline'});
+  if(!tl.some(t=>t.id==='selenium-baseline'))more.push({key:'baseline',title:'Selenium Baseline',sub:'Selenium GUI automation baseline checks.',cases:casesForType('selenium-baseline'),total:countForType('selenium-baseline'),href:'#/baseline'});
   more.push({key:'build',kind:'build',title:'In-container build',sub:'Reported by CI; not re-run by the engine.',href:'#/builds'});
-  const other=casesForType('other');
-  if(other.length)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:other,href:'#/type/other'});
+  const otherCount=countForType('other');
+  if(otherCount>0)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:casesForType('other'),total:otherCount,href:'#/type/other'});
   const groups=[];
   if(sitCases().length)groups.push({title:'SIT console',sub:'Post-deploy packs by area',tiles:SIT_GROUPS.map(g=>({key:'sit:'+g.id,title:g.title,sub:g.summary,cases:(state.idx&&state.idx.sitGroupCases.get(g.id))||[],href:'#/sit/'+g.id,accent:'sit'}))});
   // Engine self-test cases all sit under QC on the Overview tile board, same as the sidebar.
@@ -778,15 +826,70 @@ function suiteTile(s,accent){return {key:'suite:'+s.id,suiteId:s.id,title:s.name
 function renderTypeView(typeId){
   const t=typeList().find(x=>x.id===typeId)||{title:typeTitle(typeId),summary:''};
   el('viewTitle').textContent=t.title;
-  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
   if(typeId==='recordAndPlay')return renderRecordAndPlayPane(t);
   const suites=suitesForType(typeId);
-  const typeCases=casesForType(typeId);
-  const tiles=suites.length?suites.map(s=>suiteTile(s)):[{key:'type:'+typeId,title:t.title,sub:t.summary,cases:typeCases,inline:true}];
+  const total=countForType(typeId);
+  // Suites row (if present) still relies on summary data for its per-tile status
+  // breakdown; it renders empty-looking tiles until summary lands.
+  const tiles=suites.length?suites.map(s=>suiteTile(s)):[{key:'type:'+typeId,title:t.title,sub:t.summary,cases:casesForType(typeId),total,inline:true}];
   const sel=suites.find(s=>s.id===state.suiteId)||null;
-  el('content').innerHTML=liveStripHtml()+statsRowHtml(typeCases,t.summary)+
-    tileGroupHtml({title:suites.length?'Suites':'Cases',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'No suites — grouped by type tag',tiles})+
-    caseSectionHtml({title:sel?sel.name:`${t.title} — all cases`,sub:sel?sel.key:'',cases:sel?casesInSuite(sel.id):typeCases,suiteId:sel&&sel.id,clear:!!sel,label:sel?sel.name:t.title});
+  // The case list at the bottom now pages from /api/v1/ui/cases — it never
+  // downloads the whole type unless the user scrolls through it. The old
+  // in-memory slice (which capped effectively at 1000 after 10 Show-more
+  // clicks) is gone.
+  const head=liveStripHtml()+statsRowHtml(casesForType(typeId),t.summary)+
+    tileGroupHtml({title:suites.length?'Suites':'Cases',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'No suites — grouped by type tag',tiles});
+  // Reset the pager when switching type or suite.
+  const scopeKey=`type:${typeId}:suite:${sel?sel.id:''}`;
+  if(!state.typePage||state.typePage.scopeKey!==scopeKey){
+    state.typePage={scopeKey,typeId,suiteId:sel?sel.id:null,title:sel?sel.name:`${t.title} — all cases`,sub:sel?sel.key:'',rows:[],total:null,offset:0,pageSize:50,loading:false,search:'',loaded:false};
+    loadTypeCasesPage(true);
+  }
+  el('content').innerHTML=head+typeCasesSectionHtml();
+}
+async function loadTypeCasesPage(reset){
+  const p=state.typePage;if(!p)return;
+  // A fresh request supersedes any in-flight one — the user may be typing in
+  // the search box and we only want the latest response to survive.
+  const reqId=(p.reqSeq=(p.reqSeq||0)+1);
+  if(reset){p.rows=[];p.offset=0;p.loaded=false;}
+  p.loading=true;
+  if(state.view==='type'||state.view==='baseline')renderCurrentView();
+  try{
+    const url='/api/v1/ui/cases'+appQuery()+envQuery()
+      +'&limit='+p.pageSize
+      +'&offset='+p.offset
+      +(p.typeId?'&type_id='+encodeURIComponent(p.typeId):'')
+      +(p.suiteId?'&suite_id='+encodeURIComponent(p.suiteId):'')
+      +(p.search?'&q='+encodeURIComponent(p.search):'');
+    const res=await api(url);
+    if(reqId!==p.reqSeq)return; // a newer request has already run — this response is stale
+    p.rows=reset?(res.data||[]):p.rows.concat(res.data||[]);
+    p.total=Number(res.total||0);
+    p.offset=p.rows.length;
+    p.loaded=true;
+  }catch(e){if(reqId===p.reqSeq)p.error=e.message;}
+  finally{if(reqId===p.reqSeq)p.loading=false;}
+  if(state.view==='type'||state.view==='baseline')renderCurrentView();
+}
+function typeCasesSectionHtml(){
+  const p=state.typePage;if(!p)return '';
+  const total=p.total==null?'…':p.total;
+  const rows=p.rows.map(c=>{
+    const st=c.last_status?badge({status:c.last_status}):'<span class="badge never">Never run</span>';
+    const dur=c.last_duration_ms?secs(c.last_duration_ms):'';
+    return `<tr><td><a href="#/case/${esc(c.id)}">${esc(c.name||c.key)}</a><div class="key small">${esc(c.key)}</div></td><td>${esc(c.execution_method||'')}</td><td>${st}</td><td>${esc(dur)}</td><td class="muted small">${esc(c.last_at?when(c.last_at):'—')}</td></tr>`;
+  }).join('');
+  const bar=`<div class="toolbar" style="border:none;padding:6px 0 10px;gap:8px;align-items:center;flex-wrap:wrap">
+    <input type="search" data-action="type-search" placeholder="Search within these cases…" value="${esc(p.search||'')}" style="flex:1 1 240px;max-width:360px">
+    <span class="muted small">${p.rows.length} of ${total} loaded</span>
+  </div>`;
+  const more=p.rows.length<Number(p.total||0)
+    ?`<div class="more"><button class="btn" data-action="type-more"${p.loading?' disabled':''}>${p.loading?'Loading…':`Load next ${p.pageSize}`}</button></div>`
+    :'';
+  const body=p.loaded&&!p.rows.length?'<div class="empty">No cases match these filters.</div>'
+    :(p.rows.length?`<div class="table-wrap"><table><thead><tr><th>Case</th><th>Method</th><th>Latest</th><th>Duration</th><th>Last run</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="hp-loading"><div class="skel" style="height:120px"></div></div>');
+  return `<div class="card"><div class="card-head"><h2>${esc(p.title)}</h2><span class="muted small">${esc(p.sub||'')}</span></div><div class="hp-body">${bar}${body}${more}</div></div>`;
 }
 
 // Record & play: the pane is the record form itself. Existing recordings sit
@@ -1938,6 +2041,7 @@ function renderReportsView(){
 function renderCurrentView(){
   state.tiles=new Map();state.charts=new Map();state.panels=new Set();state.section=null;
   state.live=liveCaseState();
+  syncEnvAndVersionChips();
   const v=state.view;
   if(v==='home')renderHomeView();
   else if(v==='history')renderHistory();
@@ -2031,23 +2135,42 @@ async function switchEnvironment(id){
   loadActiveDeployment();
 }
 function renderAppSelect(){
-  const sel=el('appSelect');if(!sel)return;
-  sel.innerHTML=state.applications.map(a=>'<option value="'+esc(a.key)+'"'+(a.key===state.appKey?' selected':'')+'>'+esc(a.name||a.key)+'</option>').join('')||'<option value="sand-bench">Sand Bench</option>';
+  // The <select> is kept hidden for existing scripts that read its value, but
+  // the user-facing control is a static label plus a "↻ Home" link. The only
+  // way to change application is to go back to Home.
+  const sel=el('appSelect');if(sel)sel.innerHTML=state.applications.map(a=>'<option value="'+esc(a.key)+'"'+(a.key===state.appKey?' selected':'')+'>'+esc(a.name||a.key)+'</option>').join('')||'<option value="sand-bench">Sand Bench</option>';
+  const lab=el('appLabel');if(lab){
+    const app=state.applications.find(a=>a.key===state.appKey);
+    lab.textContent=app?(app.name||app.key):(state.appKey||'—');
+  }
+}
+// Views whose data only makes sense against a chosen environment. Everything
+// else (test cases, suites, config, reports, insights, catalog coverage) is
+// environment-free so the Env chip and Version input are hidden there.
+const ENV_SCOPED_VIEWS=new Set(['home','overview','history','run','schedules','builds','config-infra']);
+function syncEnvAndVersionChips(){
+  const v=state.view||'overview';
+  const envNeeded=ENV_SCOPED_VIEWS.has(v);
+  const show=(id,on)=>{const n=el(id);if(n)n.hidden=!on;};
+  show('envLabel',envNeeded);
+  show('envSelect',envNeeded);
+  show('versionLabel',envNeeded);
+  const vi=el('appVersionInput');if(vi)vi.hidden=!envNeeded;
 }
 async function switchApplication(key){
   if(!key||key===state.appKey)return;
   state.appKey=key;
   try{localStorage.setItem('te.app',key);}catch{}
   // Full reset of app-scoped view state, including the environment: each application has its own targets.
-  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},runsSel:new Set(),
+  Object.assign(state,{loaded:false,cases:[],suites:[],environments:[],envId:null,build:null,stats:{},idx:null,catalogCounts:null,tile:null,suiteId:null,selected:new Set(),selectedTypes:new Set(),rowLimit:ROWS,buildRows:null,since:null,catalogSig:null,runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},runsSel:new Set(),
     schedFormOpen:false,report:{data:null,loading:false,error:null,busy:''},
     reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
     cycleRun:null,deployLoop:null});
   state.history.clear();
   location.hash='#/overview';
-  renderSideNav();renderCurrentView();
-  try{await loadSummary();}catch(e){banner('Failed to load '+key+': '+e.message);}
-  renderSideNav();renderCurrentView();pollLive();
+  renderAppSelect();renderSideNav();renderCurrentView();
+  try{await loadCatalogCounts();renderSideNav();renderCurrentView();await loadSummary();}catch(e){banner('Failed to load '+key+': '+e.message);}
+  renderAppSelect();renderSideNav();renderCurrentView();pollLive();
 }
 
 // ---------------------------------------------------------------------------
@@ -2159,6 +2282,7 @@ function handleAction(action,node){
   else if(action==='run-types')runSelectedTypes();
   else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
   else if(action==='summary-sub'){state.summarySub=node.dataset.sub;renderCurrentView();}
+  else if(action==='type-more')loadTypeCasesPage(false);
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
   else if(action==='sched-save')saveSchedule(node);
   else if(action==='sched-preset'){const c=el('schedCron');if(c){c.value=node.dataset.cron;state.schedForm.cron=node.dataset.cron;}}
@@ -2845,7 +2969,7 @@ async function onRoute(){
   if(caseId&&(!state.caseDetail||state.caseDetail.id!==caseId)){await loadCaseDetail(caseId);if(state.caseId===caseId)renderCurrentView();}
 }
 async function refreshAll(){
-  try{await Promise.all([loadSummary(),pollLive(),loadHealth()]);banner(null);renderBanner();renderSideNav();renderCurrentView();}
+  try{await Promise.all([loadCatalogCounts(),loadSummary(),pollLive(),loadHealth()]);banner(null);renderBanner();renderSideNav();renderCurrentView();}
   catch(e){banner('Failed to load: '+e.message);}
 }
 el('menuToggle').onclick=()=>el('sidebar').classList.toggle('open');
@@ -2889,6 +3013,14 @@ content.addEventListener('click',e=>{
   const run=t.closest('[data-run]');if(run&&!t.closest('a,button,input'))location.hash='#/run/'+encodeURIComponent(run.dataset.run);
 });
 content.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-run]'))location.hash='#/run/'+encodeURIComponent(e.target.dataset.run);});
+// Server-paged type view: fire a filtered reload while the user types, debounced.
+const typeSearchDebounced=debounce(()=>{if(state.typePage){loadTypeCasesPage(true);}},200);
+content.addEventListener('input',e=>{
+  if(e.target.matches('[data-action="type-search"]')&&state.typePage){
+    state.typePage.search=e.target.value;
+    typeSearchDebounced();
+  }
+});
 content.addEventListener('change',e=>{
   if(e.target.id==='deployMode'){state.deployMode=e.target.value;renderCurrentView();return;}
   if(e.target.id==='cycleIterations'){const n=Math.max(1,Math.min(100,Number(e.target.value)||3));state.cycleIterations=n;e.target.value=String(n);return;}
@@ -2963,7 +3095,14 @@ setInterval(()=>{
   el('headedCheck').checked=state.headed;
   parseHash();renderSideNav();renderCurrentView();       // skeleton paints before any data arrives
   loadHealth();setInterval(loadHealth,60000);
-  try{await loadApplications();await Promise.all([loadSummary(),pollLive()]);}catch(e){banner('Failed to load: '+e.message);return;}
+  try{
+    await loadApplications();
+    // Counts arrive first (small payload) so the sidebar and Overview tiles
+    // render with real numbers while the heavier summary + poll fetch the
+    // per-case rows in the background.
+    await loadCatalogCounts();renderSideNav();renderCurrentView();
+    await Promise.all([loadSummary(),pollLive()]);
+  }catch(e){banner('Failed to load: '+e.message);return;}
   renderBanner();onRoute();
   loadActiveDeployment();
 })();

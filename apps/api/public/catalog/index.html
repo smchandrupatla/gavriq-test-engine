@@ -361,11 +361,18 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
       <h1 id="viewTitle">Overview</h1>
       <div class="topbar-actions">
         <input id="globalSearch" type="search" placeholder="Search cases…" aria-label="Search">
+        <!--
+          The application context is picked once at Home and stays fixed; the
+          only way to switch is to go back there. Dropping the <select> keeps
+          users from accidentally jumping apps mid-browse.
+        -->
         <label class="pill" style="border:none;background:none;padding-right:0">App</label>
-        <select id="appSelect" aria-label="Application under test"></select>
-        <label class="pill" style="border:none;background:none;padding-right:0">Env</label>
+        <span id="appLabel" class="pill" title="Switch applications from the Home screen" style="font-weight:600"></span>
+        <a id="appHomeLink" class="pill" href="#/home" title="Change application" aria-label="Change application" style="text-decoration:none">↻ Home</a>
+        <select id="appSelect" aria-label="Application under test" hidden></select>
+        <label class="pill" id="envLabel" style="border:none;background:none;padding-right:0">Env</label>
         <select id="envSelect" aria-label="Target environment"></select>
-        <label class="pill" style="border:none;background:none;padding-right:0" title="Branch / tag / version to run against. Stamped on every run queued from this console (Run everything, Run suite, Run case, Schedule) and shown in the App version column.">Version</label>
+        <label class="pill" id="versionLabel" style="border:none;background:none;padding-right:0" title="Branch / tag / version to run against. Stamped on every run queued from this console (Run everything, Run suite, Run case, Schedule) and shown in the App version column.">Version</label>
         <input id="appVersionInput" type="text" list="appVersionList" value="main" style="width:140px;padding:4px 8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;font:inherit" aria-label="Application version / branch">
         <datalist id="appVersionList"></datalist>
         <label class="pill" id="headedToggle" title="Run browser-based tests with a visible window instead of headless"><input type="checkbox" id="headedCheck"> Show browser</label>
