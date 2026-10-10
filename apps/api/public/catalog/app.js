@@ -921,7 +921,13 @@ function recordReviewHtml(){
     </div>`;
   }).join('');
   const live=steps.filter(s=>!s._deleted).length;
+  const draftKey=r.session&&r.session.draft_case_key;
+  const draftId=r.session&&r.session.draft_case_id;
+  const draftAlert=draftKey?`<div class="card" style="margin:0 0 8px;padding:8px 10px;background:#fff7ed;border:1px solid #f59e0b;color:#92400e">
+    <b>The recording was auto-saved as a draft</b> — <a href="#/case/${esc(draftId)}">${esc(draftKey)}</a>. Review the steps below (edit, remove, add preconditions) and click <b>Save as a case</b> to activate it so it joins the Record &amp; play suite. If you close this tab without saving, the draft stays in the catalog as a draft.
+  </div>`:'';
   return `<div class="card" style="margin:8px 0 0;padding:10px">
+    ${draftAlert}
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
       <div><h3 style="margin:0;font-size:14px">Review the recorded steps · ${esc(String(live))} of ${esc(String(steps.length))}</h3><div class="muted small">Edit anything before saving as a test case. Auto-assertions sit at the end — remove any that look wrong.</div></div>
       <div class="row" style="gap:8px">
@@ -969,6 +975,10 @@ async function recordAdoptPending(){
         r.session=d.session||s;
         r.warnings=d.warnings||[];
         r.review={steps:(d.steps||[]).map(x=>({...x})),startUrl:d.start_url||s.url};
+        // Alert the user that the recording has been auto-saved as a draft and
+        // only needs a review+Save to join the suite as an active case.
+        const dk=r.session&&r.session.draft_case_key;
+        if(dk&&!r._alertedDraft){toast('Recording auto-saved as draft '+dk+' — review & Save to activate','#/case/'+r.session.draft_case_id);r._alertedDraft=true;}
       }catch(e){/* ignore */}
     }
   }catch(e){/* ignore */}
