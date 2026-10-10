@@ -232,6 +232,64 @@ async function seed() {
   const committed = await post(`${api}/api/v1/schemas`, { name: 'pacs.008.001.14 (staging baseline)', fileName, content }, auth);
   if (!committed.ok) throw new Error(`baseline seed: schema commit returned HTTP ${committed.status}: ${(await committed.text()).slice(0, 300)}`);
   console.log(`[staging] baseline schema registry: ${fileName} committed`);
+
+  await seedUserPool(api);
+}
+
+/**
+ * Seed the parallel-safe user pool (see docs/USER-POOL.md): N operator slots
+ * and M admin slots, each a distinct user so parallel cases get distinct
+ * sessions. Sand Bench removed role/permission checks, so every created
+ * user holds every permission — no role assignment step is needed.
+ *
+ * Pool size must match POOL_SIZE / ADMIN_POOL_SIZE in
+ * apps/api/src/catalog/user-pool.ts. All pool users share the same demo
+ * password (demo-only; never valid in production): the password the
+ * staging stack ships with.
+ */
+const POOL_SIZE = 8;
+const ADMIN_POOL_SIZE = 2;
+const POOL_PASSWORD = 'password';
+
+async function seedUserPool(api) {
+  // The create-user endpoint lives under /admin — log in as admin for the seed
+  // regardless of whether role checks are enforced on the current build.
+  const adminLogin = await fetch(`${api}/api/v1/session/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: POOL_PASSWORD }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!adminLogin.ok) throw new Error(`user-pool seed: admin login returned HTTP ${adminLogin.status}`);
+  const { token: adminToken } = await adminLogin.json().catch(() => ({}));
+  if (!adminToken) throw new Error('user-pool seed: admin login returned no token');
+  const auth = { authorization: `Bearer ${adminToken}` };
+  const post = (url, body) =>
+    fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+
+  const users = [];
+  for (let i = 0; i < POOL_SIZE; i++) users.push({ username: `pool.op${i}`, kind: 'operator' });
+  for (let i = 0; i < ADMIN_POOL_SIZE; i++) users.push({ username: `pool.adm${i}`, kind: 'admin' });
+
+  let created = 0; let present = 0;
+  for (const u of users) {
+    const body = {
+      username: u.username,
+      displayName: `Pool ${u.kind} ${u.username}`,
+      email: `${u.username}@example.invalid`,
+      password: POOL_PASSWORD,
+      securityQuestion: 'pool',
+      securityAnswer: 'pool',
+    };
+    const res = await post(`${api}/api/v1/admin/tenants/tenant_default/users`, body);
+    const text = await res.text();
+    if (res.status === 201) { created++; continue; }
+    // The create endpoint returns 409 (or sometimes 422 with a uniqueness error)
+    // when the username is already present — repeating the seed is safe.
+    if (res.status === 409 || (res.status === 422 && /unique|exists|duplicate/i.test(text))) { present++; continue; }
+    throw new Error(`user-pool seed: ${u.username} returned HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
+  console.log(`[staging] user pool: ${created} created, ${present} already present (${POOL_SIZE} operators + ${ADMIN_POOL_SIZE} admins)`);
 }
 
 /**
@@ -268,12 +326,42 @@ async function register(state) {
         tenant: 'default',
         username: 'operator',
         password: 'password',
+        admin_username: 'admin',
+        admin_password: 'password',
+        // Parallel-safe user pool (see docs/USER-POOL.md): seeded by seedUserPool()
+        // above; each pool slot maps to a distinct Sand Bench user, so parallel
+        // cases get distinct sessions. Resolver order (apps/worker/src/worker.ts):
+        // secret_env wins over vars when both set the same key — vars here are the
+        // actual usernames; secret_env below resolves the shared password at run time.
+        pool_user_0: 'pool.op0',
+        pool_user_1: 'pool.op1',
+        pool_user_2: 'pool.op2',
+        pool_user_3: 'pool.op3',
+        pool_user_4: 'pool.op4',
+        pool_user_5: 'pool.op5',
+        pool_user_6: 'pool.op6',
+        pool_user_7: 'pool.op7',
+        pool_admin_0: 'pool.adm0',
+        pool_admin_1: 'pool.adm1',
         kafkaPortal: 'http://127.0.0.1:8095',
         mqPortal: 'http://127.0.0.1:8092',
         ftpPortal: 'http://127.0.0.1:18102',
         apiPortal: 'http://127.0.0.1:8093',
       },
-      secret_env: { password: 'SB_STAGING_PASSWORD' },
+      secret_env: {
+        password: 'SB_STAGING_PASSWORD',
+        admin_password: 'SB_STAGING_PASSWORD',
+        pool_pass_0: 'SB_STAGING_PASSWORD',
+        pool_pass_1: 'SB_STAGING_PASSWORD',
+        pool_pass_2: 'SB_STAGING_PASSWORD',
+        pool_pass_3: 'SB_STAGING_PASSWORD',
+        pool_pass_4: 'SB_STAGING_PASSWORD',
+        pool_pass_5: 'SB_STAGING_PASSWORD',
+        pool_pass_6: 'SB_STAGING_PASSWORD',
+        pool_pass_7: 'SB_STAGING_PASSWORD',
+        pool_adminpass_0: 'SB_STAGING_PASSWORD',
+        pool_adminpass_1: 'SB_STAGING_PASSWORD',
+      },
       // Managed by the engine's infrastructure lifecycle (apps/api/src/infra.ts): the infra agent
       // deploys and tears this stack down with this script. Hours set in the console are kept.
       infra: { ...(existingConfig.infra || {}), driver: 'compose', script: 'deploy/staging/deploy.mjs', compose_project: PROJECT },

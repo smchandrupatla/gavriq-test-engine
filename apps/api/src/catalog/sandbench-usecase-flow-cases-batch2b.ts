@@ -107,6 +107,7 @@ C.push(
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'dsNew'],
     dataProfile: { profile: 'synthetic-named', data: 'Two uniquely named source datasets merged by id into a third named job.', source: 'Generated per run.' },
     expected: '202 with a job_id and both source ids reflected.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'Bulk-merge is defined as combining ≥2 source dataset ids; the two creates are the minimum material the merge contract needs.' },
   },
   {
     key: 'SB-UC-dsNew-EXC-1',

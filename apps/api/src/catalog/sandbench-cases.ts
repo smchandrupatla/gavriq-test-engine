@@ -1889,6 +1889,7 @@ C.push(
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'oversized', data: 'Single JSON payload with a 120,000-byte filler field.', source: 'Generated per run.' },
     expected: 'Clean accept-or-reject; health 200 afterwards.',
+    atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app (the test-hub simulator): if accepted, the message lands in the inbound-events append-only audit log, which exposes no delete route. The event-log row is harmless (per-run unique MsgId) but is not scrubbed.' },
   },
   {
     key: 'SB-NF-UNKNOWN-ROUTE',
@@ -2433,7 +2434,7 @@ C.push(
 /* that the removed password-less portal route is gone (404).              */
 /* ------------------------------------------------------------------------ */
 
-const ADMIN_LOGIN = { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: 'admin', password: 'password' }, expected_status: 200, save: { adminToken: 'token' }, description: 'admin login' };
+const ADMIN_LOGIN = { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{admin_username}}', password: '{{admin_password}}' }, expected_status: 200, save: { adminToken: 'token' }, description: 'admin login' };
 const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
 
 C.push(
@@ -2765,6 +2766,7 @@ C.push(
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'fault-injection', data: 'One message with channel "carrier-pigeon" and unique MsgId.', source: 'Generated per run.' },
     expected: 'Delivery handled either way; health 200 after.',
+    atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app: on 202 the event lands in the inbound-events append-only audit log (no delete route). Per-run unique MsgId keeps the row isolated.' },
   },
   {
     key: 'SB-CH-GHOST-TENANT',
@@ -2817,8 +2819,11 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: [200, 202, 400, 422], description: 'negative count' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: [200, 202, 400, 422], save: { negcount_run_id: 'id' }, description: 'negative count' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
+    ],
+    cleanupSteps: [
+      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/runs/{{negcount_run_id}}', headers: BEARER, expected_status: [200, 204, 404], skip_if_missing: ['negcount_run_id'], description: 'remove the created run if one was created' },
     ],
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation'],
@@ -2851,9 +2856,12 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: [200, 202, 400, 422], description: 'injection-shaped channel' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: [200, 202, 400, 422], save: { injection_run_id: 'id' }, description: 'injection-shaped channel' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', headers: BEARER, expected_status: 200, description: 'catalogue routes still work (no table dropped)' },
+    ],
+    cleanupSteps: [
+      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/runs/{{injection_run_id}}', headers: BEARER, expected_status: [200, 204, 404], skip_if_missing: ['injection_run_id'], description: 'remove the created run if one was created' },
     ],
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation', 'injection'],
@@ -2948,6 +2956,7 @@ C.push(
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'oversized', data: 'One JSON payload nested 20 levels deep.', source: 'Hand-crafted.' },
     expected: 'Clean accept-or-reject; health 200 after.',
+    atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app: on 2xx the event lands in the inbound-events append-only audit log (no delete route). Per-run unique MsgId keeps the row isolated.' },
   },
   {
     key: 'SB-CH-CONCURRENT-IDENTICAL-SEED-RUNS',

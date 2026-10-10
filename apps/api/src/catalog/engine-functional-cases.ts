@@ -497,6 +497,7 @@ C.push(
     cleanupSteps: [ARCHIVE_CLEANUP('{{n1}}'), ARCHIVE_CLEANUP('{{n2}}')],
     dataProfile: SANDBOX_DATA('Two temporary cases sharing one name, archived at the end.'),
     expected: 'Second name ends with " (YYYYMMDD-HHMMSS)".',
+    atomicityNote: { reason: 'tests-interaction', detail: 'The uniqueness-with-timestamp invariant can only be observed by creating the duplicate name a second time; both creates are the material of the one behaviour under test.' },
   }),
   integration({
     key: 'TE-INT-CASE-REQUIRED-FIELDS', name: 'Case creation requires key, name and application',
@@ -644,6 +645,7 @@ C.push(
     ],
     dataProfile: ISOLATED_DATA,
     expected: 'FIFO hand-out; third claim 204.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'FIFO claim order is only observable with ≥2 queued executions — the ordering invariant IS the single behaviour under test.' },
   }),
   integration({
     key: 'TE-INT-SUITE-EXECUTION', name: 'Queueing a suite resolves its cases',
@@ -774,6 +776,7 @@ C.push(
     ],
     dataProfile: SANDBOX_DATA('Three generated proposals, all rejected in the same case; the API has no proposal-delete route, so rejected audit rows remain stored.'),
     expected: 'Three proposals created and rejected.',
+    atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'The engine has no /ai-proposals delete route by design — rejected rows stay as an audit trail. The case rejects every proposal it creates, which is the strongest discharge the API offers.' },
   })
 );
 
@@ -823,6 +826,7 @@ C.push(
     ],
     dataProfile: SANDBOX_DATA('Two runs of fixture case TE-FIX-PASS, both cancelled while queued.'),
     expected: '202, 409 naming the active run, then 202 after the cancel.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'Exclusivity can only be exercised with a second overlapping run — the "refuse the second one" invariant IS the single behaviour under test.' },
   }),
   usecase({
     key: 'TE-UC-RETIRED-ENVIRONMENT', name: 'A run cannot be triggered against a retired environment',

@@ -23,6 +23,41 @@ describe('Test Engine self-test catalogue', () => {
     }
   });
 
+  // Atomic contract (see .github/skills/test-case-lifecycle/SKILL.md): one case,
+  // one behaviour. An HTTP case that POSTs to the same creation endpoint more
+  // than once is likely exercising several behaviours and must declare why
+  // (CaseDef.atomicityNote). Session logins and action/sub-resource routes are
+  // ignored, since those are not resource creations.
+  it('does not create the same resource more than once without justification', () => {
+    const AUTH_URL = /\/session\/(login|refresh|logout)|\/auth\//;
+    const ACTION_URL = /\/(stage|transitions|validate|rotate|execute|claim|cancel|finish|dummy|close|verify|accept|reject|resolve|archive|promote|publish|discard|withdraw|revoke|dispatch|replay|results)(\/|\b)/i;
+    const JUSTIFICATIONS = new Set(['tests-interaction', 'tests-idempotency', 'tests-independence', 'pending-split']);
+    const problems: string[] = [];
+    for (const c of [...ENGINE_CASES, ...SANDBENCH_CASES]) {
+      if (c.method !== 'http') continue;
+      const perEndpoint = new Map<string, number>();
+      for (const step of stepsOf(c)) {
+        if (step.action !== 'request') continue;
+        if (String(step.method || 'GET').toUpperCase() !== 'POST') continue;
+        const url = String(step.url || '');
+        if (AUTH_URL.test(url) || ACTION_URL.test(url)) continue;
+        const save = step.save || {};
+        const savesId = Object.values(save).some((v) => typeof v === 'string' && /(?:^|\.)id$/i.test(v));
+        if (!savesId) continue;
+        const key = url.replace(/\{\{[^}]+\}\}/g, '{var}');
+        perEndpoint.set(key, (perEndpoint.get(key) || 0) + 1);
+      }
+      const multi = [...perEndpoint.entries()].filter(([, n]) => n > 1);
+      if (!multi.length) continue;
+      const note = c.atomicityNote;
+      if (!note || !JUSTIFICATIONS.has(note.reason) || !(note.detail || '').trim()) {
+        const where = multi.map(([u, n]) => `${n}× ${u}`).join(', ');
+        problems.push(`${c.key}: creates the same resource ${where} without a CaseDef.atomicityNote (allowed reasons: ${[...JUSTIFICATIONS].join(', ')})`);
+      }
+    }
+    assert.deepEqual(problems, [], problems.join('\n'));
+  });
+
   it('cancels every execution a case can queue', () => {
     const queueUrl = /\/api\/v1\/(?:executions(?:\?|$)|runs(?:\?|$)|schedules\/[^/]+\/run(?:\?|$)|schedules\/trigger(?:\?|$))/;
     for (const testCase of ENGINE_CASES) {
@@ -141,6 +176,36 @@ describe('Test Engine self-test catalogue', () => {
     for (const c of ENGINE_CASES) {
       assert.ok(!JSON.stringify(c.steps || []).includes('\\u0000'), `${c.key}: a step's JSON contains a literal null byte`);
     }
+  });
+
+  // Parallel-safe logins: a case may not hard-code a persona username in its
+  // step body. All logins go through environment-config vars ({{username}},
+  // {{admin_username}} or a pool slot) so a deployment can rotate identities
+  // and parallel runs can be given distinct pool users without a catalog
+  // change (see [[atomic-case-contract]] / docs/USER-POOL.md).
+  it('does not hard-code a persona username in any step body', () => {
+    const FORBIDDEN = /^(admin|operator\.acme|analyst\.acme|reviewer\.acme|auditor\.acme|admin\.acme|analyst)$/i;
+    const problems: string[] = [];
+    for (const c of [...ENGINE_CASES, ...SANDBENCH_CASES]) {
+      for (const [idx, step] of stepsOf(c).entries()) {
+        const body = (step as Step).body as Record<string, unknown> | undefined;
+        if (!body || typeof body !== 'object') continue;
+        const u = typeof body.username === 'string' ? body.username : undefined;
+        if (u && FORBIDDEN.test(u)) problems.push(`${c.key} step ${idx + 1}: body.username="${u}" is hard-coded — use {{username}}/{{admin_username}} or a user-pool slot`);
+      }
+    }
+    assert.deepEqual(problems, [], problems.join('\n'));
+  });
+
+  // Create→act→cleanup discipline (see [[atomic-case-contract]]): no HTTP
+  // case may leak a created record, delete a record it did not create, or
+  // write-mutate one. A case that genuinely cannot clean up declares the
+  // reason via CaseDef.atomicityNote ('pending-cleanup' or 'no-cleanup-endpoint').
+  // The audit script `scripts/audit-case-atomicity.mts` holds the heuristic.
+  it('leaves no HTTP case with an unflagged create→act→cleanup gap', async () => {
+    const { auditCases } = await import('../scripts/audit-case-atomicity.mts');
+    const findings = auditCases([...SANDBENCH_CASES, ...ENGINE_CASES]);
+    assert.deepEqual(findings, [], findings.map((f) => `${f.key} [${f.category}] ${f.detail}`).join('\n'));
   });
 
   it('describes the artefact the worker-protocol cases upload', () => {

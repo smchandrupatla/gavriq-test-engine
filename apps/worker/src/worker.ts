@@ -11,6 +11,7 @@ import { runHttp } from './runners/http.js';
 import { runPerformance } from './runners/performance.js';
 import { runSit, isSitScript } from './runners/sit.js';
 import { runE2E } from './runners/e2e.js';
+import { closeBrowserPool } from './runners/playwright.js';
 import { ensureEvidence, evidencePreflight, publishEvidence, secretValues } from './evidence.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
@@ -205,25 +206,50 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
     };
   };
 
+  // Every runner branch below funnels through runCase() so cleanup is always
+  // attempted — even if the runner (or anything between the call and the
+  // wrap) throws. The atomic contract requires it (see
+  // .github/skills/test-case-lifecycle/SKILL.md, authoring step 4).
+  const runCase = async (body: () => Promise<RunnerResult>): Promise<RunnerResult> => {
+    let result: RunnerResult;
+    try {
+      result = await body();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result = {
+        status: 'failed',
+        verdict: 'fail',
+        duration_ms: 0,
+        message: msg.slice(0, 500),
+        classification: 'runner_crash',
+        metrics: {},
+        evidence: [],
+      };
+    }
+    return withCleanup(result);
+  };
+
   // Imported SIT catalog entries
   if (isSitScript(script) || method === 'sit') {
-    const r = await runSit({
-      script,
-      baseUrl,
-      vars,
-      timeoutSeconds: tc?.timeout_seconds || 120,
-      signal,
-    });
-    return withCleanup({
-      status: r.status === 'skipped' ? 'skipped' : r.status,
-      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      remarks: r.remarks,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: [],
-      output: r.output,
+    return runCase(async () => {
+      const r = await runSit({
+        script,
+        baseUrl,
+        vars,
+        timeoutSeconds: tc?.timeout_seconds || 120,
+        signal,
+      });
+      return {
+        status: r.status === 'skipped' ? 'skipped' : r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: [],
+        output: r.output,
+      };
     });
   }
 
@@ -236,99 +262,126 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
   };
 
   if (method === 'playwright') {
-    const r = await runPlaywright({
-      ...common,
-      browser: rules.browser || 'chromium',
-      viewport,
-      headless,
-      signal,
-    });
-    return withCleanup({
-      status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      remarks: r.remarks,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: r.evidence || [],
+    return runCase(async () => {
+      const r = await runPlaywright({
+        ...common,
+        browser: rules.browser || 'chromium',
+        viewport,
+        headless,
+        signal,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: r.evidence || [],
+      };
     });
   }
 
   if (method === 'e2e') {
-    const r = await runE2E({
-      baseUrl,
-      steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
-      vars,
-      timeoutSeconds: tc?.timeout_seconds || 180,
-      signal,
-    });
-    return withCleanup({
-      status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      remarks: r.remarks,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: r.evidence || [],
+    return runCase(async () => {
+      const r = await runE2E({
+        baseUrl,
+        steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
+        vars,
+        timeoutSeconds: tc?.timeout_seconds || 180,
+        signal,
+        // Pin the e2e runDir to the case key so the agent's plan cache survives
+        // across runs — the first-run plan is paid once, then replays are fast.
+        caseKey: tc?.key,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: r.evidence || [],
+      };
     });
   }
 
   if (method === 'http' || method === 'rest' || method === 'api') {
-    const r = await runHttp({
-      ...common,
-      signal,
-      cleanupSteps: Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : undefined,
-      cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
-    });
-    return {
-      status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      remarks: r.remarks,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: (r as { evidence?: any[] }).evidence || [],
-    };
+    // runHttp already runs cleanupSteps itself, so skip the wrapper here —
+    // double-firing would try to delete already-deleted resources.
+    try {
+      const r = await runHttp({
+        ...common,
+        signal,
+        cleanupSteps: Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : undefined,
+        cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: (r as { evidence?: any[] }).evidence || [],
+      };
+    } catch (err) {
+      // Crash before runHttp's own cleanup could run: attempt it from here.
+      const msg = err instanceof Error ? err.message : String(err);
+      return withCleanup({
+        status: 'failed',
+        verdict: 'fail',
+        duration_ms: 0,
+        message: msg.slice(0, 500),
+        classification: 'runner_crash',
+        metrics: {},
+        evidence: [],
+      });
+    }
   }
 
   if (method === 'performance' || method === 'load' || method === 'k6' || method === 'endurance' || method === 'soak') {
-    const r = await runPerformance({
-      baseUrl,
-      vars,
-      script: tc?.script,
-      url: rules.url,
-      path: rules.path || '/health',
-      method: rules.method || 'GET',
-      concurrency: rules.concurrency || 5,
-      requests: rules.requests || 20,
-      durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
-      timeoutSeconds: tc?.timeout_seconds || 15,
-      sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
-      signal,
+    return runCase(async () => {
+      const r = await runPerformance({
+        baseUrl,
+        vars,
+        script: tc?.script,
+        url: rules.url,
+        path: rules.path || '/health',
+        method: rules.method || 'GET',
+        concurrency: rules.concurrency || 5,
+        requests: rules.requests || 20,
+        durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
+        timeoutSeconds: tc?.timeout_seconds || 15,
+        sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
+        signal,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics,
+        evidence: [],
+      };
     });
-    return withCleanup({
+  }
+
+  return runCase(async () => {
+    const r = await runSelenium({ ...common, viewport, headless, signal });
+    return {
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
-      remarks: r.remarks,
       classification: r.classification || null,
-      metrics: r.metrics,
-      evidence: [],
-    });
-  }
-
-  const r = await runSelenium({ ...common, viewport, headless, signal });
-  return withCleanup({
-    status: r.status,
-    verdict: r.status === 'passed' ? 'pass' : 'fail',
-    duration_ms: r.duration_ms,
-    message: r.message,
-    classification: r.classification || null,
-    evidence: r.evidence || [],
+      evidence: r.evidence || [],
+    };
   });
 }
 
@@ -504,7 +557,15 @@ async function pollLoop() {
   }
 }
 
+// Close the pooled browsers before the worker exits so Chromium/Firefox/WebKit
+// shut down cleanly instead of leaving zombie processes in the container.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(sig, () => {
+    closeBrowserPool().finally(() => process.exit(0));
+  });
+}
+
 pollLoop().catch((err) => {
   console.error(err);
-  process.exit(1);
+  closeBrowserPool().finally(() => process.exit(1));
 });

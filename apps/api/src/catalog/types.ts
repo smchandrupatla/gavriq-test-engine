@@ -125,6 +125,23 @@ export interface CaseDef {
   commonFailureCauses?: string;
   /** Catalog module the case is defined in (set by tagSource; used for the automation link). */
   sourceFile?: string;
+  /**
+   * Justification when a case intentionally creates the same kind of resource
+   * more than once (so the atomic-single-purpose lint lets it through). Without
+   * this, the lint requires an HTTP case to POST at most one creation to any
+   * given endpoint — the atomic rule from
+   * .github/skills/test-case-lifecycle/SKILL.md.
+   */
+  atomicityNote?: {
+    reason:
+      | 'tests-interaction'    // multiple creates verify ordering/isolation/exclusivity between resources
+      | 'tests-idempotency'    // repeated identical creates verify idempotent handling
+      | 'tests-independence'   // separate creates verify an independence invariant
+      | 'pending-split'        // acknowledged non-atomic, scheduled for a split
+      | 'pending-cleanup'      // acknowledged leaky, cleanup to be added
+      | 'no-cleanup-endpoint'; // the application exposes no delete/archive route for the created resource
+    detail: string;            // one sentence explaining why or what the follow-up is
+  };
 }
 
 export interface SuiteDef {

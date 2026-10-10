@@ -37,7 +37,7 @@ import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-case
 import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from './catalog/record-and-play-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 import { screenFields, type AppContext } from './catalog/plain-language.js';
-import { annotateAppendOnlyCases, bindCaseToPool, poolDefaults, poolSecretEnvDefaults } from './catalog/user-pool.js';
+import { annotateAppendOnlyCases, autoAttachCleanups, bindCaseToPool, poolDefaults, poolSecretEnvDefaults } from './catalog/user-pool.js';
 
 // Per application: the environment its cases are written for, where cases
 // that need prepared fixtures run, and the team that owns its defects.
@@ -113,6 +113,11 @@ async function upsertApplication(key: string, name: string, description: string,
   // no-cleanup-endpoint atomicityNote (idempotent — skips cases already
   // annotated by the author).
   annotateAppendOnlyCases(cases);
+  // Auto-attach cleanup steps for well-known creation endpoints (runs, users,
+  // definitions, workers, message-types, drafts) whose POSTs don't already
+  // save the created id. Keeps authors from having to repeat the save+DELETE
+  // boilerplate for every case touching the same route.
+  autoAttachCleanups(cases);
   const counts = new Map<string, number>();
   for (const c of cases) {
     const suite = suites.find((s) => s.key === c.suiteKey);

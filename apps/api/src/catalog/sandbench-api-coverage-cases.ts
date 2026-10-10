@@ -487,15 +487,35 @@ function classify(method: Method, path: string): Expected {
   if (method === 'GET' && !paramised) return { statuses: [200, 404, 503] };
   // Authenticated GET on a parameterised path → 200/400/404/422/503.
   if (method === 'GET' && paramised) return { statuses: [200, 400, 404, 422, 503] };
-  // DELETE on parameterised → 2xx/4xx/412 (If-Match demanded).
-  if (method === 'DELETE' && paramised) return { statuses: [200, 204, 400, 403, 404, 412] };
-  // POST/PUT/PATCH with empty body — accept most reasonable outcomes.
-  //   2xx: route accepts a bare body (preview/randomize/clear-data endpoints).
-  //   4xx: route rejects — the typical case.
-  //   412: route demands an If-Match header (optimistic concurrency).
-  const bodyWriteStatuses = [200, 201, 202, 204, 400, 401, 403, 404, 409, 412, 422, 429, 503];
+  // Writes against a parameterised probe id (we substitute :id with
+  // 00000000-...): the route MUST refuse, since atomicity would be broken by
+  // accidentally mutating the probe row. If a route accepts 2xx against the
+  // zero-UUID, that is a real defect — not a tolerated outcome.
+  if (method === 'DELETE' && paramised) return { statuses: [400, 403, 404, 412] };
+  if ((method === 'PUT' || method === 'PATCH') && paramised) {
+    return { statuses: [400, 401, 403, 404, 409, 412, 422], body: {} };
+  }
+  // POST on a parameterised path (`/parent/:id/children`) with the probe id
+  // as parent: parent does not exist → the route must refuse.
+  if (method === 'POST' && paramised) {
+    return { statuses: [400, 401, 403, 404, 409, 412, 422], body: {} };
+  }
+  // POST/PUT/PATCH on a top-level path with an empty body. A persisting
+  // creation endpoint should reject the empty payload for missing required
+  // fields — any 2xx against `body: {}` would leave a persisted record and
+  // break atomicity. Known non-persisting suffixes (preview, randomize,
+  // dryrun, dummy, invalidate, validate, parse, connectivity-check, health,
+  // ping, export, clear-data, randomise) legitimately return 2xx on empty
+  // bodies; everything else is restricted to 4xx-only.
+  // Non-persisting POST suffixes must appear as the LAST path segment —
+  // `/analytics/export/ingest` is a persist (the leaf is `ingest`), not an
+  // export, so a middle `/export/` doesn't qualify.
+  const nonPersistingPost = /\/(preview|randomize|randomise|dryrun|dry-run|simulate|dummy|invalidate|validate|parse|connectivity-check|health|ping|clear-data|clear|export|logout)$/i;
   if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-    return { statuses: bodyWriteStatuses, body: {} };
+    if (nonPersistingPost.test(path)) {
+      return { statuses: [200, 201, 202, 204, 400, 401, 403, 404, 409, 412, 422, 429, 503], body: {} };
+    }
+    return { statuses: [400, 401, 403, 404, 409, 412, 422, 429, 503], body: {} };
   }
   // Fallback.
   return { statuses: [200, 400, 404] };

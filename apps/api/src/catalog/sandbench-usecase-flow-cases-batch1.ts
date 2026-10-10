@@ -27,7 +27,7 @@ const BEARER = { authorization: 'Bearer {{token}}' };
 // for the admin-only endpoints behind the Roles/Users screens (operator.acme gets 403).
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { username: 'admin', password: '{{password}}' },
+  body: { username: '{{admin_username}}', password: '{{admin_password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };
