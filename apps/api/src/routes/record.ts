@@ -162,6 +162,28 @@ export async function recordRoutes(app: FastifyInstance) {
     return reply.send({ data: recordAgentView() });
   });
 
+  // Ask the host-side infra-agent to spawn the record agent on demand. The
+  // engine runs in Docker; it reaches the host via host.docker.internal:9900
+  // (the infra-agent's control plane). If the infra-agent isn't up either,
+  // the response explains the manual command.
+  app.post('/api/v1/record/agent/start', async (_req, reply) => {
+    const base = (process.env.INFRA_AGENT_CONTROL_URL || 'http://host.docker.internal:9900').replace(/\/+$/, '');
+    try {
+      const r = await fetch(`${base}/spawn/record-agent`, { method: 'POST', signal: AbortSignal.timeout(5_000) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return reply.status(502).send({ error: `infra-agent refused the spawn request: ${(body as any)?.error || r.status}`, infra_agent_url: base });
+      }
+      return reply.send({ data: body });
+    } catch (err) {
+      return reply.status(503).send({
+        error: 'Could not reach the host infra-agent. Start it on your machine first with: .\\scripts\\start-infra-agent.ps1 (Windows) or scripts/start-infra-agent.sh (macOS/Linux). The infra-agent then starts the record-agent on demand.',
+        detail: (err as Error).message,
+        infra_agent_url: base,
+      });
+    }
+  });
+
   app.post<{ Body: { url?: string; application_key?: string; application_id?: string; browser?: string } }>(
     '/api/v1/record/start',
     async (req, reply) => {

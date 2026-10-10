@@ -25,7 +25,8 @@
  * ever run, whatever a job says.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, openSync } from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -377,6 +378,101 @@ async function poll() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Local control plane: a tiny HTTP server on 127.0.0.1:9900 that the engine
+// (which runs in Docker and reaches the host via host.docker.internal) uses to
+// spawn host-side helpers like the record agent on demand. Everything the
+// engine ever asks for is a one-shot: start / stop / status of one of the
+// agents whose source lives in apps/<name>-agent.
+// -----------------------------------------------------------------------------
+const CONTROL_PORT = Number(process.env.INFRA_AGENT_CONTROL_PORT) || 9900;
+const RECORD_PID_FILE = path.join(ROOT, 'record-agent.pid');
+const RECORD_LOG_FILE = path.join(ROOT, 'record-agent.log');
+const RECORD_AGENT_SRC = path.join(ROOT, 'apps/record-agent/src/agent.ts');
+const TSX_CLI = path.join(ROOT, 'node_modules/tsx/dist/cli.mjs');
+
+function pidRunning(pidFile: string): number | null {
+  if (!existsSync(pidFile)) return null;
+  const raw = Number(readFileSync(pidFile, 'utf8').trim());
+  if (!raw) return null;
+  try { process.kill(raw, 0); return raw; } catch { return null; }
+}
+
+function spawnRecordAgent(): { pid: number; started: boolean; error?: string } {
+  const existing = pidRunning(RECORD_PID_FILE);
+  if (existing) return { pid: existing, started: false };
+  if (!existsSync(RECORD_AGENT_SRC)) return { pid: 0, started: false, error: `record-agent source not found: ${RECORD_AGENT_SRC}` };
+  if (!existsSync(TSX_CLI)) return { pid: 0, started: false, error: `tsx not installed under ${ROOT} — run npm install` };
+  try {
+    const out = openSync(RECORD_LOG_FILE, 'a');
+    const err = openSync(RECORD_LOG_FILE, 'a');
+    const child = spawn(process.execPath, [TSX_CLI, RECORD_AGENT_SRC], {
+      cwd: ROOT,
+      env: { ...process.env, TEST_ENGINE_API: API },
+      detached: true,
+      stdio: ['ignore', out, err],
+      windowsHide: true,
+    });
+    child.unref();
+    if (!child.pid) return { pid: 0, started: false, error: 'spawn returned no pid' };
+    writeFileSync(RECORD_PID_FILE, String(child.pid), 'utf8');
+    log(`spawned record-agent (pid ${child.pid}); log: ${RECORD_LOG_FILE}`);
+    return { pid: child.pid, started: true };
+  } catch (e) {
+    return { pid: 0, started: false, error: (e as Error).message };
+  }
+}
+
+function stopRecordAgent(): { stopped: boolean; pid: number | null } {
+  const pid = pidRunning(RECORD_PID_FILE);
+  if (!pid) return { stopped: false, pid: null };
+  try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+  return { stopped: true, pid };
+}
+
+/** Accept loopback + RFC1918 (Docker bridge, LAN) only. */
+function isLocalAddr(addr: string): boolean {
+  if (!addr) return false;
+  const a = addr.replace(/^::ffff:/, '');
+  if (a === '127.0.0.1' || a === '::1' || a.startsWith('127.')) return true;
+  if (a.startsWith('10.')) return true;
+  if (a.startsWith('192.168.')) return true;
+  return /^172\.(1[6-9]|2\d|3[0-1])\./.test(a);
+}
+
+function startControlServer(): void {
+  const server = http.createServer((req, res) => {
+    if (!isLocalAddr(req.socket.remoteAddress || '')) {
+      res.statusCode = 403; res.end('{"error":"local networks only"}'); return;
+    }
+    const url = req.url || '/';
+    if (req.method === 'GET' && url === '/health') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ agent_id: AGENT_ID, record_agent_pid: pidRunning(RECORD_PID_FILE) }));
+      return;
+    }
+    if (req.method === 'POST' && url === '/spawn/record-agent') {
+      const r = spawnRecordAgent();
+      res.setHeader('content-type', 'application/json');
+      res.statusCode = r.error ? 500 : 200;
+      res.end(JSON.stringify(r));
+      return;
+    }
+    if (req.method === 'POST' && url === '/stop/record-agent') {
+      const r = stopRecordAgent();
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(r));
+      return;
+    }
+    res.statusCode = 404; res.end('{"error":"not found"}');
+  });
+  server.on('error', (err) => log(`control server error: ${err.message}`));
+  // Bind to 0.0.0.0 so a container reaching host.docker.internal (which lands
+  // on the host's bridge IP, not 127.0.0.1) can get through; the per-request
+  // isLocalAddr check restricts clients to loopback + RFC1918.
+  server.listen(CONTROL_PORT, '0.0.0.0', () => log(`control plane on 0.0.0.0:${CONTROL_PORT} (loopback + RFC1918 only)`));
+}
+
 async function main() {
   try {
     const v = await docker(['version', '--format', '{{.Server.Version}}'], 30_000);
@@ -386,6 +482,7 @@ async function main() {
     process.exit(1);
   }
   log(`agent ${AGENT_ID} · engine ${API} · repo ${ROOT} · polling every ${POLL_MS}ms`);
+  startControlServer();
   await heartbeat();
   setInterval(heartbeat, HEARTBEAT_MS).unref();
   await poll();

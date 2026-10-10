@@ -314,15 +314,27 @@ async function pollOnce(): Promise<void> {
   }
 }
 
+// Playwright emits navigation errors from inside internal event emitters that
+// Node sometimes sees as unhandled, even when our try/catch has them covered.
+// Treat those as a logged warning instead of crashing the agent.
+process.on('unhandledRejection', (err) => {
+  console.warn('[record-agent] unhandled rejection:', (err as Error)?.message || err);
+});
+process.on('uncaughtException', (err) => {
+  console.warn('[record-agent] uncaught exception:', (err as Error)?.message || err);
+});
+
 async function main() {
   installedBrowsers = await detectBrowsers();
   console.log(`[record-agent] host=${hostname()} engine=${ENGINE} browsers=${installedBrowsers.join(',') || '(none)'} density=${DEFAULT_DENSITY}`);
   if (!installedBrowsers.length) console.warn('[record-agent] no Playwright browsers found. Install with: npx playwright install');
 
   await heartbeat();
-  setInterval(heartbeat, 5000).unref();
-  setInterval(pollOnce, POLL_MS).unref();
-  process.stdin.resume();
+  // Keep the event loop alive. Do NOT .unref() — the infra-agent spawns us
+  // with stdin ignored, so stdin.resume() cannot keep us running; the two
+  // intervals below are the only reason we stay up.
+  setInterval(heartbeat, 5000);
+  setInterval(pollOnce, POLL_MS);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
