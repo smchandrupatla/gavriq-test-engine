@@ -240,7 +240,7 @@ export async function getReport(ref: string) {
   return { ...rows[0], summary: summarize(defects.rows), defects: defects.rows };
 }
 
-export async function listDefects(filter: { status?: string; report?: string; limit?: number }) {
+export async function listDefects(filter: { status?: string; report?: string; test_case_id?: string; case_key?: string; limit?: number }) {
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (filter.status) {
@@ -251,10 +251,22 @@ export async function listDefects(filter: { status?: string; report?: string; li
     params.push(filter.report);
     clauses.push(`(r.id::text = $${params.length} OR r.key = $${params.length})`);
   }
+  if (filter.test_case_id) {
+    params.push(filter.test_case_id);
+    clauses.push(`(d.test_case_id::text = $${params.length} OR d.case_key = $${params.length})`);
+  }
+  if (filter.case_key) {
+    params.push(filter.case_key);
+    clauses.push(`d.case_key = $${params.length}`);
+  }
   params.push(Math.min(Math.max(filter.limit || 100, 1), 500));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const { rows } = await query(
-    `SELECT d.*, r.key AS report_key FROM defects d JOIN defect_reports r ON r.id = d.report_id
+    `SELECT d.*, r.key AS report_key, r.status AS report_status, r.claimed_by AS report_claimed_by,
+            e.key AS execution_key, env.key AS environment_key, env.name AS environment_name
+       FROM defects d JOIN defect_reports r ON r.id = d.report_id
+       LEFT JOIN executions e ON e.id = d.execution_id
+       LEFT JOIN environments env ON env.id = e.environment_id
      ${where} ORDER BY d.updated_at DESC LIMIT $${params.length}`,
     params
   );

@@ -19,7 +19,14 @@ test("ASVS V6 login rejects missing credentials (no 500)", async () => {
   const { status, json } = await postLogin({});
   assert.ok(status === 401 || status === 422, `expected 401/422 got ${status}`);
   assert.ok(json.error, "error envelope missing");
-  assert.ok(!/password|stack|jwtSecret/i.test(JSON.stringify(json)), "secret leaked in login error");
+  // The validation message "username and password are required" legitimately
+  // contains the word "password" — that is not a leaked secret. Guard against
+  // actual secret leakage: a stack trace, the JWT secret, or a credential
+  // VALUE (quoted/colon-prefixed) in the envelope.
+  const serialised = JSON.stringify(json);
+  assert.ok(!/at\s+[A-Za-z0-9_$.]+ \(/.test(serialised), "stack trace leaked in login error");
+  assert.ok(!/jwtSecret/i.test(serialised), "jwt secret leaked in login error");
+  assert.ok(!/"password"\s*:\s*"[^"]{3,}"/i.test(serialised), "password value echoed in login error");
 });
 
 test("ASVS V6 login rejects wrong password", async () => {

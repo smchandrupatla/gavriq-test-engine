@@ -105,6 +105,19 @@ export async function logAutoDefect(db: Db, a: AutoLogInput): Promise<string> {
     version = dep.version || dep.commit || 'not recorded';
   }
 
+  // Pull the test case's intent and expected result so the implementation manager has the
+  // full picture — what was being checked, what should have happened, and what did.
+  let context = '';
+  if (a.testCaseId) {
+    const { rows: tcs } = await db.query(
+      `SELECT objective, expected_results FROM test_cases WHERE id = $1`,
+      [a.testCaseId]
+    );
+    const tc = tcs[0];
+    if (tc?.objective) context += `\n\nWhat the test checks: ${tc.objective}`;
+    if (tc?.expected_results) context += `\n\nExpected result: ${tc.expected_results}`;
+  }
+
   const sentAt = a.held ? null : new Date();
   const { rows } = await db.query(
     `INSERT INTO defect_log (key, application_id, title, description, severity, status, origin, test_case_id, case_key,
@@ -117,7 +130,7 @@ export async function logAutoDefect(db: Db, a: AutoLogInput): Promise<string> {
     [
       applicationId,
       `${a.caseName} — ${a.severity} failure`,
-      `Logged automatically from run ${a.runId ?? 'unknown'}. The case "${a.caseName}" failed with: ${a.message}`,
+      `Logged automatically from run ${a.runId ?? 'unknown'}. The case "${a.caseName}" failed with: ${a.message}${context}`,
       a.severity,
       a.held ? 'logged' : 'sent',
       a.testCaseId,
@@ -165,17 +178,60 @@ function sha256(data: string | Buffer): string {
 
 // ------------------------------------------------------------------ settings
 
-export async function getAutoApprove(appKey: string): Promise<{ application: string; auto_approve: boolean } | null> {
+export interface ImplementationManager {
+  name: string;
+  contact?: string;
+}
+
+export interface AppDefectSettings {
+  application: string;
+  auto_approve: boolean;
+  implementation_manager: ImplementationManager | null;
+}
+
+/** Read the implementation manager and auto-approve configured for an application. */
+export async function getAutoApprove(appKey: string): Promise<AppDefectSettings | null> {
   const { rows } = await query(
-    `SELECT key, COALESCE((metadata->>'defect_auto_approve')::boolean, false) AS on FROM applications WHERE key = $1`,
+    `SELECT key, COALESCE((metadata->>'defect_auto_approve')::boolean, false) AS on,
+            metadata->'implementation_manager' AS im
+       FROM applications WHERE key = $1`,
     [appKey]
   );
   if (!rows[0]) return null;
-  return { application: rows[0].key, auto_approve: Boolean(rows[0].on) };
+  return {
+    application: rows[0].key,
+    auto_approve: Boolean(rows[0].on),
+    implementation_manager: normalizeManager(rows[0].im),
+  };
+}
+
+function normalizeManager(raw: unknown): ImplementationManager | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = String((raw as any).name ?? '').trim();
+  if (!name) return null;
+  const contact = String((raw as any).contact ?? '').trim();
+  return contact ? { name, contact } : { name };
+}
+
+/** Name the implementation manager who receives this application's defects (or clear it with null). */
+export async function setImplementationManager(appKey: string, manager: ImplementationManager | null): Promise<AppDefectSettings> {
+  const value = manager && manager.name?.trim() ? normalizeManager(manager) : null;
+  const { rows } = await query(
+    `UPDATE applications
+        SET metadata = CASE WHEN $2::jsonb IS NULL
+                            THEN COALESCE(metadata, '{}'::jsonb) - 'implementation_manager'
+                            ELSE COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('implementation_manager', $2::jsonb) END,
+            updated_at = now()
+      WHERE key = $1
+      RETURNING key`,
+    [appKey, value ? JSON.stringify(value) : null]
+  );
+  if (!rows[0]) throw new LogError(404, `application ${appKey} not found`);
+  return (await getAutoApprove(appKey))!;
 }
 
 /** Turn auto-approve on or off for an application. Held reports stay held: a person releases them. */
-export async function setAutoApprove(appKey: string, on: boolean) {
+export async function setAutoApprove(appKey: string, on: boolean): Promise<AppDefectSettings> {
   const { rows } = await query(
     `UPDATE applications
         SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('defect_auto_approve', $2::boolean),
@@ -185,7 +241,7 @@ export async function setAutoApprove(appKey: string, on: boolean) {
     [appKey, on]
   );
   if (!rows[0]) throw new LogError(404, `application ${appKey} not found`);
-  return { application: rows[0].key, auto_approve: on };
+  return (await getAutoApprove(appKey))!;
 }
 
 // ------------------------------------------------------------------ CRUD
@@ -195,6 +251,7 @@ export interface ListFilter {
   status?: string;
   run_id?: string;
   origin?: string;
+  environment?: string;
   limit?: number;
 }
 
@@ -217,11 +274,15 @@ export async function listDefectLog(f: ListFilter) {
     params.push(f.origin);
     clauses.push(`dl.origin = $${params.length}`);
   }
+  if (f.environment) {
+    params.push(f.environment);
+    clauses.push(`(dl.environment_key = $${params.length} OR dl.environment_id::text = $${params.length})`);
+  }
   params.push(Math.min(Math.max(f.limit || 200, 1), 1000));
   const { rows } = await query(
     `SELECT dl.id, dl.key, a.key AS application, dl.title, dl.severity, dl.status, dl.origin, dl.case_key,
             dl.run_id, dl.environment_key, dl.application_version, dl.logged_by, dl.validated_by, dl.sent_by,
-            dl.sent_at, dl.rejected_reason, dl.created_at, dl.updated_at,
+            dl.sent_at, dl.implementation_manager, dl.rejected_reason, dl.created_at, dl.updated_at,
             (SELECT count(*)::int FROM defect_log_attachments att WHERE att.defect_log_id = dl.id) AS attachments
        FROM defect_log dl JOIN applications a ON a.id = dl.application_id
        ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
@@ -234,10 +295,17 @@ export async function listDefectLog(f: ListFilter) {
 
 export async function getDefectLog(id: string) {
   const { rows } = await query(
-    `SELECT dl.*, a.key AS application, tc.name AS case_name
+    `SELECT dl.*, a.key AS application, a.name AS application_name,
+            a.metadata->'implementation_manager' AS app_implementation_manager,
+            tc.name AS case_name, tc.objective AS case_objective, tc.preconditions AS case_preconditions,
+            tc.steps AS case_steps, tc.expected_results AS case_expected,
+            d.status AS defect_status, d.assignee AS defect_assignee, d.fix_ref AS defect_fix_ref, d.key AS defect_key,
+            dr.status AS report_status, dr.claimed_by AS report_claimed_by, dr.key AS report_key
        FROM defect_log dl
        JOIN applications a ON a.id = dl.application_id
        LEFT JOIN test_cases tc ON tc.id = dl.test_case_id
+       LEFT JOIN defects d ON d.id = dl.defect_id
+       LEFT JOIN defect_reports dr ON dr.id = dl.defect_report_id
       WHERE dl.id = $1`,
     [id]
   );
@@ -374,6 +442,263 @@ export async function deleteDefectLog(id: string): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+// --------------------------------------------------------- implementation managers
+
+/** The implementation managers already named on any application, so one can be reused. */
+export async function listManagers(): Promise<ImplementationManager[]> {
+  const { rows } = await query(
+    `SELECT DISTINCT metadata->'implementation_manager' AS im
+       FROM applications WHERE metadata ? 'implementation_manager'`
+  );
+  const seen = new Set<string>();
+  const out: ImplementationManager[] = [];
+  for (const r of rows) {
+    const m = normalizeManager(r.im);
+    if (m && !seen.has(m.name.toLowerCase())) {
+      seen.add(m.name.toLowerCase());
+      out.push(m);
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ------------------------------------------------------------------ comments
+
+export async function listComments(id: string) {
+  const { rows } = await query(
+    `SELECT id, author, body, created_at FROM defect_log_comments WHERE defect_log_id = $1 ORDER BY created_at`,
+    [id]
+  );
+  return rows;
+}
+
+export async function addComment(id: string, body: string, author: string) {
+  if (!body?.trim()) throw new LogError(400, 'comment body is required');
+  const { rows: exists } = await query(`SELECT 1 FROM defect_log WHERE id = $1`, [id]);
+  if (!exists[0]) throw new LogError(404, 'defect not found');
+  const { rows } = await query(
+    `INSERT INTO defect_log_comments (defect_log_id, author, body) VALUES ($1, $2, $3)
+     RETURNING id, author, body, created_at`,
+    [id, author || 'operator', body.trim().slice(0, 4000)]
+  );
+  return rows[0]!;
+}
+
+// ------------------------------------------------------------------ timeline
+
+export interface TimelineItem {
+  at: string;
+  by: string;
+  kind: 'comment' | 'event';
+  action: string;
+  detail?: string;
+}
+
+/** The whole life of a defect as one conversation: the engine logging it, the review on the
+ *  test side, the hand-off, then everything the implementation manager and reruns did to it,
+ *  interleaved with the manual comments people added. */
+export async function getTimeline(id: string): Promise<TimelineItem[]> {
+  const { rows } = await query(
+    `SELECT dl.key, dl.created_at, dl.logged_by, dl.origin, dl.run_id, dl.validated_at, dl.validated_by,
+            dl.rejected_reason, dl.sent_at, dl.sent_by, dl.implementation_manager, dl.updated_at,
+            dl.defect_id, dl.defect_report_id, d.history AS defect_history, dr.history AS report_history
+       FROM defect_log dl
+       LEFT JOIN defects d ON d.id = dl.defect_id
+       LEFT JOIN defect_reports dr ON dr.id = dl.defect_report_id
+      WHERE dl.id = $1`,
+    [id]
+  );
+  const dl = rows[0];
+  if (!dl) throw new LogError(404, 'defect not found');
+
+  const items: TimelineItem[] = [];
+  const ev = (at: string | null, by: string | null, action: string, detail?: string) => {
+    if (at) items.push({ at: new Date(at).toISOString(), by: by || '—', kind: 'event', action, detail });
+  };
+
+  ev(dl.created_at, dl.logged_by, dl.origin === 'auto' ? 'Logged by the engine' : 'Raised by hand',
+    dl.run_id ? `Run ${dl.run_id}` : undefined);
+  ev(dl.validated_at, dl.validated_by, 'Validated on the test side');
+  if (dl.rejected_reason) ev(dl.updated_at, null, 'Rejected', dl.rejected_reason);
+  ev(dl.sent_at, dl.sent_by, 'Sent to the implementation manager',
+    dl.implementation_manager ? `To ${dl.implementation_manager}` : 'To the application queue');
+
+  // The implementation-manager side of the loop: claim, fix, rerun, verify or reopen.
+  const histories: Array<{ src: string; h: any }> = [];
+  if (Array.isArray(dl.report_history)) histories.push({ src: 'report', h: dl.report_history });
+  if (Array.isArray(dl.defect_history)) histories.push({ src: 'defect', h: dl.defect_history });
+  for (const { h } of histories) {
+    for (const e of h) {
+      if (!e?.at) continue;
+      const detailBits = [e.reason, e.fix_ref ? `fix: ${e.fix_ref}` : null, e.execution ? `run ${e.execution}` : null]
+        .filter(Boolean)
+        .join(' · ');
+      items.push({ at: new Date(e.at).toISOString(), by: e.by || '—', kind: 'event', action: labelAction(e.action), detail: detailBits || undefined });
+    }
+  }
+
+  for (const c of await listComments(id)) {
+    items.push({ at: new Date(c.created_at).toISOString(), by: c.author, kind: 'comment', action: 'Comment', detail: c.body });
+  }
+
+  items.sort((a, b) => a.at.localeCompare(b.at));
+  return items;
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  created: 'Report created',
+  opened: 'Defect opened',
+  released: 'Released to the implementation manager',
+  claimed: 'Picked up by the implementation manager',
+  with_pm: 'Picked up by the implementation manager',
+  fixing: 'Implementation manager started fixing',
+  fixed: 'Marked fixed by the implementation manager',
+  reopened: 'Reopened',
+  regressed: 'Regressed in a later run',
+  verified: 'Fix verified by a rerun',
+  rerun_verified: 'Rerun passed — fix verified',
+  rerun_reopened: 'Rerun failed — reopened',
+  seen_again: 'Seen again in a run',
+};
+function labelAction(a: string): string {
+  if (!a) return 'Update';
+  return ACTION_LABELS[a] ?? a.replace(/_/g, ' ');
+}
+
+// ------------------------------------------------------------------ bulk
+
+export const BULK_ACTIONS = ['delete', 'send', 'validate', 'reject'] as const;
+export type BulkAction = (typeof BULK_ACTIONS)[number];
+
+export function isBulkAction(v: unknown): v is BulkAction {
+  return typeof v === 'string' && (BULK_ACTIONS as readonly string[]).includes(v);
+}
+
+/** Apply one action to many defects, reporting per-id success so the UI can show what stuck. */
+export async function bulkAction(action: BulkAction, ids: string[], by: string, reason?: string) {
+  const done: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  for (const id of ids) {
+    try {
+      if (action === 'delete') {
+        if (!(await deleteDefectLog(id))) throw new LogError(404, 'defect not found');
+      } else if (action === 'send') {
+        await sendToManager(id, by);
+      } else if (action === 'validate') {
+        await updateDefectLog(id, { status: 'validated' }, by);
+      } else if (action === 'reject') {
+        await updateDefectLog(id, { status: 'rejected', rejected_reason: reason || 'Rejected in bulk' }, by);
+      }
+      done.push(id);
+    } catch (err) {
+      failed.push({ id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { action, done: done.length, failed };
+}
+
+// ------------------------------------------------------------------ dashboard
+
+/** One defect_log row as the dashboard reads it: its lifecycle status and the status of
+ *  the downstream defect, once it has been sent to the implementation manager. */
+export interface DashRow {
+  log_status: string;
+  application: string;
+  environment: string | null;
+  severity: string;
+  defect_status: string | null;
+}
+
+/** A sent defect's lane: in_progress until the implementation manager reports a fix, then
+ *  fixed, then verified once a rerun confirms it. Anything not sent yet is not_sent. */
+export type ProgressLane = 'not_sent' | 'in_progress' | 'fixed' | 'verified';
+
+function laneOf(r: DashRow): ProgressLane {
+  if (r.log_status !== 'sent') return 'not_sent';
+  if (r.defect_status === 'verified') return 'verified';
+  if (r.defect_status === 'fixed') return 'fixed';
+  return 'in_progress';
+}
+
+interface Group {
+  name: string;
+  total: number;
+  logged: number;
+  validated: number;
+  rejected: number;
+  sent: number;
+  not_sent: number;
+  in_progress: number;
+  fixed: number;
+  verified: number;
+}
+
+function emptyGroup(name: string): Group {
+  return { name, total: 0, logged: 0, validated: 0, rejected: 0, sent: 0, not_sent: 0, in_progress: 0, fixed: 0, verified: 0 };
+}
+
+/** Roll raw rows up into the counts the dashboard draws: lifecycle status, fix progress,
+ *  and both split per application and per environment. Pure, so it is tested without a DB. */
+export function rollupDashboard(rows: DashRow[]) {
+  const by_status: Record<string, number> = { logged: 0, validated: 0, rejected: 0, sent: 0 };
+  const by_severity: Record<string, number> = {};
+  const progress: Record<ProgressLane, number> = { not_sent: 0, in_progress: 0, fixed: 0, verified: 0 };
+  const apps = new Map<string, Group>();
+  const envs = new Map<string, Group>();
+
+  const tally = (map: Map<string, Group>, key: string, r: DashRow, lane: ProgressLane) => {
+    let g = map.get(key);
+    if (!g) { g = emptyGroup(key); map.set(key, g); }
+    g.total++;
+    if (r.log_status in g) (g as any)[r.log_status]++;
+    g[lane]++;
+  };
+
+  for (const r of rows) {
+    by_status[r.log_status] = (by_status[r.log_status] ?? 0) + 1;
+    const sev = r.severity || 'unknown';
+    by_severity[sev] = (by_severity[sev] ?? 0) + 1;
+    const lane = laneOf(r);
+    progress[lane]++;
+    tally(apps, r.application, r, lane);
+    tally(envs, r.environment || 'not recorded', r, lane);
+  }
+  const sorted = (m: Map<string, Group>) => [...m.values()].sort((a, b) => b.total - a.total);
+  return {
+    total: rows.length,
+    by_status,
+    by_severity,
+    progress,
+    open: progress.not_sent + progress.in_progress,
+    done: progress.fixed + progress.verified,
+    by_application: sorted(apps),
+    by_environment: sorted(envs),
+  };
+}
+
+export async function dashboardStats(f: { application?: string; environment?: string }) {
+  const params: unknown[] = [];
+  const clauses: string[] = [];
+  if (f.application) {
+    params.push(f.application);
+    clauses.push(`a.key = $${params.length}`);
+  }
+  if (f.environment) {
+    params.push(f.environment);
+    clauses.push(`(dl.environment_key = $${params.length} OR dl.environment_id::text = $${params.length})`);
+  }
+  const { rows } = await query(
+    `SELECT dl.status AS log_status, a.key AS application, dl.environment_key AS environment,
+            dl.severity, d.status AS defect_status
+       FROM defect_log dl
+       JOIN applications a ON a.id = dl.application_id
+       LEFT JOIN defects d ON d.id = dl.defect_id
+       ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}`,
+    params
+  );
+  return rollupDashboard(rows as DashRow[]);
+}
+
 // ------------------------------------------------------------------ attachments
 
 export async function addAttachment(id: string, a: { name: string; kind?: string; content_type?: string; data_base64: string }, by: string) {
@@ -416,20 +741,29 @@ export async function deleteAttachment(attId: string): Promise<boolean> {
  */
 export async function sendToManager(id: string, by: string) {
   return withTransaction(async (db) => {
-    const { rows } = await db.query(`SELECT * FROM defect_log WHERE id = $1 FOR UPDATE`, [id]);
+    const { rows } = await db.query(
+      `SELECT dl.*, a.key AS application_key, a.metadata->'implementation_manager' AS im
+         FROM defect_log dl JOIN applications a ON a.id = dl.application_id
+        WHERE dl.id = $1 FOR UPDATE OF dl`,
+      [id]
+    );
     const cur = rows[0];
     if (!cur) throw new LogError(404, 'defect not found');
     if (cur.status === 'sent') throw new LogError(409, 'this defect was already sent');
     if (cur.status === 'rejected') throw new LogError(409, 'a rejected defect must be reopened before it is sent');
+
+    const manager = normalizeManager(cur.im);
+    const managerName = manager?.name ?? null;
+    const route = { defect_log: cur.key, application: cur.application_key, implementation_manager: managerName };
 
     let reportId: string | null = cur.defect_report_id;
     let defectId: string | null = cur.defect_id;
     if (!reportId) {
       const rkey = reportKey(new Date(), randomUUID().replace(/-/g, ''));
       const { rows: reports } = await db.query(
-        `INSERT INTO defect_reports (key, source, status, held, history)
-         VALUES ($1, 'manual', 'open', false, $2::jsonb) RETURNING id`,
-        [rkey, historyEntry(by, 'created', { defect_log: cur.key })]
+        `INSERT INTO defect_reports (key, source, status, held, application_key, history)
+         VALUES ($1, 'manual', 'open', false, $2, $3::jsonb) RETURNING id`,
+        [rkey, cur.application_key, historyEntry(by, 'created', route)]
       );
       reportId = reports[0].id as string;
       const { rows: seq } = await db.query<{ n: string }>(`SELECT nextval('defect_key_seq')::text AS n`);
@@ -450,16 +784,20 @@ export async function sendToManager(id: string, by: string) {
       defectId = defects[0].id as string;
     } else {
       await db.query(
-        `UPDATE defect_reports SET held = false, updated_at = now(), history = history || $2::jsonb WHERE id = $1`,
-        [reportId, historyEntry(by, 'released', { defect_log: cur.key })]
+        `UPDATE defect_reports
+            SET held = false, application_key = COALESCE(application_key, $3), updated_at = now(),
+                history = history || $2::jsonb
+          WHERE id = $1`,
+        [reportId, historyEntry(by, 'released', route), cur.application_key]
       );
     }
 
     const { rows: sent } = await db.query(
       `UPDATE defect_log
-          SET status = 'sent', sent_by = $2, sent_at = now(), defect_report_id = $3, defect_id = $4, updated_at = now()
+          SET status = 'sent', sent_by = $2, sent_at = now(), defect_report_id = $3, defect_id = $4,
+              implementation_manager = $5, updated_at = now()
         WHERE id = $1 RETURNING *`,
-      [id, by, reportId, defectId]
+      [id, by, reportId, defectId, managerName]
     );
     return sent[0];
   });

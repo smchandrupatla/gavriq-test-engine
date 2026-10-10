@@ -28,7 +28,9 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.get('/api/v1/settings', async (_req, reply) => {
     const [{ rows }, types] = await Promise.all([
       query(
-        'SELECT run_retention_days, test_type_timeout_minutes, consecutive_failure_limit, updated_at FROM settings WHERE id = true'
+        `SELECT run_retention_days, test_type_timeout_minutes, consecutive_failure_limit,
+                rolling_fail_cancel_enabled, rolling_fail_cancel_window, rolling_fail_cancel_threshold_pct,
+                updated_at FROM settings WHERE id = true`
       ),
       testTypes(),
     ]);
@@ -38,6 +40,9 @@ export async function settingsRoutes(app: FastifyInstance) {
         run_retention_days: row.run_retention_days ?? 5,
         test_type_timeout_minutes: withDefaults(types, row.test_type_timeout_minutes || {}),
         consecutive_failure_limit: row.consecutive_failure_limit ?? 20,
+        rolling_fail_cancel_enabled: row.rolling_fail_cancel_enabled ?? true,
+        rolling_fail_cancel_window: row.rolling_fail_cancel_window ?? 20,
+        rolling_fail_cancel_threshold_pct: row.rolling_fail_cancel_threshold_pct ?? 50,
         updated_at: row.updated_at ?? null,
       },
     });
@@ -48,6 +53,9 @@ export async function settingsRoutes(app: FastifyInstance) {
       run_retention_days?: unknown;
       test_type_timeout_minutes?: unknown;
       consecutive_failure_limit?: unknown;
+      rolling_fail_cancel_enabled?: unknown;
+      rolling_fail_cancel_window?: unknown;
+      rolling_fail_cancel_threshold_pct?: unknown;
     };
   }>('/api/v1/settings', async (req, reply) => {
     const b = req.body || {};
@@ -91,15 +99,42 @@ export async function settingsRoutes(app: FastifyInstance) {
       failureLimit = n;
     }
 
+    let rollingEnabled: boolean | null = null;
+    if (b.rolling_fail_cancel_enabled !== undefined) {
+      rollingEnabled = !!b.rolling_fail_cancel_enabled;
+    }
+    let rollingWindow: number | null = null;
+    if (b.rolling_fail_cancel_window !== undefined) {
+      const n = Number(b.rolling_fail_cancel_window);
+      if (!Number.isInteger(n) || n < 5 || n > 500) {
+        return reply.status(400).send({ error: 'rolling_fail_cancel_window must be a whole number between 5 and 500' });
+      }
+      rollingWindow = n;
+    }
+    let rollingThreshold: number | null = null;
+    if (b.rolling_fail_cancel_threshold_pct !== undefined) {
+      const n = Number(b.rolling_fail_cancel_threshold_pct);
+      if (!Number.isInteger(n) || n < 10 || n > 100) {
+        return reply.status(400).send({ error: 'rolling_fail_cancel_threshold_pct must be a whole number between 10 and 100' });
+      }
+      rollingThreshold = n;
+    }
+
     const { rows } = await query(
       `UPDATE settings SET
          run_retention_days = COALESCE($1, run_retention_days),
          test_type_timeout_minutes = COALESCE($2::jsonb, test_type_timeout_minutes),
          consecutive_failure_limit = COALESCE($3, consecutive_failure_limit),
+         rolling_fail_cancel_enabled = COALESCE($5, rolling_fail_cancel_enabled),
+         rolling_fail_cancel_window = COALESCE($6, rolling_fail_cancel_window),
+         rolling_fail_cancel_threshold_pct = COALESCE($7, rolling_fail_cancel_threshold_pct),
          updated_at = now(), updated_by = $4
        WHERE id = true
-       RETURNING run_retention_days, test_type_timeout_minutes, consecutive_failure_limit, updated_at`,
-      [days, timeouts ? JSON.stringify(timeouts) : null, failureLimit, req.actor?.id ?? null]
+       RETURNING run_retention_days, test_type_timeout_minutes, consecutive_failure_limit,
+                 rolling_fail_cancel_enabled, rolling_fail_cancel_window, rolling_fail_cancel_threshold_pct,
+                 updated_at`,
+      [days, timeouts ? JSON.stringify(timeouts) : null, failureLimit, req.actor?.id ?? null,
+       rollingEnabled, rollingWindow, rollingThreshold]
     );
     return reply.send({
       data: {

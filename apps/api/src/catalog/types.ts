@@ -81,7 +81,7 @@ export interface CaseDef {
   suiteKey: string;
   /** Postgres test_type enum value. */
   testType: string;
-  method: 'http' | 'selenium' | 'playwright' | 'performance';
+  method: 'http' | 'selenium' | 'playwright' | 'performance' | 'e2e';
   severity: 'critical' | 'high' | 'medium' | 'low' | 'trivial';
   priority: 'p0' | 'p1' | 'p2' | 'p3' | 'p4';
   preconditions: string;
@@ -170,4 +170,10 @@ export const TYPE_TO_ENUM: Record<string, string> = {
   compliance: 'other',
   drRecovery: 'resilience',
   api: 'api',
+  kafkaPortalIntegration: 'integration',
+  mqPortalIntegration: 'integration',
+  ftpPortalIntegration: 'integration',
+  apiPortalIntegration: 'integration',
+  e2eGui: 'ui',
+  recordAndPlay: 'ui',
 };

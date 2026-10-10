@@ -30,6 +30,7 @@ import { pool, query, migrate } from './db/client.js';
 import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
 import { SANDBENCH_PORTAL_CASES, SANDBENCH_PORTAL_SUITES } from './catalog/sandbench-portal-cases.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
+import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from './catalog/record-and-play-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 import { screenFields, type AppContext } from './catalog/plain-language.js';
 
@@ -293,26 +294,27 @@ async function main() {
   // 4) Applications, each with the environment it is developed on and its suites + cases.
   const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
   if (wanted('sand-bench')) {
-    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES];
+    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, recordAndPlaySuite('sand-bench')];
     const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES];
     const sbId = await upsertApplication(
       'sand-bench', 'Sand Bench',
       'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
-      SANDBENCH_TYPES, allSuites, allCases
+      [...SANDBENCH_TYPES, RECORD_AND_PLAY_TYPE], allSuites, allCases
     );
     await upsertEnvironment('sand-bench-local', 'Sand Bench · local Docker (development)', 'docker', HOST_VARS.web, HOST_VARS, ['sand-bench']);
     const sbCount = await seedSuitesAndCases(sbId, 'sand-bench', allSuites, allCases);
     console.log(`Seeded ${sbCount} Sand Bench cases across ${allSuites.length} ${grouping}.`);
   }
   if (wanted('gavriq-test-engine')) {
+    const engineSuites = [...ENGINE_SUITES, recordAndPlaySuite('gavriq-test-engine')];
     const teId = await upsertApplication(
       'gavriq-test-engine', 'GAVRIQ Test Engine',
       'The test engine itself as an application under test: control-plane API, console, worker protocol, scheduler and evidence store.',
-      ENGINE_TYPES, ENGINE_SUITES, ENGINE_CASES
+      [...ENGINE_TYPES, RECORD_AND_PLAY_TYPE], engineSuites, ENGINE_CASES
     );
     await upsertEnvironment('engine-local', 'Test Engine · local Docker (development)', 'docker', HOST_VARS.engine, HOST_VARS, ['gavriq-test-engine']);
-    const teCount = await seedSuitesAndCases(teId, 'gavriq-test-engine', ENGINE_SUITES, ENGINE_CASES);
-    console.log(`Seeded ${teCount} Test Engine self-test cases across ${ENGINE_SUITES.length} ${grouping}.`);
+    const teCount = await seedSuitesAndCases(teId, 'gavriq-test-engine', engineSuites, ENGINE_CASES);
+    console.log(`Seeded ${teCount} Test Engine self-test cases across ${engineSuites.length} ${grouping}.`);
   }
   console.log('Every case is executable: http/playwright/selenium/performance steps verified against the live deployment.');
 

@@ -18,7 +18,7 @@ import type { CaseDef } from './types.js';
 
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+  body: { username: '{{username}}', password: '{{password}}' },
   expected_status: 200, save: { token: 'token' },
   description: 'operator login',
 };

@@ -33,7 +33,7 @@ const WITH_JOBS = `
                                     'log_tail', right(j.log, 1200))
             FROM infra_jobs j WHERE j.deployment_id = d.id AND j.kind = 'deploy' ORDER BY j.created_at DESC LIMIT 1) AS job,
          (SELECT jsonb_build_object('id', t.id, 'status', t.status, 'reason', t.reason, 'created_at', t.created_at,
-                                    'finished_at', t.finished_at, 'error', t.error)
+                                    'finished_at', t.finished_at, 'error', t.error, 'log_tail', right(t.log, 1200))
             FROM infra_jobs t WHERE t.id = d.teardown_job_id) AS teardown,
          EXISTS (SELECT 1 FROM infra_agents a WHERE a.last_heartbeat > now() - interval '90 seconds') AS agent_online
   FROM deployments d JOIN environments env ON env.id = d.environment_id`;

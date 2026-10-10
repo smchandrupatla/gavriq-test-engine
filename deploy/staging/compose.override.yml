@@ -37,6 +37,12 @@ services:
       - "127.0.0.1:${STAGING_API_PORT:-18787}:8787"
     environment:
       ENVIRONMENT_CLASSIFICATION: test
+      # File unauthenticated simulator traffic (testhub /hub/to-app, API portal
+      # forwards) under the same tenant as the demo "operator" account, so
+      # catalogue cases that POST via the simulator can read the event back
+      # from the operator's /api/v1/inbound/events. Default without this is
+      # tenant_demo_acme, which has no accounts in the pinned commit.
+      SBE_PUBLIC_TENANT: tenant_default
 
   worker:
     image: sand-bench-staging-app:${SBE_STAGING_TAG}
