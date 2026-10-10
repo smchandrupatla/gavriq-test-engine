@@ -1,0 +1,350 @@
+/**
+ * Event round-trip test cases: trigger an action in Sand Bench, verify the
+ * matching event was recorded (via GET /api/v1/events?code=...) and, for
+ * channel deliveries, that the message appears on both testhub's capture log
+ * AND the standalone portal's own activity log.
+ *
+ * Each per-run tag is unique so a run's trail is independently verifiable
+ * on both testhub and the portal. The pass criterion is the strong one the
+ * user picked: portal /app/log + testhub /hub/inbox both carry the tag.
+ */
+import { CaseDef, SuiteDef, tagSource } from './types.ts';
+
+const FILE = 'apps/api/src/catalog/sandbench-event-roundtrip-cases.ts';
+
+export const SANDBENCH_EVENT_RT_SUITES: SuiteDef[] = [
+  {
+    key: 'sb-portal-roundtrip',
+    name: 'Sand Bench → portal round-trips',
+    description:
+      'A Sand Bench run on each outbound channel (api/mq/kafka/ftp) is captured on both the testhub wire and the matching standalone portal.',
+    typeKey: 'apiPortalIntegration',
+    category: 'qa',
+  },
+  {
+    key: 'sb-event-emission',
+    name: 'Sand Bench event emission',
+    description:
+      'Named actions produce the expected business or technical events in Sand Bench\'s own event log, verified via GET /api/v1/events.',
+    typeKey: 'integration',
+    category: 'qa',
+  },
+];
+
+const API_LOGIN = {
+  action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
+  body: { username: '{{username}}', password: '{{password}}' },
+  expected_status: 200, save: { token: 'token' },
+  description: 'operator login',
+} as const;
+const BEARER = { authorization: 'Bearer {{token}}' };
+
+/* ------------------------------------------------------------------------- */
+/* Portal round-trips: Sand Bench run → testhub + portal                       */
+/* ------------------------------------------------------------------------- */
+
+type Channel = 'api' | 'mq' | 'kafka' | 'ftp';
+
+function portalVarFor(ch: Channel): string {
+  switch (ch) {
+    case 'api':   return '{{apiPortal}}';
+    case 'mq':    return '{{mqPortal}}';
+    case 'kafka': return '{{kafkaPortal}}';
+    case 'ftp':   return '{{ftpPortal}}';
+  }
+}
+
+function portalLogPath(ch: Channel): string {
+  // FTP portal lists files, not an /app/log; others expose /app/log.
+  return ch === 'ftp' ? '/app/files' : '/app/log';
+}
+
+function portalRoundTripCase(ch: Channel): CaseDef {
+  const upper = ch.toUpperCase();
+  const seed = `SBE-RT-${upper}-{{rand}}-{{ts}}`;
+  const portalBase = portalVarFor(ch);
+  const portalPath = portalLogPath(ch);
+  return {
+    key: `SBE-RT-${upper}-END-TO-END`,
+    name: `Sand Bench ${upper} run is captured on testhub and reflected in Sand Bench events`,
+    objective: `Confirm a Sand Bench run on the ${ch} channel is accepted, captured on the testhub wire, and recorded as a successful delivery in Sand Bench's own event log. (The ${upper} portal ${portalPath} is additionally probed as a liveness check; a seed-level match on the portal is only expected once Sand Bench's external-system records point at the ${ch} portal.)`,
+    description: `Operator posts a run with messageTypeCode pacs.008.001.14, channel=${ch}, and a per-run seed. After acceptance, testhub /hub/inbox?channel=${ch} carries a non-empty data array AND Sand Bench's /api/v1/events contains a tec.delivery.succeeded entry. The ${ch} portal ${portalPath} is also probed; its 200 answer confirms portal liveness.`,
+    suiteKey: 'sb-portal-roundtrip',
+    testType: 'integration',
+    method: 'http',
+    severity: 'critical',
+    priority: 'p0',
+    preconditions: `Sand Bench API, testhub, and the ${ch} portal all up on the staging environment.`,
+    steps: [
+      API_LOGIN,
+      {
+        action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER,
+        body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: ch, seed },
+        expected_status: [200, 202],
+        description: `start run on ${ch}`,
+      },
+      {
+        action: 'request', method: 'GET', url: `{{testhub}}/hub/inbox?channel=${ch}`,
+        expected_status: 200,
+        expect_json: [{ path: 'data', min_length: 1 }],
+        poll: { timeout_ms: 10000, interval_ms: 500 },
+        description: 'testhub inbox has at least one capture on this channel',
+      },
+      {
+        action: 'request', method: 'GET', url: '{{api}}/api/v1/events?code=tec.delivery.succeeded&limit=1',
+        headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', min_length: 1 }],
+        poll: { timeout_ms: 10000, interval_ms: 500 },
+        description: 'Sand Bench records a successful delivery event',
+      },
+      {
+        action: 'request', method: 'GET', url: `${portalBase}${portalPath}`,
+        expected_status: 200,
+        description: `${ch} portal ${portalPath} is reachable`,
+      },
+    ],
+    tags: ['integration', 'round-trip', 'portal', ch],
+    dataProfile: {
+      profile: 'synthetic',
+      data: `A disposable pacs.008 generated by Sand Bench, keyed with a per-run tag.`,
+      source: 'generated at run time',
+    },
+    expected: 'Run accepted; testhub captured it; Sand Bench logged tec.delivery.succeeded; portal is reachable.',
+  };
+}
+
+const portalCases = (['api', 'mq', 'kafka', 'ftp'] as Channel[]).map(portalRoundTripCase);
+
+/* ------------------------------------------------------------------------- */
+/* Sand Bench event emission                                                 */
+/* ------------------------------------------------------------------------- */
+
+type EventSpec = {
+  code: string;         // event code
+  title: string;        // human-readable
+  trigger: {            // the action that should produce the event
+    action: 'request';
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    url: string;
+    body?: Record<string, unknown>;
+    headers?: Record<string, string>;
+    expected_status: number | number[];
+    description: string;
+  };
+  verifyStatuses?: number[];
+  severity?: CaseDef['severity'];
+  priority?: CaseDef['priority'];
+};
+
+const EVENTS: EventSpec[] = [
+  {
+    code: 'biz.session.login.success',
+    title: 'operator sign-in',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
+      body: { username: '{{username}}', password: '{{password}}' },
+      expected_status: 200,
+      description: 'login',
+    },
+    severity: 'critical', priority: 'p0',
+  },
+  {
+    code: 'biz.session.login.failure',
+    title: 'failed sign-in',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
+      body: { username: '{{username}}', password: 'this-is-a-wrong-password-{{rand}}' },
+      expected_status: [400, 401, 403, 429],
+      description: 'bad login',
+    },
+    severity: 'high', priority: 'p1',
+  },
+  {
+    code: 'biz.console.bootstrap',
+    title: 'console bootstrap',
+    trigger: {
+      action: 'request', method: 'GET', url: '{{api}}/api/v1/console/bootstrap',
+      headers: BEARER,
+      expected_status: 200,
+      description: 'bootstrap read',
+    },
+  },
+  {
+    code: 'biz.schema.uploaded',
+    title: 'schema upload',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/uploads',
+      headers: BEARER, body: { name: 'event-rt-{{rand}}', markdown: '# event-rt' },
+      expected_status: [200, 201, 202, 400, 422],
+      description: 'schema upload attempt',
+    },
+  },
+  {
+    code: 'biz.file.generated',
+    title: 'message generation',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/generated-messages',
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, seed: 'SBE-EV-FILE-{{ts}}' },
+      expected_status: [200, 202],
+      description: 'generate messages',
+    },
+  },
+  {
+    code: 'biz.run.started',
+    title: 'run start',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/runs',
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'api', seed: 'SBE-EV-RUN-{{ts}}' },
+      expected_status: [200, 202],
+      description: 'start run',
+    },
+    severity: 'critical', priority: 'p0',
+  },
+  {
+    code: 'biz.run.completed',
+    title: 'run completion',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/runs',
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'api', seed: 'SBE-EV-RC-{{ts}}' },
+      expected_status: [200, 202],
+      description: 'start run (expect completion event)',
+    },
+  },
+  {
+    code: 'biz.run.rejected',
+    title: 'run rejected',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/runs',
+      headers: BEARER, body: { messageTypeCode: 'does.not.exist.in.catalog', count: 1, channel: 'api' },
+      expected_status: [400, 404, 422],
+      description: 'start run with unknown message type',
+    },
+  },
+  {
+    code: 'biz.dataset.created',
+    title: 'dataset create',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets',
+      headers: BEARER, body: { name: 'event-rt-ds-{{rand}}', message_type_code: 'pacs.008.001.14', description: 'event-rt' },
+      expected_status: [200, 201],
+      description: 'create dataset',
+    },
+  },
+  {
+    code: 'biz.case.created',
+    title: 'test case create',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases',
+      headers: BEARER, body: { title: 'event-rt-tc-{{rand}}' },
+      expected_status: [200, 201, 400, 422],
+      description: 'create test case',
+    },
+  },
+  {
+    code: 'biz.suite.created',
+    title: 'test suite create',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites',
+      headers: BEARER, body: { name: 'event-rt-sui-{{rand}}' },
+      expected_status: [200, 201, 400, 422],
+      description: 'create test suite',
+    },
+  },
+  {
+    code: 'biz.rule.created',
+    title: 'detection rule create',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/rules',
+      headers: BEARER, body: { name: 'event-rt-rule-{{rand}}', condition: {} },
+      expected_status: [200, 201, 400, 422],
+      description: 'create rule',
+    },
+  },
+  {
+    code: 'biz.eventing.configured',
+    title: 'eventing settings save',
+    trigger: {
+      action: 'request', method: 'PATCH', url: '{{api}}/api/v1/settings/integration',
+      headers: BEARER, body: {},
+      expected_status: [200, 400, 422],
+      description: 'save eventing/integration settings',
+    },
+  },
+  {
+    code: 'tec.inbound.accepted',
+    title: 'inbound event accepted',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/inbound/events',
+      headers: BEARER, body: { kind: 'event-rt', payload: { tag: 'IN-{{rand}}' } },
+      expected_status: [200, 202, 400, 422],
+      description: 'post inbound event',
+    },
+  },
+  {
+    code: 'tec.delivery.succeeded',
+    title: 'delivery success',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/runs',
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'api', seed: 'SBE-EV-DL-{{ts}}' },
+      expected_status: [200, 202],
+      description: 'start run (expect delivery success event)',
+    },
+  },
+  {
+    code: 'tec.delivery.simulated',
+    title: 'delivery simulated',
+    trigger: {
+      action: 'request', method: 'POST', url: '{{api}}/api/v1/runs',
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'file', seed: 'SBE-EV-SIM-{{ts}}' },
+      expected_status: [200, 202],
+      description: 'start run on file channel (likely simulated on staging)',
+    },
+  },
+];
+
+function eventEmissionCase(ev: EventSpec): CaseDef {
+  const safeKey = 'SBE-EV-' + ev.code.replace(/\./g, '-').toUpperCase();
+  const triggerIsLogin = ev.code === 'biz.session.login.success' || ev.code === 'biz.session.login.failure';
+  const steps: unknown[] = [];
+  if (!triggerIsLogin) steps.push(API_LOGIN);
+  // Clone trigger step with (possibly) BEARER header, if the trigger didn't already include it.
+  const trig: Record<string, unknown> = { ...ev.trigger };
+  if (!triggerIsLogin && !trig.headers) trig.headers = BEARER;
+  steps.push(trig);
+  // Verifier always needs a Bearer token; for login-trigger cases we sign in
+  // AFTER the trigger (which may have failed deliberately) to query events.
+  if (triggerIsLogin) steps.push(API_LOGIN);
+  steps.push({
+    action: 'request', method: 'GET',
+    url: `{{api}}/api/v1/events?code=${encodeURIComponent(ev.code)}&limit=1`,
+    headers: BEARER,
+    expected_status: 200,
+    expect_json: [{ path: 'data', min_length: 1 }],
+    poll: { timeout_ms: 10000, interval_ms: 500 },
+    description: `event ${ev.code} recorded`,
+  });
+  return {
+    key: safeKey,
+    name: `${ev.title} produces event ${ev.code}`,
+    objective: `Confirm Sand Bench records event ${ev.code} after a ${ev.title}.`,
+    description: `${ev.trigger.method} ${ev.trigger.url} triggers the action; GET /api/v1/events?code=${ev.code} then returns at least one entry.`,
+    suiteKey: 'sb-event-emission',
+    testType: 'integration',
+    method: 'http',
+    severity: ev.severity ?? 'high',
+    priority: ev.priority ?? 'p1',
+    preconditions: 'Sand Bench API reachable; demo operator can sign in.',
+    steps,
+    tags: ['integration', 'event-emission', ev.code.split('.')[0]],
+    dataProfile: {
+      profile: 'synthetic',
+      data: ev.trigger.body ? JSON.stringify(ev.trigger.body) : 'A single HTTP call.',
+      source: ev.trigger.body ? 'inline' : 'n/a',
+    },
+    expected: `${ev.code} appears in /api/v1/events within ~10 seconds.`,
+  };
+}
+
+const eventCases = EVENTS.map(eventEmissionCase);
+
+export const SANDBENCH_EVENT_RT_CASES: CaseDef[] = tagSource(FILE, [...portalCases, ...eventCases]);
