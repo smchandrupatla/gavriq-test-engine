@@ -79,9 +79,15 @@ DO $$ BEGIN
     'application_defect','assertion_failure','environment_problem',
     'infrastructure_failure','network_failure','authentication_problem',
     'test_data_problem','script_problem','dependency_failure',
-    'deployment_problem','timeout','unknown'
+    'deployment_problem','timeout','cleanup_failure','unknown'
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- The engine's worker reports a cleanup_failure classification when a case's
+-- own cleanup step failed after its main assertions passed (see http.ts and
+-- worker.ts). Older schemas were seeded before that value existed; add it on
+-- the fly so the API's enum cast does not 500 on these reports.
+ALTER TYPE failure_classification ADD VALUE IF NOT EXISTS 'cleanup_failure';
 
 -- ---------------------------------------------------------------------------
 -- Hierarchy: Application → Release → Component → Feature → Requirement
@@ -409,6 +415,42 @@ CREATE INDEX IF NOT EXISTS idx_deployments_created ON deployments(created_at DES
 ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_after_run BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_job_id UUID;
 ALTER TABLE deployments ADD COLUMN IF NOT EXISTS run_request JSONB;
+-- A deploy that is one iteration of a cycle (see cycle_runs below) carries the cycle id.
+-- When its teardown succeeds, the engine starts the next iteration or marks the cycle done.
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS cycle_run_id UUID;
+
+-- Cycle runs: deploy → run → tear down, repeated iterations_total times, so the user
+-- can hammer an environment N times from one click. apps/api/src/cycle-run.ts starts
+-- the first iteration; infra.ts advances the cycle on each teardown success and marks
+-- it failed if a deploy or run step fails. Cancel stops the cycle after the current
+-- iteration finishes (or immediately, cancelling any live run as well).
+CREATE SEQUENCE IF NOT EXISTS cycle_run_key_seq;
+CREATE TABLE IF NOT EXISTS cycle_runs (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                     TEXT NOT NULL UNIQUE,
+  application             TEXT NOT NULL,
+  environment_id          UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  iterations_total        INT NOT NULL CHECK (iterations_total BETWEEN 1 AND 100),
+  iterations_done         INT NOT NULL DEFAULT 0,
+  status                  TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
+  current_deployment_id   UUID REFERENCES deployments(id) ON DELETE SET NULL,
+  last_error              TEXT,
+  requested_by            TEXT,
+  started_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at             TIMESTAMPTZ,
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_runs_env_status ON cycle_runs (environment_id, status);
+CREATE INDEX IF NOT EXISTS idx_cycle_runs_app ON cycle_runs (application, started_at DESC);
+
+-- Clean-start cycle: before the first iteration, tear down whatever is on the stack and prune
+-- Docker (stopped containers in the managed projects, dangling images, build cache older than
+-- the policy's prune_build_cache_hours). Phase progresses: tearing_down → pruning → ready → nulled
+-- when preparation is done, then normal cycle iterations begin.
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS clean_start BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS preparation_phase TEXT
+  CHECK (preparation_phase IS NULL OR preparation_phase IN ('tearing_down', 'pruning', 'ready'));
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS preparation_prune_job_id UUID;
 
 -- Infrastructure jobs: work for the host-side infra agent (apps/infra-agent),
 -- which has git and docker where the compose stacks live. The control plane
@@ -667,6 +709,13 @@ INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS test_type_timeout_minutes JSONB NOT NULL DEFAULT '{}';
 -- Stop a run after this many test cases in a row fail (anywhere in the run, including its start).
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS consecutive_failure_limit INT NOT NULL DEFAULT 20;
+-- Rolling fail-rate cancel: cancel every queued execution in a run_group once
+-- the group's recent-result window hits this fail rate. 0 disables the guard;
+-- the window must have at least `rolling_fail_cancel_window` reported results
+-- before the guard fires, so an early fail does not take the whole run down.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_window INT NOT NULL DEFAULT 20;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_threshold_pct INT NOT NULL DEFAULT 50;
 -- Infrastructure policy (idle/max-uptime teardown, housekeeping cadence, teardown defaults);
 -- keys absent here take the defaults in apps/api/src/infra.ts.
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS infra_policy JSONB NOT NULL DEFAULT '{}';
@@ -738,6 +787,34 @@ CREATE TABLE IF NOT EXISTS defect_log (
 CREATE INDEX IF NOT EXISTS defect_log_status_idx ON defect_log (application_id, status);
 CREATE INDEX IF NOT EXISTS defect_log_run_idx ON defect_log (run_id);
 
+-- The named implementation manager (applications.metadata->implementation_manager) recorded
+-- on a defect at the moment it is sent, so the record shows who received it.
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS implementation_manager TEXT;
+
+-- A sent defect's report carries its application key so the right application's implementation
+-- manager (and feedback loop) picks it up, even for a manual defect with no execution behind it.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS application_key TEXT;
+CREATE INDEX IF NOT EXISTS idx_defect_reports_application ON defect_reports (application_key);
+
+-- Deploy-failure loop (apps/api/src/deploy-loop.ts): when a managed stack's deploy fails,
+-- the engine opens a defect_reports row with kind='deploy' and hands it to the application
+-- repo's agent through the same claim/fix lane every test defect uses. When the agent marks
+-- the defect fixed, the engine redeploys (at the agent's fix_ref if given, otherwise the same
+-- ref). The retry count is capped: after deploy_retry_cap attempts (default 5) the report
+-- goes to status='parked', and the console banners the environment for offline investigation.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'test';
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS environment_id UUID REFERENCES environments(id) ON DELETE SET NULL;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_retry_count INT NOT NULL DEFAULT 0;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_retry_cap INT NOT NULL DEFAULT 5;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_last_ref TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_last_error TEXT;
+CREATE INDEX IF NOT EXISTS idx_defect_reports_kind_env ON defect_reports (kind, environment_id);
+-- At most one live deploy-failure report per environment (parked and verified don't count:
+-- a new deploy failure after a parked report opens a fresh one).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_defect_reports_live_deploy
+  ON defect_reports (environment_id)
+  WHERE kind = 'deploy' AND status NOT IN ('parked', 'verified');
+
 -- Attachments: a screenshot or system log either linked to the run's evidence (evidence_id)
 -- or uploaded by a person (content).
 CREATE TABLE IF NOT EXISTS defect_log_attachments (
@@ -754,6 +831,18 @@ CREATE TABLE IF NOT EXISTS defect_log_attachments (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS defect_log_attachments_log_idx ON defect_log_attachments (defect_log_id);
+
+-- Conversation on a defect: manual comments a person (or the implementation manager) adds,
+-- alongside the lifecycle events the timeline derives from the record itself. Lets the
+-- implementation manager ask for more detail and the tester answer, kept with the defect.
+CREATE TABLE IF NOT EXISTS defect_log_comments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  defect_log_id   UUID NOT NULL REFERENCES defect_log(id) ON DELETE CASCADE,
+  author          TEXT NOT NULL DEFAULT 'operator',
+  body            TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_comments_log_idx ON defect_log_comments (defect_log_id, created_at);
 
 -- Feedback loop (feedback-loop.ts): one row per application. The loop runs the
 -- application's suite, lets the Defect Manager file reports, requests reruns of

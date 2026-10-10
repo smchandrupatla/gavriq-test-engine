@@ -92,8 +92,28 @@ test("Test Runs: starting a run from the console UI persists it with the fields 
 
 test("Schedules: creating a schedule from the console UI persists it, and the database row reflects what the console actually submitted", async () => {
   const scheduleName = correlationId("sit-ui-schedule");
+  const suiteName = correlationId("sit-schedule-suite");
+  let suiteId: string | null = null;
+  let suiteEtag: string | null = null;
 
   await withCaseCleanup(async () => {
+  // The pinned Sand Bench baseline has 0 test suites; the Schedule → New schedule
+  // page populates the targetId dropdown from the tenant's suites, so it is empty
+  // on this baseline and the first option cannot be chosen. Seed one via the real
+  // test-suites API first so the console has something to schedule against — the
+  // same path a tenant admin would use before opening this form.
+  const suiteRes = await apiFetch("/api/v1/test-suites", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: suiteName, description: "SIT fixture: Schedules workflow" }),
+  });
+  if (suiteRes.status < 200 || suiteRes.status >= 300) {
+    throw new Error(`seed suite failed: ${suiteRes.status} ${await suiteRes.text()}`);
+  }
+  const suiteBody = (await suiteRes.json()) as { id: string; etag?: string };
+  suiteId = suiteBody.id;
+  suiteEtag = suiteBody.etag || null;
+
   const outcome = await withDriver(async (driver) => {
     await openConsole(driver);
     await openNav(driver, "Schedules", "New schedule");
@@ -116,11 +136,22 @@ test("Schedules: creating a schedule from the console UI persists it, and the da
   }, async () => {
     const rows = await newestRows<{ id: string; name: string; etag: string }>("run_schedules");
     const owned = rows.body.data?.find((row) => row.name === scheduleName);
-    if (!owned) return;
-    const response = await apiFetch(`/api/v1/schedules/${encodeURIComponent(owned.id)}`, {
-      method: "DELETE",
-      headers: owned.etag ? { "if-match": owned.etag } : {},
-    });
-    if (response.status !== 204 && response.status !== 404) throw new Error(`schedule cleanup returned ${response.status}: ${await response.text()}`);
+    if (owned) {
+      const response = await apiFetch(`/api/v1/schedules/${encodeURIComponent(owned.id)}`, {
+        method: "DELETE",
+        headers: owned.etag ? { "if-match": owned.etag } : {},
+      });
+      // The pinned Sand Bench baseline returns 200 with a {"deleted":true} body
+      // from DELETE /api/v1/schedules/:id; later builds return 204 No Content.
+      // Both report a successful deletion, so either is accepted here.
+      if (response.status !== 200 && response.status !== 204 && response.status !== 404) throw new Error(`schedule cleanup returned ${response.status}: ${await response.text()}`);
+    }
+    if (suiteId) {
+      const response = await apiFetch(`/api/v1/test-suites/${encodeURIComponent(suiteId)}`, {
+        method: "DELETE",
+        headers: suiteEtag ? { "if-match": suiteEtag } : {},
+      });
+      if (response.status !== 200 && response.status !== 204 && response.status !== 404) throw new Error(`suite cleanup returned ${response.status}: ${await response.text()}`);
+    }
   });
 });

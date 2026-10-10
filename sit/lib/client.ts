@@ -51,12 +51,17 @@ export function loginGateConfig(): Promise<LoginGateConfig> {
   return cachedGateConfig;
 }
 
-// What a browser case types into the gate's password box: nothing where the deployment
-// declares the password optional (development/demo builds sign the named user in without a
-// credential check, and a supplied password that does not match the stored one is still
-// rejected), the configured password where one is required.
+// What a browser case types into the gate's password box: the configured password where
+// one is explicitly required by the deployment's login.json, OR when a password has been
+// configured in the environment (ENV.password non-empty) — the pinned staging baseline
+// serves a login.json that documents password-required in prose but does not set the
+// passwordRequired flag, so treating a configured ENV.password as the operator's intent
+// is the honest behaviour there; development/demo builds that pass "" opt into the
+// passwordless gate as before.
 export async function gatePassword(): Promise<string> {
-  return (await loginGateConfig()).passwordRequired ? ENV.password : "";
+  const cfg = await loginGateConfig();
+  if (cfg.passwordRequired) return ENV.password;
+  return ENV.password && ENV.password.length > 0 ? ENV.password : "";
 }
 
 // Cached for the whole SIT run: every case shares one session, same as one operator

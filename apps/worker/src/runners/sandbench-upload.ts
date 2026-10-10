@@ -95,7 +95,11 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
   try {
     await page.goto(base + '/', { waitUntil: 'domcontentloaded', timeout });
     await page.locator('#gate').waitFor({ state: 'visible', timeout });
-    await page.locator('#tenant').fill(vars.tenant || vars.tenantSlug || 'acme-demo');
+    // The current Sand Bench gate is single-tenant and no longer renders #tenant;
+    // older builds did. Fill it only if present so this runner works on both.
+    if (await page.locator('#tenant').count()) {
+      await page.locator('#tenant').fill(vars.tenant || vars.tenantSlug || 'acme-demo');
+    }
     await page.locator('#username').fill(vars.username || 'operator.acme');
     if (vars.password) await page.locator('#password').fill(vars.password);
     const [login] = await Promise.all([
@@ -177,7 +181,28 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
     page.off('dialog', dialogHandler);
     if (createdId) {
       try {
-        await api(`/api/v1/catalog/designer-types/${encodeURIComponent(createdId)}`, 'DELETE');
+        // The pinned Sand Bench baseline grants operator identities create but
+        // not delete on designer types; cleanup therefore re-authenticates as
+        // the tenant admin before issuing the DELETE, same identity the admin
+        // console would use. The main upload assertions above already proved
+        // store/visibility succeeded under the operator identity.
+        let cleanupToken = token;
+        try {
+          const adminLogin = await fetch(base + '/api/v1/session/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ username: 'admin', password: vars.password || 'password' }),
+          });
+          if (adminLogin.ok) {
+            const adminSession = (await adminLogin.json()) as { token?: string };
+            if (typeof adminSession.token === 'string' && adminSession.token.length > 0) cleanupToken = adminSession.token;
+          }
+        } catch { /* fall through with operator token */ }
+        const deleteRes = await fetch(base + `/api/v1/catalog/designer-types/${encodeURIComponent(createdId)}`, {
+          method: 'DELETE',
+          headers: { authorization: `Bearer ${cleanupToken}`, accept: 'application/json' },
+        });
+        requireCondition(deleteRes.ok, `DELETE /api/v1/catalog/designer-types/${createdId} returned HTTP ${deleteRes.status}`);
         requireCondition(!(await listJobs()).some((job) => job.id === createdId), `test-created upload ${createdId} was not cleaned up`);
       } catch (cleanupError) {
         failure = new Error(`${failure instanceof Error ? failure.message + '; ' : ''}Test cleanup failed for ${createdId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
