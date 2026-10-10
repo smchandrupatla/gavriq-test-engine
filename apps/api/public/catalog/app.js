@@ -33,8 +33,12 @@ const ENV_TYPES=['localhost','development','integration','qa','sit','uat','stagi
 const SAFETY_CATEGORIES=['functional_smoke','read_only_api','write_api','load','stress','soak','chaos','destructive_db','security_scan','deployment'];
 const SAFETY_DEFAULT={functional_smoke:'allowed',read_only_api:'allowed',write_api:'allowed',load:'allowed',soak:'allowed',chaos:'allowed',security_scan:'allowed',deployment:'allowed',stress:'approval_required',destructive_db:'prohibited'};
 const TERMINAL=new Set(['passed','failed','skipped','blocked','cancelled','error','timed_out']);
+// A timed-out run is its own category — not a failure (nothing was asserted
+// about the app) and not a pass. UI chrome colours it amber and ranks it below
+// failures when grouping outcomes.
+const TIMED_OUT=new Set(['timed_out']);
 const ACTIVE=new Set(['queued','preparing','running','claiming']);
-const FAILED=new Set(['failed','error','timed_out']);
+const FAILED=new Set(['failed','error']);
 const ROWS=100;                            // case-table rows rendered before "Show more"
 const POLL_ACTIVE=3000,POLL_IDLE=15000,POLL_HIDDEN=60000;
 const STALL_MS=15*60*1000;                 // active run with no new result for this long is flagged as stalled
@@ -81,6 +85,8 @@ const state={
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
   runsFilter:{environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''},runsSel:new Set(),runsTab:null,
   appVersion:'main',
+  // Rows fetched per page on the Test Runs list. Default 25; user can pick 25/50/75/100/200.
+  runsPageSize:25,
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
   selectedTypes:new Set(),overviewTab:'summary',
@@ -91,7 +97,7 @@ const state={
   reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
   report:{data:null,loading:false,error:null,busy:''},
   // Record & play: codegen session + the "record" or "import a pasted script" form.
-  record:{mode:'spawn',url:'',title:'',preconditions:'',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null},
+  record:{mode:'spawn',url:'',title:'',preconditions:'',browser:'chromium',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null,agent:null,agentPoll:null,review:null},
 };
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -117,8 +123,11 @@ function isSitCase(c){const tags=(c.tags||[]).map(t=>String(t).toLowerCase());if
 function isSitSuite(s){return String(s.key||'').toLowerCase().startsWith('sit-');}
 function typeOfCase(c,types,suiteById){
   if(isSitCase(c))return 'sit';
-  const tags=new Set((c.tags||[]).map(t=>String(t).toLowerCase()));
-  for(const t of types)if(tags.has(String(t.id).toLowerCase()))return t.id;
+  // Suite-type is a stronger signal than tags: a case explicitly placed in a
+  // typed suite (e.g. the API-portal suite with suite_type apiPortalIntegration)
+  // belongs to that specific type, even if its tags also match a broader type
+  // like `integration`. Without this, portal cases collapse into the generic
+  // integration bucket and the portal nav items show 0.
   for(const sid of c.suite_ids||[]){
     const s=suiteById.get(sid);if(!s)continue;
     const st=String(s.suite_type||'');
@@ -126,6 +135,8 @@ function typeOfCase(c,types,suiteById){
     const k=String(s.key||'');
     if(k.startsWith('sb-')){const p=k.split('-');if(p.length>=2&&types.some(t=>t.id===p[1]))return p[1];}
   }
+  const tags=new Set((c.tags||[]).map(t=>String(t).toLowerCase()));
+  for(const t of types)if(tags.has(String(t.id).toLowerCase()))return t.id;
   return 'other';
 }
 function suitesForType(typeKey){return state.suites.filter(s=>{if(isSitSuite(s))return false;if(String(s.key||'').startsWith('sb-type-'))return false;if(String(s.suite_type||'')===typeKey)return true;return String(s.key||'').startsWith('sb-'+typeKey+'-');});}
@@ -324,7 +335,8 @@ async function loadRunsList(reset){
   state.runsList={...state.runsList,loading:true};
   if(state.view==='history')renderCurrentView();
   try{
-    const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+RUNS_PAGE+'&offset='+offset);
+    const pageSize=[25,50,75,100,200].includes(Number(state.runsPageSize))?Number(state.runsPageSize):RUNS_PAGE;
+    const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+pageSize+'&offset='+offset);
     const rows=reset?(res.data||[]):[...state.runsList.rows,...(res.data||[])];
     state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true,facets:res.facets||{triggers:[],versions:[]}};
     if(typeof updateAppVersionDatalist==='function')updateAppVersionDatalist();
@@ -566,6 +578,12 @@ function navSection(id,label,items,forceOpen){
     +'<div class="nav-group"'+(col?' hidden':'')+'>'+items+'</div>';
 }
 function renderSideNav(){
+  // On the Home screen the left-hand nav is suppressed: the Home board is the
+  // only choice point the user needs. The nav reappears automatically for any
+  // other view (overview, test cases, runs, config, …) once an application has
+  // been picked. The top app/env/version bar still renders in both modes.
+  if(state.view==='home'){el('sideNav').innerHTML='';document.body.classList.add('home-only');return;}
+  document.body.classList.remove('home-only');
   const tl=typeList();
   const live=activeRuns().filter(e=>!isStalled(e)).length;
   const V=state.view;
@@ -732,34 +750,66 @@ function renderTypeView(typeId){
   const t=typeList().find(x=>x.id===typeId)||{title:typeTitle(typeId),summary:''};
   el('viewTitle').textContent=t.title;
   if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  if(typeId==='recordAndPlay')return renderRecordAndPlayPane(t);
   const suites=suitesForType(typeId);
   const typeCases=casesForType(typeId);
   const tiles=suites.length?suites.map(s=>suiteTile(s)):[{key:'type:'+typeId,title:t.title,sub:t.summary,cases:typeCases,inline:true}];
   const sel=suites.find(s=>s.id===state.suiteId)||null;
-  const recordBanner=typeId==='recordAndPlay'
-    ?`<div class="card" style="margin:0 0 10px"><div class="card-head"><div><h2 style="margin:0">Record a new case</h2><div class="muted small">Drive the application in a real browser; the engine captures the URL, actions, data and expected state as a plain-language test case you can replay.</div></div><a class="btn primary" href="#/record-new">+ Record new case</a></div></div>`
-    :'';
-  el('content').innerHTML=liveStripHtml()+recordBanner+statsRowHtml(typeCases,t.summary)+
+  el('content').innerHTML=liveStripHtml()+statsRowHtml(typeCases,t.summary)+
     tileGroupHtml({title:suites.length?'Suites':'Cases',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'No suites — grouped by type tag',tiles})+
     caseSectionHtml({title:sel?sel.name:`${t.title} — all cases`,sub:sel?sel.key:'',cases:sel?casesInSuite(sel.id):typeCases,suiteId:sel&&sel.id,clear:!!sel,label:sel?sel.name:t.title});
 }
 
-// Record & play: start/stop a `playwright codegen` session on the host or import a pasted script.
-function renderRecordNewView(){
-  el('viewTitle').textContent='Record a new case';
+// Record & play: the pane is the record form itself. Existing recordings sit
+// in a compact right rail so the user can jump back to one.
+function renderRecordAndPlayPane(t){
+  const cases=casesForType('recordAndPlay');
+  const header=`<div class="card" style="margin:0 0 10px"><div class="card-head"><div><h2 style="margin:0">Record & play</h2><div class="muted small">${esc(t.summary||'')} · ${plural(cases.length,'recording')} saved</div></div></div></div>`;
+  const form=renderRecordNewView({compact:true});
+  const list=cases.length?`<div class="card" style="margin:0"><div class="card-head"><div><h3 style="margin:0;font-size:13px">Existing recordings</h3></div></div><div class="hp-body" style="display:grid;gap:6px">${cases.map(c=>`<a class="tb-chip" href="#/case/${esc(c.id)}" title="${esc(c.name||c.key)}" style="display:block;padding:6px 8px"><div style="font-weight:600">${esc(c.name||c.key)}</div><div class="muted small">${esc(c.key)} · ${(c.steps||[]).length||0} steps</div></a>`).join('')}</div></div>`:'<div class="muted small" style="padding:12px">No recordings yet. Fill the form on the left to make the first one.</div>';
+  el('content').innerHTML=header+`<div class="tb-layout suite-two" style="gap:16px"><div>${form}</div><div>${list}</div></div>`;
+  startRecordAgentPoll();
+}
+
+// Record & play: queue a recording to the host agent (visible browser) or import a pasted script.
+const RECORD_BROWSERS=['chromium','firefox','webkit'];
+function recordAgentBanner(){
+  const r=state.record;const a=r.agent;
+  if(!a)return '<div class="muted small">Checking host record agent…</div>';
+  if(!a.online)return `<div class="banner">The host record agent is not running on this machine. In a terminal on your PC, run <code>.\\scripts\\start-record-agent.ps1</code> (Windows) or <code>scripts/start-record-agent.sh</code> (macOS/Linux); the Start button lights up once the engine sees it.</div>`;
+  const bs=(a.browsers||[]).join(', ')||'(none installed)';
+  const sel=r.browser;
+  const missing=sel&&!a.browsers.includes(sel);
+  return `<div class="muted small">Host agent connected${a.machine?' on <b>'+esc(a.machine)+'</b>':''} · installed browsers: ${esc(bs)}${missing?' · <span style="color:#c62828"><b>'+esc(sel)+'</b> is not installed — <code>npx playwright install '+esc(sel)+'</code> on this machine</span>':''}</div>`;
+}
+function renderRecordNewView(opts){
+  opts=opts||{};
+  el('viewTitle').textContent=opts.compact?'':'Record a new case';
   const r=state.record;
   const s=r.session;
   const busy=r.saving;
-  const recording=s&&(s.state==='launching'||s.state==='recording'||s.state==='closing');
+  const recording=s&&(s.state==='queued'||s.state==='launching'||s.state==='recording');
   const done=s&&s.state==='done';
-  const failed=s&&s.state==='error';
+  const a=r.agent||{online:false,browsers:[]};
+  const sel=r.browser||'chromium';
+  const canStart=state.appKey&&a.online&&a.browsers.includes(sel)&&!recording&&!done;
+  const browserPick=RECORD_BROWSERS.map(b=>{
+    const installed=a.browsers.includes(b);
+    const disabled=!installed||recording;
+    return `<label class="type-check" title="${installed?'':b+' is not installed on your machine'}"><input type="radio" name="recBrowser" value="${b}" ${sel===b?'checked':''} ${disabled?'disabled':''} data-action="record-pick-browser"> ${b}${installed?'':' (not installed)'}</label>`;
+  }).join('');
   const modeTab=(id,label)=>`<button class="tab-btn${r.mode===id?' active':''}" data-action="record-mode" data-mode="${id}">${label}</button>`;
   const spawnForm=`
     <div class="hp-body" style="display:grid;gap:10px">
+      ${recordAgentBanner()}
       <label style="display:grid;gap:4px">
         <span class="muted small">Starting URL</span>
         <input type="url" id="recUrl" value="${esc(r.url)}" placeholder="https://..." required ${recording?'disabled':''}>
       </label>
+      <div style="display:grid;gap:4px">
+        <span class="muted small">Browser</span>
+        <div class="type-check-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">${browserPick}</div>
+      </div>
       <label style="display:grid;gap:4px">
         <span class="muted small">Title (optional — the engine fills one from the URL)</span>
         <input type="text" id="recTitle" value="${esc(r.title)}" placeholder="e.g. Operator approves a tenant invoice" ${recording?'disabled':''}>
@@ -769,20 +819,23 @@ function renderRecordNewView(){
         <textarea id="recPrecond" rows="3" placeholder="Describe anything that must already be in the system before a replay can succeed." ${recording?'disabled':''}>${esc(r.preconditions)}</textarea>
       </label>
       <div class="row" style="gap:8px;flex-wrap:wrap">
-        ${!s?`<button class="btn primary" data-action="record-start" ${state.appKey?'':'disabled'}>Start recording</button>`:''}
+        ${!s?`<button class="btn primary" data-action="record-start" ${canStart?'':'disabled'} title="${canStart?'Open '+sel+' on this machine with the URL above':'Pre-flight: agent + installed browser + URL required'}">Start recording in ${esc(sel)}</button>`:''}
         ${s&&!r.lastCaseId?`<button class="btn primary" data-action="record-stop" ${busy?'disabled':''}>${done?'Save as a case':'Stop & save as a case'}</button>`:''}
-        ${r.lastCaseId?`<a class="btn" href="#/case/${esc(r.lastCaseId)}">Open the recorded case →</a>`:''}
+        ${s&&!r.lastCaseId&&!done?`<button class="btn" data-action="record-cancel">Cancel</button>`:''}
+        ${r.lastCaseId?`<a class="btn primary" href="#/case/${esc(r.lastCaseId)}">Open the recorded case →</a>`:''}
         ${s?`<button class="btn" data-action="record-reset">Record another</button>`:''}
       </div>
       ${s?`<div class="muted small">Session <code>${esc(s.id)}</code> · state <b>${esc(s.state)}</b>${s.message?' · '+esc(s.message):''}${s.snapshot?' · snapshot: “'+esc(s.snapshot.title||'(no title)')+'”':''}</div>`:''}
-      ${recording?'<p class="muted small">A real browser window opened on this machine. Click, type and navigate exactly the way a user would. When you are done, close the window — or click <b>Stop & save</b> above.</p>':''}
-      ${done&&!r.lastCaseId?'<p class="muted small">The browser closed. Click <b>Save as a case</b> to add the recording to the catalog.</p>':''}
+      ${recording?'<p class="muted small">A real '+esc(sel)+' window should be opening on this machine. Click, type and navigate exactly the way a user would. When you are done, <b>close that browser window</b> — the engine then saves the recording. You can also click <b>Stop &amp; save</b> above.</p>':''}
+      ${recording&&s&&s.live_steps&&s.live_steps.length?`<div class="card" style="margin:4px 0;padding:8px"><div class="muted small" style="margin-bottom:4px">Live steps · ${esc(String(s.live_step_count||s.live_steps.length))} captured so far</div><ol style="margin:0;padding-left:20px;font-size:13px">${s.live_steps.map(ls=>`<li><span class="muted small">[${esc(ls.action)}]</span> ${esc(ls.text||'')}</li>`).join('')}</ol></div>`:''}
+      ${done&&!r.review&&!r.lastCaseId?'<p class="muted small">The browser closed. Click <b>Save as a case</b> to parse the recording — you will see the steps and can amend them before committing.</p>':''}
       ${r.error?`<div class="banner">${esc(r.error)}</div>`:''}
       ${r.warnings&&r.warnings.length?`<details><summary class="muted small">${plural(r.warnings.length,'line')} the engine could not translate</summary><ul class="muted small">${r.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>`:''}
+      ${r.review?recordReviewHtml():''}
     </div>`;
   const importForm=`
     <div class="hp-body" style="display:grid;gap:10px">
-      <p class="muted small">If the engine runs on a server without a display, record on your own machine with <code>npx playwright codegen &lt;url&gt;</code> and paste the TypeScript it writes here. The engine extracts the URL, actions and data as plain-language steps and creates a case.</p>
+      <p class="muted small">If the host agent is not available, record on your own machine with <code>npx playwright codegen &lt;url&gt;</code> and paste the TypeScript it writes here. The engine extracts the URL, actions and data as plain-language steps and creates a case.</p>
       <label style="display:grid;gap:4px">
         <span class="muted small">Starting URL (optional — read from the <code>page.goto</code> if present)</span>
         <input type="url" id="recUrl" value="${esc(r.url)}" placeholder="https://..." ${busy?'disabled':''}>
@@ -805,11 +858,59 @@ function renderRecordNewView(){
       ${r.error?`<div class="banner">${esc(r.error)}</div>`:''}
       ${r.warnings&&r.warnings.length?`<details><summary class="muted small">${plural(r.warnings.length,'line')} the engine could not translate</summary><ul class="muted small">${r.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>`:''}
     </div>`;
-  el('content').innerHTML=`
-    <div class="card"><div class="card-head"><div><h2 style="margin:0">Record a new case</h2><div class="muted small">The recording lands under <a href="#/type/recordAndPlay">Record &amp; play</a> on ${esc(state.appKey||'the current application')}. ${failed?'<b>Previous attempt failed:</b> '+esc(s.error||''):''}</div></div></div>
-    <div style="display:flex;gap:4px;padding:0 12px">${modeTab('spawn','Record in a real browser')}${modeTab('import','Import a pasted codegen script')}</div>
-    ${r.mode==='import'?importForm:spawnForm}
+  const header=opts.compact?'':`<div class="card"><div class="card-head"><div><h2 style="margin:0">Record a new case</h2><div class="muted small">The recording lands under <a href="#/type/recordAndPlay">Record &amp; play</a> on ${esc(state.appKey||'the current application')}.</div></div></div></div>`;
+  const body=`<div class="card" style="margin:0 0 10px"><div style="display:flex;gap:4px;padding:8px 12px 0">${modeTab('spawn','Record in a real browser')}${modeTab('import','Import a pasted codegen script')}</div>${r.mode==='import'?importForm:spawnForm}</div>`;
+  if(opts.compact)return body;
+  el('content').innerHTML=header+body;
+  startRecordAgentPoll();
+}
+
+// Review+amend list for a finished recording. Each step is an editable row;
+// Save as a case sends the (possibly edited) steps to /record/:id/commit.
+function recordReviewHtml(){
+  const r=state.record;
+  if(!r.review)return '';
+  const steps=r.review.steps;
+  const rows=steps.map((st,i)=>{
+    if(st._deleted)return `<div class="muted small" style="padding:6px;text-decoration:line-through">Step ${i+1} removed — <button class="btn" style="padding:1px 6px;font-size:11px" data-action="record-undelete-step" data-i="${i}">restore</button></div>`;
+    const sel=st.selector?`<label style="display:grid;gap:2px"><span class="muted small">Selector</span><input type="text" id="recStepSel-${i}" value="${esc(st.selector)}" style="font-family:monospace;font-size:12px"></label>`:'';
+    return `<div class="card" style="margin:0;padding:8px;display:grid;gap:6px">
+      <div class="row" style="justify-content:space-between;align-items:center"><div><b>Step ${i+1}</b> · <span class="muted small">[${esc(st.action)}]</span></div><button class="btn" style="padding:1px 6px;font-size:11px" data-action="record-delete-step" data-i="${i}" title="Remove this step from the saved case">Remove</button></div>
+      <label style="display:grid;gap:2px"><span class="muted small">What is done</span><input type="text" id="recStepText-${i}" value="${esc(st.text||'')}"></label>
+      <label style="display:grid;gap:2px"><span class="muted small">What should happen</span><input type="text" id="recStepExpected-${i}" value="${esc(st.expected||'')}"></label>
+      ${st.testData!==undefined?`<label style="display:grid;gap:2px"><span class="muted small">Data used</span><input type="text" id="recStepData-${i}" value="${esc(st.testData||'')}"></label>`:''}
+      ${sel}
     </div>`;
+  }).join('');
+  const live=steps.filter(s=>!s._deleted).length;
+  return `<div class="card" style="margin:8px 0 0;padding:10px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div><h3 style="margin:0;font-size:14px">Review the recorded steps · ${esc(String(live))} of ${esc(String(steps.length))}</h3><div class="muted small">Edit anything before saving as a test case. Auto-assertions sit at the end — remove any that look wrong.</div></div>
+      <div class="row" style="gap:8px">
+        <button class="btn primary" data-action="record-commit" ${state.record.saving?'disabled':''}>Save as a case</button>
+      </div>
+    </div>
+    <div style="display:grid;gap:8px">${rows}</div>
+  </div>`;
+}
+function recordUndeleteStep(i){
+  const r=state.record;if(!r.review||!r.review.steps[i])return;
+  r.review.steps[i]._deleted=false;renderCurrentView();
+}
+
+// Poll /api/v1/record/agent while the record form or type page is visible, so
+// the "agent connected" and installed-browser list stay fresh without reload.
+async function recordAgentCheck(){
+  try{const res=await api('/api/v1/record/agent');state.record.agent=res.data;}catch(e){state.record.agent={online:false,browsers:[]};}
+  if(state.view==='record-new'||(state.view==='type'&&state.typeId==='recordAndPlay'))renderCurrentView();
+}
+function startRecordAgentPoll(){
+  if(state.record.agentPoll)return;
+  recordAgentCheck();
+  state.record.agentPoll=setInterval(recordAgentCheck,3000);
+}
+function stopRecordAgentPoll(){
+  if(state.record.agentPoll){clearInterval(state.record.agentPoll);state.record.agentPoll=null;}
 }
 function recordStateFromForm(){
   const r=state.record;
@@ -824,9 +925,9 @@ async function recordPoll(){
   try{
     const res=await api('/api/v1/record/'+encodeURIComponent(r.session.id));
     r.session=res.data;
-    if(r.session.state==='done'||r.session.state==='error'){clearInterval(r.poll);r.poll=null;renderCurrentView();return;}
+    if(['done','error','cancelled'].includes(r.session.state)){clearInterval(r.poll);r.poll=null;renderCurrentView();return;}
   }catch(err){r.error=err.message;clearInterval(r.poll);r.poll=null;}
-  if(state.view==='record-new')renderCurrentView();
+  if(state.view==='record-new'||(state.view==='type'&&state.typeId==='recordAndPlay'))renderCurrentView();
 }
 async function recordStart(){
   recordStateFromForm();
@@ -834,7 +935,7 @@ async function recordStart(){
   if(!r.url){r.error='A starting URL is required.';renderCurrentView();return;}
   r.error='';r.warnings=[];r.lastCaseId=null;
   try{
-    const res=await postJson('/api/v1/record/start',{url:r.url,application_key:state.appKey});
+    const res=await postJson('/api/v1/record/start',{url:r.url,application_key:state.appKey,browser:r.browser||'chromium'});
     r.session=res.data;
     if(r.poll)clearInterval(r.poll);
     r.poll=setInterval(recordPoll,1500);
@@ -844,27 +945,68 @@ async function recordStart(){
     renderCurrentView();
   }
 }
+async function recordCancel(){
+  const r=state.record;
+  if(!r.session)return;
+  try{await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/cancel',{});}catch(e){}
+  if(r.poll){clearInterval(r.poll);r.poll=null;}
+  r.session=null;renderCurrentView();
+}
+// recordStop now fetches a preview — the parsed steps the user reviews and can
+// amend before committing. recordCommit sends the final steps to the server.
 async function recordStop(){
   recordStateFromForm();
   const r=state.record;
   if(!r.session){r.error='No active recording session.';renderCurrentView();return;}
   r.saving=true;r.error='';renderCurrentView();
   try{
-    const res=await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/stop',{application_key:state.appKey,title:r.title,preconditions:r.preconditions});
-    r.lastCaseId=res.data.id;
-    r.warnings=res.warnings||[];
-    r.session={...r.session,state:'done'};
+    const res=await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/stop',{});
+    const d=res.data||res;
+    r.session=d.session||{...r.session,state:'done'};
+    r.warnings=d.warnings||[];
+    r.review={steps:(d.steps||[]).map(s=>({...s})),startUrl:d.start_url||r.url};
     r.saving=false;
     if(r.poll){clearInterval(r.poll);r.poll=null;}
-    toast('Recording saved as '+(res.data.key||res.data.name),'#/case/'+res.data.id);
-    location.hash='#/case/'+res.data.id;
-    // reset form state for a next recording
-    state.record={...state.record,url:'',title:'',script:''};
+    renderCurrentView();
   }catch(err){
     r.saving=false;
     r.error=err.message;
     renderCurrentView();
   }
+}
+async function recordCommit(){
+  recordStateFromForm();
+  const r=state.record;
+  if(!r.review||!r.session){r.error='Nothing to save.';renderCurrentView();return;}
+  r.saving=true;r.error='';renderCurrentView();
+  // Collect any edits from the step inputs.
+  const steps=r.review.steps.map((s,i)=>{
+    const t=el('recStepText-'+i);const e=el('recStepExpected-'+i);const d=el('recStepData-'+i);const sel=el('recStepSel-'+i);
+    return {...s,
+      text:t?t.value:s.text,
+      expected:e?e.value:s.expected,
+      testData:d?d.value:s.testData,
+      selector:sel&&sel.value?sel.value:s.selector,
+    };
+  }).filter(s=>!s._deleted);
+  try{
+    const res=await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/commit',{application_key:state.appKey,title:r.title,preconditions:r.preconditions,steps});
+    r.lastCaseId=res.data.id;
+    r.warnings=res.warnings||[];
+    r.review=null;
+    r.saving=false;
+    toast('Recording saved as '+(res.data.key||res.data.name),'#/case/'+res.data.id);
+    location.hash='#/case/'+res.data.id;
+    state.record={...state.record,url:'',title:'',script:'',preconditions:''};
+  }catch(err){
+    r.saving=false;
+    r.error=err.message;
+    renderCurrentView();
+  }
+}
+function recordDeleteStep(i){
+  const r=state.record;if(!r.review||!r.review.steps[i])return;
+  r.review.steps[i]._deleted=true;renderCurrentView();
 }
 async function recordImport(){
   recordStateFromForm();
@@ -887,9 +1029,11 @@ async function recordImport(){
 }
 function recordReset(){
   if(state.record.poll)clearInterval(state.record.poll);
-  state.record={mode:state.record.mode,url:'',title:'',preconditions:'',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null};
+  const keep={mode:state.record.mode,browser:state.record.browser,agent:state.record.agent,agentPoll:state.record.agentPoll};
+  state.record={...keep,url:'',title:'',preconditions:'',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null};
   renderCurrentView();
 }
+async function recordImportBrowser(){/* reserved: import tab reuses the picker */}
 function renderSitView(groupId){
   const g=groupId?SIT_GROUPS.find(x=>x.id===groupId):null;
   el('viewTitle').textContent=g?('SIT · '+g.title):'SIT console · All cases';
@@ -957,13 +1101,23 @@ function runsTableHtml(){
   if(rl.error)return `<div class="empty">Could not load runs: ${esc(rl.error)}</div>`;
   if(!rl.loaded)return '<div class="hp-loading"><div class="skel" style="height:160px"></div></div>';
   if(!rows)return '<div class="empty">No executions match these filters.</div>';
+  // How many of the selected rows are still in a cancellable state — a row's
+  // "live" status comes from the ui/runs feed (queued/preparing/running).
+  const CANCELLABLE=new Set(['queued','preparing','running','claiming']);
+  const cancellableSel=rl.rows.filter(r=>sel.has(r.id)&&CANCELLABLE.has(String(r.status||'').toLowerCase())).length;
   const batchBar=`<div class="toolbar" style="border:none;padding:6px 0 0;align-items:center">
-    <span class="muted small">${sel.size} selected</span>
+    <span class="muted small">${sel.size} selected${cancellableSel?` · ${cancellableSel} cancellable`:''}</span>
     <span class="spacer" style="flex:1"></span>
     <button class="btn" data-action="runs-clear-sel"${sel.size?'':' disabled'}>Clear selection</button>
+    <button class="btn" data-action="runs-cancel-selected"${cancellableSel?'':' disabled'} title="Cancel the queued/running runs in the selection">⏹ Cancel selected${cancellableSel?' ('+cancellableSel+')':''}</button>
     <button class="btn" data-action="runs-delete-selected"${sel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected${sel.size?' ('+sel.size+')':''}</button>
   </div>`;
-  const more=rl.rows.length<rl.total?`<div class="more"><button class="btn" data-action="runs-more"${rl.loading?' disabled':''}>${rl.loading?'Loading…':'Load more'}</button><span class="muted small">${rl.rows.length} of ${rl.total} shown</span></div>`:`<div class="more"><span class="muted small">${plural(rl.total,'run')} total</span></div>`;
+  const curSize=[25,50,75,100,200].includes(Number(state.runsPageSize))?Number(state.runsPageSize):25;
+  const sizeOpts=[25,50,75,100,200].map(n=>`<option value="${n}"${n===curSize?' selected':''}>${n}</option>`).join('');
+  const sizePicker=`<label class="muted small" style="display:inline-flex;align-items:center;gap:6px">Rows per page <select data-action="runs-page-size" aria-label="Rows per page">${sizeOpts}</select></label>`;
+  const more=rl.rows.length<rl.total
+    ?`<div class="more"><button class="btn" data-action="runs-more"${rl.loading?' disabled':''}>${rl.loading?'Loading…':'Load more'}</button><span class="muted small">${rl.rows.length} of ${rl.total} shown</span>${sizePicker}</div>`
+    :`<div class="more"><span class="muted small">${plural(rl.total,'run')} total</span>${sizePicker}</div>`;
   return `${batchBar}<div class="table-wrap"><table><thead><tr><th><input type="checkbox" data-run-pickall="1"${allChecked?' checked':''} aria-label="Select all shown runs"></th><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Application</th><th>App version</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Ended</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
 }
 function renderHistory(){
@@ -1016,6 +1170,35 @@ function renderRun(){
     const copyBtn=v.url?`<button class="copy-btn" data-action="copy-evidence" data-url="${esc(v.url)}" title="Copy evidence link">Copy</button>`:'';
     return `<div class="evidence-item">${link}<div class="muted small">${esc(c.name)} · ${esc(v.evidence_type)}</div>${copyBtn}</div>`;
   }).join('')}</div>`:`<div class="empty">${active?'No evidence reported yet.':'No evidence was recorded for this run.'}</div>`;
+  // Order of execution: the engine runs these cases strictly in the order the
+  // test_case_ids list defines, on the single worker that claims the run.
+  // Cases of the same execution_method are grouped visually so the user can see
+  // how many workers of each kind the run would saturate if it were parallelised
+  // across more than one claim — today one run = one worker; cross-run parallelism
+  // comes from workers claiming different runs.
+  const planRows=ids.map((cid,idx)=>{
+    const c=names.get(cid)||{};
+    const res=byCase.get(cid);
+    const resStatus=res?String(res.status||'').toLowerCase():(cid===current?'running':'queued');
+    const method=String(c.execution_method||'other').toLowerCase();
+    return {idx,id:cid,name:c.name||cid,key:c.key||'',status:resStatus,method,duration_ms:res?res.duration_ms:null};
+  });
+  const methodChipClass=m=>({http:'badge',selenium:'badge',playwright:'badge',performance:'badge',e2e:'badge'})[m]||'badge';
+  const methodCounts=planRows.reduce((m,r)=>{m[r.method]=(m[r.method]||0)+1;return m;},{});
+  const methodSummary=Object.entries(methodCounts).sort((a,b)=>b[1]-a[1]).map(([m,n])=>`<span class="chip">${esc(m)} × ${n}</span>`).join(' ');
+  const planBody=planRows.length
+    ?`<ol class="run-plan">${planRows.map(p=>{
+        const statusDot=p.status==='passed'?'<span class="rc-icon passed">✓</span>'
+          :FAILED.has(p.status)?'<span class="rc-icon failed">✗</span>'
+          :p.status==='running'?'<span class="pulse running"></span>'
+          :p.status==='skipped'?'<span class="rc-icon skipped">—</span>'
+          :'<span class="rc-icon queued">·</span>';
+        const durTxt=p.duration_ms!=null?` <span class="muted small">${esc(secs(p.duration_ms))}</span>`:'';
+        return `<li class="run-plan-row"><span class="run-plan-pos">${p.idx+1}</span>${statusDot}<a class="run-plan-name" href="#/case/${esc(p.id)}">${esc(p.name)}</a>${p.key?`<span class="muted small key">${esc(p.key)}</span>`:''}<span class="${esc(methodChipClass(p.method))}" title="Needs a worker that supports ${esc(p.method)}">${esc(p.method)}</span>${durTxt}${badge(p.status)}</li>`;
+      }).join('')}</ol>`
+    :'<div class="empty">This run has no planned cases.</div>';
+  const parallelNote=`<div class="muted small" style="margin-top:8px">The engine runs these cases strictly in the order shown — one worker claims the run and executes each case before the next. Parallel execution happens across runs: another worker can be claiming a different run at the same time.</div>`;
+  const planCard=`<div class="card"><div class="card-head"><h2>Order of execution</h2><span class="muted small">${plural(planRows.length,'case')} · ${methodSummary||'no methods declared'}</span></div><div class="hp-body">${planBody}${parallelNote}</div></div>`;
   el('content').innerHTML=`<div class="card run-head">
       <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.name||r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
         <div class="hp-actions"><button class="btn" data-action="nav-back">← Back</button><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
@@ -1025,6 +1208,7 @@ function renderRun(){
         <dl class="kv run-kv"><dt>Suite</dt><dd>${esc(r.suite_name||'—')}</dd><dt>Environment</dt><dd>${esc(r.environment_name||'—')}</dd><dt>Trigger</dt><dd>${esc(r.trigger_source||'—')}</dd><dt>Worker</dt><dd class="key">${esc(r.worker_id||(active?'waiting for a worker':'—'))}</dd><dt>Queued</dt><dd>${esc(when(r.created_at))}</dd><dt>Started</dt><dd>${esc(when(r.started_at))}</dd><dt>Finished</dt><dd>${r.finished_at?esc(when(r.finished_at)):'—'}</dd><dt>${active?'Elapsed':'Duration'}</dt><dd>${elapsed}</dd></dl>
         ${failMsgs}
       </div></div>
+    ${planCard}
     ${TB.remarksHtml(r)}
     <div class="card"><div class="card-head"><h2>Evidence</h2><span class="muted small">${plural(evidenceList.length,'item')} · ${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><div class="hp-body">${gallery}</div></div>`;
 }
@@ -1171,12 +1355,20 @@ function renderConfigView(){
   const s=state.settings;
   if(!s){el('content').innerHTML=skeletonHtml();return;}
   if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
-  const timeouts=s.test_type_timeout_minutes||{};
-  const typeRows=Object.keys(timeouts).map(t=>{
-    const hours=timeouts[t]/60;
+  const timeouts=s.test_type_timeout_seconds||{};
+  const types=Object.keys(timeouts).sort();
+  const typeRows=types.map(t=>{
+    const secs=Number(timeouts[t])||30;
     const label=t.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());
-    return `<tr><td>${esc(label)}</td><td><input type="number" class="timeoutHours" data-type="${esc(t)}" min="0.01" max="168" step="0.25" value="${hours%1===0?hours:hours.toFixed(2)}" style="width:90px"> hours</td></tr>`;
+    return `<tr><td><input type="checkbox" class="timeoutPick" data-type="${esc(t)}" aria-label="Select ${esc(label)} for bulk edit"></td><td>${esc(label)} <span class="muted small">${esc(t)}</span></td><td><input type="number" class="timeoutSecs" data-type="${esc(t)}" min="5" max="604800" step="5" value="${esc(secs)}" style="width:90px"> seconds</td></tr>`;
   }).join('');
+  const bulkBar=`<div class="toolbar" style="border:none;padding:4px 0 10px;gap:10px;align-items:center;flex-wrap:wrap">
+    <label class="muted small"><input type="checkbox" id="timeoutPickAll" aria-label="Select all"> Select all</label>
+    <span class="spacer" style="flex:1"></span>
+    <label class="muted small">Set selected to <input type="number" id="bulkSetSecs" min="5" max="604800" step="5" value="30" style="width:84px"> seconds <button class="btn" data-action="timeouts-bulk-set">Apply</button></label>
+    <label class="muted small">Change selected by <input type="number" id="bulkDeltaSecs" min="-604800" max="604800" step="5" value="10" style="width:84px"> seconds <button class="btn" data-action="timeouts-bulk-delta">Apply</button></label>
+    <button class="btn" data-action="timeouts-reset-defaults" title="Reset selected rows to 30 seconds">Reset to 30 s</button>
+  </div>`;
   el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Run retention</h2></div>
     <div class="hp-body">
       <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted. Minimum 5 days.</p>
@@ -1189,8 +1381,9 @@ function renderConfigView(){
     </div></div>
     <div class="card" style="margin-top:12px"><div class="card-head"><h2>Test case run timeout</h2></div>
       <div class="hp-body">
-        <p class="muted small">A running test case is killed and recorded as "Timed out" once it runs longer than its test type's limit below. Every type defaults to 24 hours.</p>
-        <div class="table-wrap"><table><thead><tr><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table></div>
+        <p class="muted small">A running test case is killed and recorded as "Timed out" once it runs longer than its test type's limit below. Every type defaults to 30 seconds. Select rows and apply a bulk change, or edit each row directly.</p>
+        ${bulkBar}
+        <div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table></div>
       </div></div>
     <div class="card" style="margin-top:12px"><div class="card-head"><h2>Failure circuit breaker</h2></div>
       <div class="hp-body">
@@ -1705,12 +1898,16 @@ function cycleRunHtml(){
       :prep==='ready'?`Preparation complete — queuing iteration 1`
       :`Iteration ${i} of ${total} in flight · ${done} completed`;
     const cleanTag=c.clean_start?' <span class="chip">Clean cycle</span>':'';
-    return `<div class="banner" style="margin:0 0 12px;background:var(--amber-50,#fff7ed);border-color:var(--amber,#e0a826)">Cycle ${esc(c.key)} on ${esc(envLabel)}${cleanTag}: ${esc(phase)}. <button class="btn" data-action="cancel-cycle" data-id="${esc(c.id)}">Cancel cycle</button></div>`;
+    // Running banner uses the default `.banner` dark-amber tokens (amber-soft bg + amber text).
+    // The old inline `background:var(--amber-50,#fff7ed)` fell through to a near-white #fff7ed
+    // because --amber-50 is not defined in this theme, which made the already-bright amber text
+    // unreadable against it.
+    return `<div class="banner" style="margin:0 0 12px">Cycle ${esc(c.key)} on ${esc(envLabel)}${cleanTag}: ${esc(phase)}. <button class="btn" data-action="cancel-cycle" data-id="${esc(c.id)}">Cancel cycle</button></div>`;
   }
-  if(c.status==='completed')return `<div class="banner" style="margin:0 0 12px;background:var(--green-50,#ecfdf5);border-color:var(--green,#17a673)">Cycle ${esc(c.key)} completed: ${total} iteration${total===1?'':'s'} finished on ${esc(envLabel)}.</div>`;
+  if(c.status==='completed')return `<div class="banner" style="margin:0 0 12px;background:var(--green-soft);border-color:var(--green);color:var(--green)">Cycle ${esc(c.key)} completed: ${total} iteration${total===1?'':'s'} finished on ${esc(envLabel)}.</div>`;
   if(c.status==='failed'){const err=c.last_error?' — '+esc(String(c.last_error).slice(0,180)):'';
-    return `<div class="banner" style="margin:0 0 12px;background:var(--red-50,#fef2f2);border-color:var(--red,#d64545)">Cycle ${esc(c.key)} failed at iteration ${done+1} of ${total}${err}</div>`;}
-  if(c.status==='cancelled')return `<div class="banner" style="margin:0 0 12px">Cycle ${esc(c.key)} cancelled after ${done} of ${total} iterations.</div>`;
+    return `<div class="banner" style="margin:0 0 12px;background:var(--red-soft);border-color:var(--red);color:var(--red)">Cycle ${esc(c.key)} failed at iteration ${done+1} of ${total}${err}</div>`;}
+  if(c.status==='cancelled')return `<div class="banner" style="margin:0 0 12px;background:var(--panel,#1b1e24);border-color:var(--border,#30363d);color:var(--muted,#9aa0a6)">Cycle ${esc(c.key)} cancelled after ${done} of ${total} iterations.</div>`;
   return '';
 }
 function renderEnvSelect(){
@@ -1848,12 +2045,16 @@ function handleAction(action,node){
   else if(action==='run-case'){const envSel=el('runCaseEnv');runCases([node.dataset.id],node.dataset.label,envSel&&envSel.value||null);}
   else if(action==='save-retention')saveRetention(node);
   else if(action==='save-timeouts')saveTimeouts(node);
+  else if(action==='timeouts-bulk-set')timeoutsBulkSet();
+  else if(action==='timeouts-bulk-delta')timeoutsBulkDelta();
+  else if(action==='timeouts-reset-defaults')timeoutsResetDefaults();
   else if(action==='save-suite')saveAsSuite();
   else if(action==='apply-run-filters')applyRunFilters();
   else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''};loadRunsList(true);}
   else if(action==='runs-more')loadRunsList(false);
   else if(action==='runs-clear-sel'){state.runsSel=new Set();renderCurrentView();}
   else if(action==='runs-delete-selected')deleteSelectedRuns();
+  else if(action==='runs-cancel-selected')cancelSelectedRuns();
   else if(action==='runs-tab'){state.runsTab=node.dataset.tab;renderCurrentView();}
   else if(action==='home-refresh'){state.appBoard=null;loadApplicationBoard();renderCurrentView();}
   else if(action==='home-pick'){const key=node.dataset.app;if(key)switchApplication(key);location.hash='#/overview';}
@@ -1889,8 +2090,13 @@ function handleAction(action,node){
   else if(action==='infra-save-policy')saveInfraPolicy(node);
   else if(action==='infra-job-log'){state.infraOpenJob=state.infraOpenJob===node.dataset.id?null:node.dataset.id;renderCurrentView();}
   else if(action==='record-mode'){recordStateFromForm();state.record.mode=node.dataset.mode;state.record.error='';renderCurrentView();}
+  else if(action==='record-pick-browser'){state.record.browser=node.value;renderCurrentView();}
   else if(action==='record-start')recordStart();
   else if(action==='record-stop')recordStop();
+  else if(action==='record-cancel')recordCancel();
+  else if(action==='record-commit')recordCommit();
+  else if(action==='record-delete-step'){recordStateFromForm();recordDeleteStep(Number(node.dataset.i));}
+  else if(action==='record-undelete-step'){recordStateFromForm();recordUndeleteStep(Number(node.dataset.i));}
   else if(action==='record-import')recordImport();
   else if(action==='record-reset')recordReset();
 }
@@ -1932,6 +2138,22 @@ async function deleteSelectedRuns(){
     await loadRunsList(true);
   }catch(e){
     toast('Delete failed: '+e.message);
+  }
+}
+async function cancelSelectedRuns(){
+  const CANCELLABLE=new Set(['queued','preparing','running','claiming']);
+  const sel=state.runsSel||new Set();
+  const ids=(state.runsList.rows||[]).filter(r=>sel.has(r.id)&&CANCELLABLE.has(String(r.status||'').toLowerCase())).map(r=>r.id);
+  if(!ids.length){toast('None of the selected runs are cancellable.');return;}
+  if(!confirm(`Cancel ${plural(ids.length,'run')}? Each worker learns of the cancellation on its next heartbeat.`))return;
+  try{
+    const res=await postJson('/api/v1/executions/cancel-batch',{ids});
+    const n=res&&res.data&&res.data.cancelled!=null?res.data.cancelled:ids.length;
+    toast(`Cancelled ${plural(n,'run')}`);
+    await loadRunsList(true);
+    pollLive();
+  }catch(e){
+    toast('Cancel failed: '+e.message);
   }
 }
 async function runSelectedTypes(){
@@ -1989,11 +2211,11 @@ function showTimeoutsError(msg){
 }
 async function saveTimeouts(btn){
   showTimeoutsError(null);
-  const test_type_timeout_minutes={};
-  for(const inp of document.querySelectorAll('.timeoutHours')){
-    const hours=Number(inp.value);
-    if(!(hours>0)||!Number.isFinite(hours)){showTimeoutsError('Enter a timeout greater than 0 for every test type.');return;}
-    test_type_timeout_minutes[inp.dataset.type]=Math.round(hours*60);
+  const test_type_timeout_seconds={};
+  for(const inp of document.querySelectorAll('.timeoutSecs')){
+    const secs=Number(inp.value);
+    if(!Number.isInteger(secs)||secs<5||secs>604800){showTimeoutsError('Enter whole seconds between 5 and 604800 for every test type.');return;}
+    test_type_timeout_seconds[inp.dataset.type]=secs;
   }
   const limit=Number(el('failureLimit').value);
   if(!Number.isInteger(limit)||limit<1||limit>1000){
@@ -2002,10 +2224,36 @@ async function saveTimeouts(btn){
   }
   btn.disabled=true;
   try{
-    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_timeout_minutes,consecutive_failure_limit:limit})})).data;
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_timeout_seconds,consecutive_failure_limit:limit})})).data;
     toast('Timeout and circuit breaker settings saved');
     renderCurrentView();
   }catch(e){showTimeoutsError('Save failed: '+e.message);btn.disabled=false;}
+}
+function pickedTimeoutInputs(){
+  const picks=[...document.querySelectorAll('.timeoutPick')];
+  const selected=picks.filter(p=>p.checked);
+  const target=selected.length?selected:picks;
+  return target.map(p=>document.querySelector(`.timeoutSecs[data-type="${CSS.escape(p.dataset.type)}"]`)).filter(Boolean);
+}
+function clampTimeoutSecs(n){return Math.max(5,Math.min(604800,Math.round(n)));}
+function timeoutsBulkSet(){
+  const v=Number(el('bulkSetSecs').value);
+  if(!Number.isInteger(v)||v<5||v>604800){showTimeoutsError('Set-to needs whole seconds between 5 and 604800.');return;}
+  for(const inp of pickedTimeoutInputs())inp.value=String(clampTimeoutSecs(v));
+  showTimeoutsError(null);
+}
+function timeoutsBulkDelta(){
+  const d=Number(el('bulkDeltaSecs').value);
+  if(!Number.isFinite(d)||!Number.isInteger(d)){showTimeoutsError('Delta needs a whole-number of seconds (positive or negative).');return;}
+  for(const inp of pickedTimeoutInputs()){
+    const cur=Number(inp.value)||0;
+    inp.value=String(clampTimeoutSecs(cur+d));
+  }
+  showTimeoutsError(null);
+}
+function timeoutsResetDefaults(){
+  for(const inp of pickedTimeoutInputs())inp.value='30';
+  showTimeoutsError(null);
 }
 async function runEverything(btn){
   if(!state.envId){toast('No environment available.');return;}
@@ -2425,6 +2673,7 @@ function parseHash(){
 }
 async function onRoute(){
   parseHash();renderSideNav();
+  if(state.view!=='record-new'&&!(state.view==='type'&&state.typeId==='recordAndPlay'))stopRecordAgentPoll();
   const runId=state.runId,caseId=state.caseId;
   if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
   if(state.view==='config-retention'&&state.settings===null)loadSettings();
@@ -2494,6 +2743,15 @@ content.addEventListener('change',e=>{
     return;
   }
   if(e.target.matches('#runsEnvFilter,#runsStatusFilter,#runsTriggerFilter,#runsVersionFilter,#runsFromFilter,#runsToFilter')){applyRunFilters();return;}
+  if(e.target.id==='timeoutPickAll'){
+    const on=e.target.checked;for(const p of document.querySelectorAll('.timeoutPick'))p.checked=on;
+    return;
+  }
+  if(e.target.matches('select[data-action="runs-page-size"]')){
+    const n=Number(e.target.value);
+    if([25,50,75,100,200].includes(n)){state.runsPageSize=n;try{localStorage.setItem('te.runsPageSize',String(n));}catch{}loadRunsList(true);}
+    return;
+  }
   const typesel=e.target.closest('[data-typesel]');
   if(typesel){
     if(typesel.checked)state.selectedTypes.add(typesel.dataset.typesel);else state.selectedTypes.delete(typesel.dataset.typesel);
@@ -2539,6 +2797,7 @@ setInterval(()=>{
 },1000);
 (async function init(){
   try{state.headed=!!localStorage.getItem('te.headed');}catch{}
+  try{const n=Number(localStorage.getItem('te.runsPageSize'));if([25,50,75,100,200].includes(n))state.runsPageSize=n;}catch{}
   el('headedCheck').checked=state.headed;
   parseHash();renderSideNav();renderCurrentView();       // skeleton paints before any data arrives
   loadHealth();setInterval(loadHealth,60000);

@@ -31,13 +31,14 @@
  */
 
 export interface RecordedStep {
-  action: 'navigate' | 'click' | 'click_text' | 'type' | 'select' | 'wait_for' | 'assert_selector_text' | 'assert_title' | 'wait';
+  action: 'navigate' | 'click' | 'click_text' | 'type' | 'select' | 'wait_for' | 'assert_selector_text' | 'assert_title' | 'assert_no_horizontal_overflow' | 'wait';
   selector?: string;
   value?: string;
   expected?: string;
   must_contain?: string;
   text: string;
   testData?: string;
+  max_overflow_px?: number;
 }
 
 export interface ParsedRecording {
