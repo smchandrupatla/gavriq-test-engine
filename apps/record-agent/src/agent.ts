@@ -162,38 +162,39 @@ async function scrapeAssertions(page: Page, density: 'landmarks' | 'all'): Promi
   }
 
   // Visible elements: text + properties.
+  // The evaluate body is a string, not a TS arrow, so tsx's injected helpers
+  // (like __name) do not leak into the browser context and break the scan.
   type Scraped = { role: string; name: string; text: string | null; placeholder: string | null; title: string | null; href: string | null; testid: string | null };
-  const rows = await page.evaluate(({ densityArg }) => {
-    const out: any[] = [];
-    const trim = (s: string | null | undefined) => (s || '').replace(/\s+/g, ' ').trim();
-    const isVisible = (el: Element) => {
-      const r = (el as HTMLElement).getBoundingClientRect();
+  const selectors = density === 'all'
+    ? 'h1,h2,h3,h4,h5,h6,button,a[href],[role=button],[role=link],[role=heading],[role=tab],[aria-label],[title],[placeholder],[data-testid],input,textarea,select,label'
+    : 'h1,h2,h3,h4,h5,h6,button,a[href],[role=button],[role=heading],[aria-label],[title],[placeholder],input[type=text],input[type=email],input[type=password],input[type=search],textarea';
+  const scrapeBody = `(() => {
+    var out = [];
+    function trim(s) { return (s || '').replace(/\\s+/g, ' ').trim(); }
+    function isVisible(el) {
+      var r = el.getBoundingClientRect();
       if (!r.width || !r.height) return false;
-      const style = getComputedStyle(el);
+      var style = getComputedStyle(el);
       if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return false;
       return true;
-    };
-    const push = (role: string, el: HTMLElement) => {
-      const text = trim(el.innerText || el.textContent);
-      const placeholder = (el as HTMLInputElement).placeholder || null;
-      const titleAttr = el.getAttribute('title');
-      const href = (el as HTMLAnchorElement).href || null;
-      const testid = el.getAttribute('data-testid');
-      const name = trim(el.getAttribute('aria-label') || text || placeholder || titleAttr || '');
-      if (!name) return;
-      out.push({ role, name, text: text || null, placeholder, title: titleAttr, href, testid });
-    };
-    const selectors = densityArg === 'all'
-      ? 'h1,h2,h3,h4,h5,h6,button,a[href],[role=button],[role=link],[role=heading],[role=tab],[aria-label],[title],[placeholder],[data-testid],input,textarea,select,label'
-      : 'h1,h2,h3,h4,h5,h6,button,a[href],[role=button],[role=heading],[aria-label],[title],[placeholder],input[type=text],input[type=email],input[type=password],input[type=search],textarea';
-    const nodes = Array.from(document.querySelectorAll(selectors)) as HTMLElement[];
-    for (const el of nodes) {
+    }
+    var nodes = Array.prototype.slice.call(document.querySelectorAll(${JSON.stringify(selectors)}));
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
       if (!isVisible(el)) continue;
-      const role = (el.getAttribute('role') || el.tagName.toLowerCase());
-      push(role, el);
+      var role = el.getAttribute('role') || el.tagName.toLowerCase();
+      var text = trim(el.innerText || el.textContent);
+      var placeholder = el.placeholder || null;
+      var titleAttr = el.getAttribute('title');
+      var href = el.href || null;
+      var testid = el.getAttribute('data-testid');
+      var name = trim(el.getAttribute('aria-label') || text || placeholder || titleAttr || '');
+      if (!name) continue;
+      out.push({ role: role, name: name, text: text || null, placeholder: placeholder, title: titleAttr, href: href, testid: testid });
     }
     return out;
-  }, { densityArg: density });
+  })()`;
+  const rows: Scraped[] = await page.evaluate(scrapeBody);
 
   const seen = new Set<string>();
   for (const r of rows as Scraped[]) {
