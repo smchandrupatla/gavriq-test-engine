@@ -938,9 +938,40 @@ function recordUndeleteStep(i){
 
 // Poll /api/v1/record/agent while the record form or type page is visible, so
 // the "agent connected" and installed-browser list stay fresh without reload.
+// Also look for any adoptable session (started outside this tab, or left over
+// after a reload) so the review+save flow is always available where the
+// engine has state waiting for it.
 async function recordAgentCheck(){
   try{const res=await api('/api/v1/record/agent');state.record.agent=res.data;}catch(e){state.record.agent={online:false,browsers:[]};}
+  await recordAdoptPending();
   if(state.view==='record-new'||(state.view==='type'&&state.typeId==='recordAndPlay'))renderCurrentView();
+}
+async function recordAdoptPending(){
+  const r=state.record;
+  // Nothing to adopt if we already have a session in flight or in review.
+  if(r.lastCaseId||r.review||(r.session&&r.session.state!=='done'&&r.session.state!=='error'&&r.session.state!=='cancelled'))return;
+  if(!state.appKey)return;
+  try{
+    const res=await api('/api/v1/record/sessions/pending-ui?application_key='+encodeURIComponent(state.appKey));
+    const list=res.data||[];
+    if(!list.length)return;
+    const s=list[0];
+    // Skip anything we already saw and dismissed.
+    if(r.session&&r.session.id===s.id&&r.review===null&&(s.state==='done'||s.state==='cancelled'||s.state==='error'))return;
+    r.session=s;
+    if(s.state==='queued'||s.state==='launching'||s.state==='recording'){
+      if(!r.poll)r.poll=setInterval(recordPoll,1500);
+    }else if(s.state==='done'&&!r.review){
+      // Pull the parsed preview so the review panel renders.
+      try{
+        const stop=await postJson('/api/v1/record/'+encodeURIComponent(s.id)+'/stop',{});
+        const d=stop.data||stop;
+        r.session=d.session||s;
+        r.warnings=d.warnings||[];
+        r.review={steps:(d.steps||[]).map(x=>({...x})),startUrl:d.start_url||s.url};
+      }catch(e){/* ignore */}
+    }
+  }catch(e){/* ignore */}
 }
 function startRecordAgentPoll(){
   if(state.record.agentPoll)return;
