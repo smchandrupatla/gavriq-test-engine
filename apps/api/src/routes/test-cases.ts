@@ -143,7 +143,10 @@ export async function testCaseRoutes(app: FastifyInstance) {
     const envParam = i++;
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const limit = Math.min(Number(q.limit) || 50, 1000);
+    // Caps raised to 5000 — the console no longer hits this endpoint for its
+    // type page (that uses /api/v1/ui/cases, which pages at 50 by default), but
+    // external callers may legitimately pull a few thousand in one go.
+    const limit = Math.min(Number(q.limit) || 50, 5000);
     const offset = Number(q.offset) || 0;
     // The screen lists ~800 cases: it gets the card columns; full=1 adds steps, scripts and rules.
     const columns = q.full === '1' ? 'tc.*' : `tc.id, tc.key, tc.name, tc.objective, tc.application_id, tc.test_type, tc.execution_method, tc.automation_status,

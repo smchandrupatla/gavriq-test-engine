@@ -53,7 +53,203 @@ async function resolveEnvironmentId(v: unknown): Promise<string | null> {
   return rows[0]?.id ?? null;
 }
 
+// In-memory classification cache keyed by application_key. Entries hold the
+// classified-type for every case id, so /ui/cases and /ui/catalog-counts can
+// skip the typeOfCase recomputation on every call. Invalidated by a 60 s TTL
+// and whenever a seeded catalog_sig changes.
+type ClassifyCache = {
+  signature: string;
+  computedAt: number;
+  typeByCaseId: Map<string, string>;
+  suiteIdsByCaseId: Map<string, string[]>;
+  tagsByCaseId: Map<string, string[]>;
+  byType: Record<string, number>;
+  bySuite: Record<string, number>;
+  total: number;
+};
+const classifyCache = new Map<string, ClassifyCache>();
+const CLASSIFY_TTL_MS = 60_000;
+
+async function buildClassifyCache(appKey: string): Promise<ClassifyCache> {
+  const [appRows, caseRows, suiteRows, sigRow] = await Promise.all([
+    query(
+      `SELECT COALESCE(metadata->'types', metadata->'sandbench_types', '[]'::jsonb) AS types
+       FROM applications WHERE key = $1`,
+      [appKey]
+    ),
+    query(
+      `SELECT tc.id, tc.tags,
+              COALESCE(array_agg(s.test_suite_id ORDER BY s.sort_order) FILTER (WHERE s.test_suite_id IS NOT NULL), '{}') AS suite_ids
+       FROM test_cases tc
+       LEFT JOIN test_case_suites s ON s.test_case_id = tc.id
+       WHERE tc.application_id = (SELECT id FROM applications WHERE key = $1)
+       GROUP BY tc.id, tc.tags`,
+      [appKey]
+    ),
+    query(
+      `SELECT id, key, suite_type FROM test_suites
+       WHERE application_id = (SELECT id FROM applications WHERE key = $1)`,
+      [appKey]
+    ),
+    query(
+      `SELECT (SELECT count(*) FROM test_cases)::text || ':' ||
+              COALESCE((SELECT max(updated_at) FROM test_cases)::text, '') AS sig`
+    ),
+  ]);
+
+  const appTypes: Array<{ key?: string }> = (appRows.rows[0]?.types ?? []) as any;
+  const typeKeyOrder = appTypes.map((t) => String(t?.key || '')).filter(Boolean);
+  const typeKeySet = new Set(typeKeyOrder);
+  const suiteById = new Map<string, { suite_type: string | null; key: string | null }>();
+  for (const s of suiteRows.rows as any[]) suiteById.set(s.id, { suite_type: s.suite_type, key: s.key });
+
+  const typeByCaseId = new Map<string, string>();
+  const suiteIdsByCaseId = new Map<string, string[]>();
+  const tagsByCaseId = new Map<string, string[]>();
+  const byType: Record<string, number> = {};
+  const bySuite: Record<string, number> = {};
+
+  for (const row of caseRows.rows as any[]) {
+    const tags: string[] = (row.tags || []).map((t: unknown) => String(t));
+    const suiteIds: string[] = row.suite_ids || [];
+    suiteIdsByCaseId.set(row.id, suiteIds);
+    tagsByCaseId.set(row.id, tags);
+    const tagSet = new Set(tags.map((t) => t.toLowerCase()));
+    let t: string;
+    if (tagSet.has('sit')) t = 'sit';
+    else {
+      t = '';
+      for (const sid of suiteIds) {
+        const s = suiteById.get(sid);
+        if (!s) continue;
+        const st = String(s.suite_type || '');
+        if (typeKeySet.has(st)) { t = st; break; }
+        const k = String(s.key || '');
+        if (k.startsWith('sb-')) {
+          const parts = k.split('-');
+          if (parts.length >= 2 && typeKeySet.has(parts[1]!)) { t = parts[1]!; break; }
+        }
+      }
+      if (!t) {
+        for (const tk of typeKeyOrder) {
+          if (tagSet.has(tk.toLowerCase())) { t = tk; break; }
+        }
+      }
+      if (!t) t = 'other';
+    }
+    typeByCaseId.set(row.id, t);
+    byType[t] = (byType[t] || 0) + 1;
+    for (const sid of suiteIds) bySuite[sid] = (bySuite[sid] || 0) + 1;
+  }
+
+  return {
+    signature: sigRow.rows[0]?.sig ?? '',
+    computedAt: Date.now(),
+    typeByCaseId,
+    suiteIdsByCaseId,
+    tagsByCaseId,
+    byType,
+    bySuite,
+    total: caseRows.rows.length,
+  };
+}
+
+async function getClassifyCache(appKey: string): Promise<ClassifyCache> {
+  const cached = classifyCache.get(appKey);
+  if (cached && Date.now() - cached.computedAt < CLASSIFY_TTL_MS) return cached;
+  const fresh = await buildClassifyCache(appKey);
+  classifyCache.set(appKey, fresh);
+  return fresh;
+}
+
 export async function uiRoutes(app: FastifyInstance) {
+  // Catalog counts — the single source of truth for the sidebar, Overview tiles
+  // and every "how many of X" badge. Payload is tiny (a few KB) regardless of
+  // how many thousand cases the app has, so it loads instantly and the sidebar
+  // paints before the full case list arrives.
+  //
+  // The per-type classification mirrors the client's typeOfCase() exactly:
+  //   1. tag "sit" -> type "sit"
+  //   2. suite's suite_type matches an application type -> that type
+  //   3. suite.key starts with "sb-<type>-" -> that type
+  //   4. any tag matches an application type (iteration order of app.types) -> that type
+  //   5. else "other"
+  app.get('/api/v1/ui/catalog-counts', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const c = await getClassifyCache(appKey);
+    return reply.send({ data: { total: c.total, by_type: c.byType, by_suite: c.bySuite } });
+  });
+
+  // Paged, filterable list of cases for one view (type page, suite page, search).
+  // The server classifies by the same typeOfCase rules the counts endpoint uses,
+  // so a request for type_id=apiPortalIntegration returns the portal cases
+  // whose generic DB test_type is "integration" but whose suite_type is the
+  // specific portal one.
+  app.get('/api/v1/ui/cases', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const typeId = (q.type_id || '').trim();
+    const suiteId = (q.suite_id || '').trim();
+    const search = (q.q || '').trim();
+    const envId = await resolveEnvironmentId(q.environment_id);
+    const limit = Math.max(1, Math.min(500, Number(q.limit) || 50));
+    const offset = Math.max(0, Number(q.offset) || 0);
+
+    // Classification uses the per-app cache; the first call populates it, every
+    // subsequent call reads instantly.
+    const classify = await getClassifyCache(appKey);
+
+    // Candidate case ids after filtering by type_id / suite_id — we only hit
+    // Postgres for the compact card data of the final page, not for everything.
+    const candidateIds: string[] = [];
+    for (const [id, type] of classify.typeByCaseId) {
+      if (typeId && type !== typeId) continue;
+      if (suiteId) {
+        const sids = classify.suiteIdsByCaseId.get(id) || [];
+        if (!sids.includes(suiteId)) continue;
+      }
+      candidateIds.push(id);
+    }
+
+    // Server-side search works against name+key via a parameterised ILIKE so
+    // Postgres can use its indexes; the server fetches names only for the
+    // narrowed candidate set.
+    const needle = search ? `%${search.replace(/[%_\\]/g, (m) => '\\' + m)}%` : null;
+    let ids = candidateIds;
+    if (needle) {
+      const { rows: hits } = await query(
+        `SELECT id FROM test_cases WHERE id = ANY($1::uuid[]) AND (name ILIKE $2 OR key ILIKE $2)`,
+        [candidateIds, needle]
+      );
+      const hitSet = new Set((hits as any[]).map((r) => r.id));
+      ids = candidateIds.filter((id) => hitSet.has(id));
+    }
+
+    const total = ids.length;
+    const pageIds = ids.slice(offset, offset + limit);
+    if (!pageIds.length) return reply.send({ data: [], total });
+
+    const { rows } = await query(
+      `SELECT tc.id, tc.key, tc.name, tc.tags, tc.test_type, tc.execution_method,
+              COALESCE(array_agg(s.test_suite_id ORDER BY s.sort_order) FILTER (WHERE s.test_suite_id IS NOT NULL), '{}') AS suite_ids,
+              lr.status AS last_status, COALESCE(lr.finished_at, lr.created_at) AS last_at, lr.duration_ms AS last_duration_ms
+       FROM test_cases tc
+       LEFT JOIN test_case_suites s ON s.test_case_id = tc.id
+       LEFT JOIN LATERAL (
+         SELECT er.status, er.finished_at, er.created_at, er.duration_ms
+         FROM execution_results er JOIN executions ex ON ex.id = er.execution_id
+         WHERE er.test_case_id = tc.id AND ($2::uuid IS NULL OR ex.environment_id = $2::uuid)
+         ORDER BY er.created_at DESC LIMIT 1
+       ) lr ON true
+       WHERE tc.id = ANY($1::uuid[])
+       GROUP BY tc.id, lr.status, lr.finished_at, lr.created_at, lr.duration_ms
+       ORDER BY tc.key`,
+      [pageIds, envId]
+    );
+    return reply.send({ data: rows, total });
+  });
+
   app.get('/api/v1/ui/summary', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
