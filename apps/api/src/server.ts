@@ -38,9 +38,13 @@ import { registerEvidenceGate } from './evidence-gate.js';
 import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
 import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
 import { defectRoutes } from './routes/defects.js';
+import { recordRoutes } from './routes/record.js';
 import { feedbackLoopRoutes } from './routes/feedback-loop.js';
+import { deployLoopRoutes } from './routes/deploy-loop.js';
+import { cycleRunRoutes } from './routes/cycle-runs.js';
 import { defectLogRoutes } from './routes/defect-log.js';
 import { feedbackLoopTick } from './feedback-loop.js';
+import { deployLoopTick } from './deploy-loop.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -245,6 +249,9 @@ async function main() {
   await app.register(defectRoutes);
   await app.register(feedbackLoopRoutes);
   await app.register(defectLogRoutes);
+  await app.register(deployLoopRoutes);
+  await app.register(cycleRunRoutes);
+  await app.register(recordRoutes);
 
   await app.listen({ port, host });
 
@@ -300,6 +307,24 @@ async function main() {
     };
     const every = Math.max(5_000, Number(process.env.FEEDBACK_LOOP_TICK_MS) || 20_000);
     setInterval(loopTickSafe, every).unref();
+  }
+
+  // Deploy-failure loop (deploy-loop.ts): when a managed stack's deploy fails, the engine
+  // hands the failure to the application repo's agent and retries when they report a fix.
+  // Capped at 5 retries by default; after that the loop parks and the console banners the
+  // environment so a person can investigate. DEPLOY_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.DEPLOY_LOOP_TICK_MS !== '0') {
+    let deployBusy = false;
+    const deployTickSafe = () => {
+      if (deployBusy) return;
+      deployBusy = true;
+      deployLoopTick()
+        .catch((err) => app.log.warn({ err }, 'deploy loop tick failed'))
+        .finally(() => { deployBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.DEPLOY_LOOP_TICK_MS) || 20_000);
+    setTimeout(deployTickSafe, 45_000).unref();
+    setInterval(deployTickSafe, every).unref();
   }
 
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);

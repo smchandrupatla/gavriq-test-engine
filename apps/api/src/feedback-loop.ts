@@ -137,9 +137,9 @@ async function loadReports(appKey: string): Promise<Array<ReportLite & { defects
     `SELECT dr.key, dr.status,
             COALESCE(json_agg(json_build_object('key', d.key, 'status', d.status)) FILTER (WHERE d.id IS NOT NULL), '[]') AS defects
        FROM defect_reports dr
-       JOIN executions e ON e.id = dr.execution_id
+       LEFT JOIN executions e ON e.id = dr.execution_id
        LEFT JOIN defects d ON d.report_id = dr.id
-      WHERE e.metadata->>'application_key' = $1 AND dr.status <> 'verified'
+      WHERE (e.metadata->>'application_key' = $1 OR dr.application_key = $1) AND dr.status <> 'verified'
       GROUP BY dr.id, dr.key, dr.status, dr.created_at
       ORDER BY dr.created_at`,
     [appKey]

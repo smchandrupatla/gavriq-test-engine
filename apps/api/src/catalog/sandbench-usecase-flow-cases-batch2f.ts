@@ -28,14 +28,14 @@ import type { CaseDef } from './types.js';
 
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+  body: { username: '{{username}}', password: '{{password}}' },
   expected_status: 200, save: { token: 'token' },
   description: 'operator login',
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: 'admin.acme' },
+  body: { username: 'admin', password: '{{password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };

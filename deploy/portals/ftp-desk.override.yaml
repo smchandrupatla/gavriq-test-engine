@@ -1,0 +1,13 @@
+name: gavriq-ftp-desk
+services:
+  ftp-desk:
+    ports: !override
+      - "127.0.0.1:18102:8102"
+    volumes: !override
+      - ftp-data:/ftp:ro
+    environment:
+      PORT: "8102"
+      FTP_ROOT: /ftp
+volumes:
+  ftp-data:
+    external: false

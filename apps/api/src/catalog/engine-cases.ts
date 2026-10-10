@@ -18,9 +18,11 @@ import { tagSource, type CaseDef, type SuiteDef, type TypeMeta } from './types.j
 import { ENGINE_FUNCTIONAL_CASES } from './engine-functional-cases.js';
 import { ENGINE_UI_CASES } from './engine-ui-cases.js';
 import { ENGINE_QUALITY_CASES } from './engine-quality-cases.js';
+import { ENGINE_SELF_CASES } from './engine-self-cases.js';
 
 export const ENGINE_TYPES: TypeMeta[] = [
   { key: 'smoke', label: 'Smoke tests', subtitle: 'Control plane, console and SIT console answer after a deploy.', category: 'qa' },
+  { key: 'unit', label: 'Unit tests', subtitle: 'Focused checks on single endpoints and the invariants they enforce (settings validation, metadata-aware hooks, enum shape).', category: 'qa' },
   { key: 'api', label: 'API tests', subtitle: 'Every control-plane endpoint behaves to its contract.', category: 'qa' },
   { key: 'integration', label: 'Integration tests', subtitle: 'Repository, run planner, worker protocol, schedules and build reports working together.', category: 'qa' },
   { key: 'screen', label: 'Screen tests', subtitle: 'Real-browser rendering of the unified console.', category: 'qa' },
@@ -42,6 +44,7 @@ export const ENGINE_TYPES: TypeMeta[] = [
 
 export const ENGINE_SUITES: SuiteDef[] = [
   { key: 'te-smoke', name: 'Engine smoke', description: 'The control plane, its database, the console shell and the embedded SIT console are up.', typeKey: 'smoke', category: 'qa' },
+  { key: 'te-unit', name: 'Engine unit tests', description: 'Focused checks of single endpoints: settings shape and validation, rolling-fail-cancel defaults and bounds, and the metadata-aware results hook.', typeKey: 'unit', category: 'qa' },
   { key: 'te-self-api', name: 'Engine API contracts', description: 'The engine\'s own repository, execution, run and read-model APIs verified over HTTP.', typeKey: 'api', category: 'qa' },
   { key: 'te-integration', name: 'Engine component flows', description: 'Case lifecycle, suite membership, run planning, the worker protocol, schedules and build-result ingest.', typeKey: 'integration', category: 'qa' },
   { key: 'te-screen', name: 'Console screens', description: 'Playwright-rendered checks of the unified console.', typeKey: 'screen', category: 'qa' },
@@ -65,4 +68,5 @@ export const ENGINE_CASES: CaseDef[] = [
   ...tagSource('engine-functional-cases.ts', ENGINE_FUNCTIONAL_CASES),
   ...tagSource('engine-ui-cases.ts', ENGINE_UI_CASES),
   ...tagSource('engine-quality-cases.ts', ENGINE_QUALITY_CASES),
+  ...tagSource('engine-self-cases.ts', ENGINE_SELF_CASES),
 ];

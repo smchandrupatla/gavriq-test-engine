@@ -59,8 +59,12 @@ export async function defectRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/v1/defects', async (req, reply) => {
-    const q = req.query as { status?: string; report?: string; limit?: string };
-    return reply.send({ data: await listDefects({ status: q.status, report: q.report, limit: Number(q.limit) || undefined }) });
+    const q = req.query as { status?: string; report?: string; test_case_id?: string; case_key?: string; limit?: string };
+    return reply.send({ data: await listDefects({
+      status: q.status, report: q.report,
+      test_case_id: q.test_case_id, case_key: q.case_key,
+      limit: Number(q.limit) || undefined,
+    }) });
   });
 
   app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/v1/defects/:id', async (req, reply) => {

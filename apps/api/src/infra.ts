@@ -690,6 +690,10 @@ export async function infraTick(): Promise<TickResult> {
   const result: TickResult = { at: new Date().toISOString(), reaped: 0, after_run: [], teardowns: [], prune_queued: false };
 
   // 1. Jobs whose agent went away or that ran too long are failed, and what they held is released.
+  //    A job that has gone quiet is only reaped when its agent has ALSO stopped heart-beating:
+  //    a long Docker build can export layers for many minutes without emitting a line, and the
+  //    agent's heartbeat (every 30s) is the real liveness signal. A genuinely hung job is still
+  //    bounded by the absolute job_timeout_minutes.
   const { rows: reaped } = await query(
     `UPDATE infra_jobs
      SET status = 'failed',
@@ -698,7 +702,16 @@ export async function infraTick(): Promise<TickResult> {
                       ELSE 'the infra agent stopped reporting progress' END,
          finished_at = now(), updated_at = now()
      WHERE status = 'running'
-       AND (started_at < now() - ($1::int * interval '1 minute') OR updated_at < now() - interval '10 minutes')
+       AND (
+         started_at < now() - ($1::int * interval '1 minute')
+         OR (
+           updated_at < now() - interval '10 minutes'
+           AND NOT EXISTS (
+             SELECT 1 FROM infra_agents a
+             WHERE a.id = infra_jobs.agent_id AND a.last_heartbeat > now() - interval '90 seconds'
+           )
+         )
+       )
      RETURNING *`,
     [policy.job_timeout_minutes]
   );
@@ -767,15 +780,19 @@ export async function infraTick(): Promise<TickResult> {
 /**
  * Side effects of a job ending (from the agent's report or the reaper):
  * a deploy completes its deployment, a teardown settles the stack's state.
+ * A failed deploy also opens (or appends to) a deploy-failure report so the
+ * application repo's agent can fix it and the engine can retry — see
+ * apps/api/src/deploy-loop.ts.
  */
 export async function applyJobOutcome(job: any, actorId?: string | null): Promise<void> {
   const ok = job.status === 'succeeded';
   const result = (job.result && typeof job.result === 'object' ? job.result : {}) as Record<string, any>;
   if (job.kind === 'deploy' && job.deployment_id) {
     const { rows } = await query('SELECT * FROM deployments WHERE id = $1', [job.deployment_id]);
-    if (rows[0] && (rows[0].status === 'queued' || rows[0].status === 'deploying')) {
+    const deployment = rows[0];
+    if (deployment && (deployment.status === 'queued' || deployment.status === 'deploying')) {
       await completeDeployment(
-        rows[0],
+        deployment,
         ok
           ? { status: 'succeeded', commit: typeof result.commit === 'string' ? result.commit : null, version: typeof result.version === 'string' ? result.version : null }
           : { status: 'failed', error: job.error || 'Deploy failed' },
@@ -784,7 +801,61 @@ export async function applyJobOutcome(job: any, actorId?: string | null): Promis
     } else if (job.environment_id) {
       await setEnvironmentState(job.environment_id, ok ? 'up' : 'failed');
     }
+    if (deployment && job.environment_id) {
+      const { recordDeployFailure, recordDeploySuccess } = await import('./deploy-loop.js');
+      if (ok) {
+        await recordDeploySuccess(job.environment_id, deployment.id);
+      } else {
+        const { rows: envRows } = await query('SELECT key FROM environments WHERE id = $1', [job.environment_id]);
+        const envKey = envRows[0]?.key as string | undefined;
+        if (envKey && deployment.application) {
+          await recordDeployFailure({
+            environmentId: job.environment_id,
+            environmentKey: envKey,
+            applicationKey: deployment.application,
+            deploymentId: deployment.id,
+            ref: deployment.ref || 'main',
+            errorMessage: job.error || 'Deploy failed',
+            logTail: typeof job.log === 'string' ? job.log.slice(-4000) : null,
+          });
+        }
+      }
+    }
   } else if (job.kind === 'teardown' && job.environment_id) {
     await setEnvironmentState(job.environment_id, ok ? 'down' : 'unknown', ok ? { torn_down_at: new Date().toISOString(), teardown_reason: job.reason } : {});
+    // Advance (or fail) a cycle run that this teardown is part of.
+    if (job.deployment_id) {
+      const { rows: cycleOwned } = await query(
+        `SELECT cycle_run_id FROM deployments WHERE id = $1 AND cycle_run_id IS NOT NULL`,
+        [job.deployment_id]
+      );
+      const cycleId = cycleOwned[0]?.cycle_run_id as string | undefined;
+      if (cycleId) {
+        const { advanceCycle } = await import('./cycle-run.js');
+        await advanceCycle(cycleId, ok);
+      }
+    }
+    // A preparation teardown (clean-start cycle, no deployment yet): advance that cycle's prep phase.
+    if (job.reason === 'clean_cycle_prep') {
+      const { onPrepTeardownFinished } = await import('./cycle-run.js');
+      await onPrepTeardownFinished(job.environment_id, ok);
+    }
+  } else if (job.kind === 'prune') {
+    // A preparation prune for a clean-start cycle: advance that cycle's prep phase.
+    const { onPrepPruneFinished } = await import('./cycle-run.js');
+    await onPrepPruneFinished(job.id, ok);
+  }
+
+  // A deploy that failed and was part of a cycle stops the chain.
+  if (job.kind === 'deploy' && !ok && job.deployment_id) {
+    const { rows: cycleOwned } = await query(
+      `SELECT cycle_run_id FROM deployments WHERE id = $1 AND cycle_run_id IS NOT NULL`,
+      [job.deployment_id]
+    );
+    const cycleId = cycleOwned[0]?.cycle_run_id as string | undefined;
+    if (cycleId) {
+      const { failCycle } = await import('./cycle-run.js');
+      await failCycle(cycleId, job.error || 'deploy failed');
+    }
   }
 }

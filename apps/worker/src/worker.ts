@@ -10,6 +10,7 @@ import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
 import { runPerformance } from './runners/performance.js';
 import { runSit, isSitScript } from './runners/sit.js';
+import { runE2E } from './runners/e2e.js';
 import { ensureEvidence, evidencePreflight, publishEvidence, secretValues } from './evidence.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
@@ -63,7 +64,7 @@ async function register() {
       id: WORKER_ID,
       name: `Multi-runner Worker ${WORKER_ID}`,
       capabilities: [
-        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load', 'sit',
+        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load', 'sit', 'e2e',
         'out_of_container', 'in_container', 'ui', 'smoke',
       ],
       labels: { kind: 'multi', runtime: 'node' },
@@ -235,6 +236,26 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
     return withCleanup({
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
+      duration_ms: r.duration_ms,
+      message: r.message,
+      remarks: r.remarks,
+      classification: r.classification || null,
+      metrics: r.metrics || {},
+      evidence: r.evidence || [],
+    });
+  }
+
+  if (method === 'e2e') {
+    const r = await runE2E({
+      baseUrl,
+      steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
+      vars,
+      timeoutSeconds: tc?.timeout_seconds || 180,
+      signal,
+    });
+    return withCleanup({
+      status: r.status,
+      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
       remarks: r.remarks,

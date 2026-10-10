@@ -90,6 +90,8 @@ const state={
   // Reports: filter form + the last preview
   reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
   report:{data:null,loading:false,error:null,busy:''},
+  // Record & play: codegen session + the "record" or "import a pasted script" form.
+  record:{mode:'spawn',url:'',title:'',preconditions:'',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null},
 };
 const el=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -734,9 +736,159 @@ function renderTypeView(typeId){
   const typeCases=casesForType(typeId);
   const tiles=suites.length?suites.map(s=>suiteTile(s)):[{key:'type:'+typeId,title:t.title,sub:t.summary,cases:typeCases,inline:true}];
   const sel=suites.find(s=>s.id===state.suiteId)||null;
-  el('content').innerHTML=liveStripHtml()+statsRowHtml(typeCases,t.summary)+
+  const recordBanner=typeId==='recordAndPlay'
+    ?`<div class="card" style="margin:0 0 10px"><div class="card-head"><div><h2 style="margin:0">Record a new case</h2><div class="muted small">Drive the application in a real browser; the engine captures the URL, actions, data and expected state as a plain-language test case you can replay.</div></div><a class="btn primary" href="#/record-new">+ Record new case</a></div></div>`
+    :'';
+  el('content').innerHTML=liveStripHtml()+recordBanner+statsRowHtml(typeCases,t.summary)+
     tileGroupHtml({title:suites.length?'Suites':'Cases',sub:suites.length?`${plural(suites.length,'suite')} · select a tile for its run history`:'No suites — grouped by type tag',tiles})+
     caseSectionHtml({title:sel?sel.name:`${t.title} — all cases`,sub:sel?sel.key:'',cases:sel?casesInSuite(sel.id):typeCases,suiteId:sel&&sel.id,clear:!!sel,label:sel?sel.name:t.title});
+}
+
+// Record & play: start/stop a `playwright codegen` session on the host or import a pasted script.
+function renderRecordNewView(){
+  el('viewTitle').textContent='Record a new case';
+  const r=state.record;
+  const s=r.session;
+  const busy=r.saving;
+  const recording=s&&(s.state==='launching'||s.state==='recording'||s.state==='closing');
+  const done=s&&s.state==='done';
+  const failed=s&&s.state==='error';
+  const modeTab=(id,label)=>`<button class="tab-btn${r.mode===id?' active':''}" data-action="record-mode" data-mode="${id}">${label}</button>`;
+  const spawnForm=`
+    <div class="hp-body" style="display:grid;gap:10px">
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Starting URL</span>
+        <input type="url" id="recUrl" value="${esc(r.url)}" placeholder="https://..." required ${recording?'disabled':''}>
+      </label>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Title (optional — the engine fills one from the URL)</span>
+        <input type="text" id="recTitle" value="${esc(r.title)}" placeholder="e.g. Operator approves a tenant invoice" ${recording?'disabled':''}>
+      </label>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Pre-existing data this flow depends on (optional — e.g. a logged-in operator, an open order in state X)</span>
+        <textarea id="recPrecond" rows="3" placeholder="Describe anything that must already be in the system before a replay can succeed." ${recording?'disabled':''}>${esc(r.preconditions)}</textarea>
+      </label>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        ${!s?`<button class="btn primary" data-action="record-start" ${state.appKey?'':'disabled'}>Start recording</button>`:''}
+        ${s&&!r.lastCaseId?`<button class="btn primary" data-action="record-stop" ${busy?'disabled':''}>${done?'Save as a case':'Stop & save as a case'}</button>`:''}
+        ${r.lastCaseId?`<a class="btn" href="#/case/${esc(r.lastCaseId)}">Open the recorded case →</a>`:''}
+        ${s?`<button class="btn" data-action="record-reset">Record another</button>`:''}
+      </div>
+      ${s?`<div class="muted small">Session <code>${esc(s.id)}</code> · state <b>${esc(s.state)}</b>${s.message?' · '+esc(s.message):''}${s.snapshot?' · snapshot: “'+esc(s.snapshot.title||'(no title)')+'”':''}</div>`:''}
+      ${recording?'<p class="muted small">A real browser window opened on this machine. Click, type and navigate exactly the way a user would. When you are done, close the window — or click <b>Stop & save</b> above.</p>':''}
+      ${done&&!r.lastCaseId?'<p class="muted small">The browser closed. Click <b>Save as a case</b> to add the recording to the catalog.</p>':''}
+      ${r.error?`<div class="banner">${esc(r.error)}</div>`:''}
+      ${r.warnings&&r.warnings.length?`<details><summary class="muted small">${plural(r.warnings.length,'line')} the engine could not translate</summary><ul class="muted small">${r.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>`:''}
+    </div>`;
+  const importForm=`
+    <div class="hp-body" style="display:grid;gap:10px">
+      <p class="muted small">If the engine runs on a server without a display, record on your own machine with <code>npx playwright codegen &lt;url&gt;</code> and paste the TypeScript it writes here. The engine extracts the URL, actions and data as plain-language steps and creates a case.</p>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Starting URL (optional — read from the <code>page.goto</code> if present)</span>
+        <input type="url" id="recUrl" value="${esc(r.url)}" placeholder="https://..." ${busy?'disabled':''}>
+      </label>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Title (optional)</span>
+        <input type="text" id="recTitle" value="${esc(r.title)}" placeholder="e.g. Operator approves a tenant invoice" ${busy?'disabled':''}>
+      </label>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Pre-existing data this flow depends on (optional)</span>
+        <textarea id="recPrecond" rows="3" placeholder="Describe anything that must already be in the system before a replay can succeed." ${busy?'disabled':''}>${esc(r.preconditions)}</textarea>
+      </label>
+      <label style="display:grid;gap:4px">
+        <span class="muted small">Codegen output (the full <code>test('test', async ({ page }) =&gt; {...})</code>)</span>
+        <textarea id="recScript" rows="10" style="font-family:monospace;font-size:12px" ${busy?'disabled':''} placeholder="await page.goto('https://...');\nawait page.getByLabel('Username').fill('analyst');\n...">${esc(r.script)}</textarea>
+      </label>
+      <div class="row" style="gap:8px">
+        <button class="btn primary" data-action="record-import" ${state.appKey&&!busy?'':'disabled'}>Create case from script</button>
+      </div>
+      ${r.error?`<div class="banner">${esc(r.error)}</div>`:''}
+      ${r.warnings&&r.warnings.length?`<details><summary class="muted small">${plural(r.warnings.length,'line')} the engine could not translate</summary><ul class="muted small">${r.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></details>`:''}
+    </div>`;
+  el('content').innerHTML=`
+    <div class="card"><div class="card-head"><div><h2 style="margin:0">Record a new case</h2><div class="muted small">The recording lands under <a href="#/type/recordAndPlay">Record &amp; play</a> on ${esc(state.appKey||'the current application')}. ${failed?'<b>Previous attempt failed:</b> '+esc(s.error||''):''}</div></div></div>
+    <div style="display:flex;gap:4px;padding:0 12px">${modeTab('spawn','Record in a real browser')}${modeTab('import','Import a pasted codegen script')}</div>
+    ${r.mode==='import'?importForm:spawnForm}
+    </div>`;
+}
+function recordStateFromForm(){
+  const r=state.record;
+  const u=el('recUrl');if(u)r.url=u.value;
+  const t=el('recTitle');if(t)r.title=t.value;
+  const pc=el('recPrecond');if(pc)r.preconditions=pc.value;
+  const sc=el('recScript');if(sc)r.script=sc.value;
+}
+async function recordPoll(){
+  const r=state.record;
+  if(!r.session)return;
+  try{
+    const res=await api('/api/v1/record/'+encodeURIComponent(r.session.id));
+    r.session=res.data;
+    if(r.session.state==='done'||r.session.state==='error'){clearInterval(r.poll);r.poll=null;renderCurrentView();return;}
+  }catch(err){r.error=err.message;clearInterval(r.poll);r.poll=null;}
+  if(state.view==='record-new')renderCurrentView();
+}
+async function recordStart(){
+  recordStateFromForm();
+  const r=state.record;
+  if(!r.url){r.error='A starting URL is required.';renderCurrentView();return;}
+  r.error='';r.warnings=[];r.lastCaseId=null;
+  try{
+    const res=await postJson('/api/v1/record/start',{url:r.url,application_key:state.appKey});
+    r.session=res.data;
+    if(r.poll)clearInterval(r.poll);
+    r.poll=setInterval(recordPoll,1500);
+    renderCurrentView();
+  }catch(err){
+    r.error=err.message;
+    renderCurrentView();
+  }
+}
+async function recordStop(){
+  recordStateFromForm();
+  const r=state.record;
+  if(!r.session){r.error='No active recording session.';renderCurrentView();return;}
+  r.saving=true;r.error='';renderCurrentView();
+  try{
+    const res=await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/stop',{application_key:state.appKey,title:r.title,preconditions:r.preconditions});
+    r.lastCaseId=res.data.id;
+    r.warnings=res.warnings||[];
+    r.session={...r.session,state:'done'};
+    r.saving=false;
+    if(r.poll){clearInterval(r.poll);r.poll=null;}
+    toast('Recording saved as '+(res.data.key||res.data.name),'#/case/'+res.data.id);
+    location.hash='#/case/'+res.data.id;
+    // reset form state for a next recording
+    state.record={...state.record,url:'',title:'',script:''};
+  }catch(err){
+    r.saving=false;
+    r.error=err.message;
+    renderCurrentView();
+  }
+}
+async function recordImport(){
+  recordStateFromForm();
+  const r=state.record;
+  if(!r.script.trim()){r.error='Paste a codegen script first.';renderCurrentView();return;}
+  r.saving=true;r.error='';r.warnings=[];renderCurrentView();
+  try{
+    const res=await postJson('/api/v1/record/import',{script:r.script,application_key:state.appKey,url:r.url,title:r.title,preconditions:r.preconditions});
+    r.lastCaseId=res.data.id;
+    r.warnings=res.warnings||[];
+    r.saving=false;
+    toast('Recording imported as '+(res.data.key||res.data.name),'#/case/'+res.data.id);
+    location.hash='#/case/'+res.data.id;
+    state.record={...state.record,url:'',title:'',script:''};
+  }catch(err){
+    r.saving=false;
+    r.error=err.message;
+    renderCurrentView();
+  }
+}
+function recordReset(){
+  if(state.record.poll)clearInterval(state.record.poll);
+  state.record={mode:state.record.mode,url:'',title:'',preconditions:'',session:null,status:'',saving:false,error:'',warnings:[],script:'',poll:null};
+  renderCurrentView();
 }
 function renderSitView(groupId){
   const g=groupId?SIT_GROUPS.find(x=>x.id===groupId):null;
@@ -1518,6 +1670,7 @@ function renderCurrentView(){
   else if(v==='insights')renderInsightsView();   // insights.js
   else if(v==='type')renderTypeView(state.typeId);
   else if(v==='baseline')renderTypeView('selenium-baseline');
+  else if(v==='record-new')renderRecordNewView();
   else if(v==='sit'||v==='sit-all')renderSitView(state.sitGroupId);
   else renderOverview();
   drawCharts();
@@ -1735,6 +1888,11 @@ function handleAction(action,node){
   else if(action==='infra-cancel-job')infraCancelJob(node.dataset.id);
   else if(action==='infra-save-policy')saveInfraPolicy(node);
   else if(action==='infra-job-log'){state.infraOpenJob=state.infraOpenJob===node.dataset.id?null:node.dataset.id;renderCurrentView();}
+  else if(action==='record-mode'){recordStateFromForm();state.record.mode=node.dataset.mode;state.record.error='';renderCurrentView();}
+  else if(action==='record-start')recordStart();
+  else if(action==='record-stop')recordStop();
+  else if(action==='record-import')recordImport();
+  else if(action==='record-reset')recordReset();
 }
 // "Schedule" next to a Run button: same selection, run later instead of now.
 function scheduleFrom(node){
@@ -2262,7 +2420,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='home'||v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage')state.view=v;
+  else if(v==='home'||v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage'||v==='record-new')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){

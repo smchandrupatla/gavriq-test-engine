@@ -710,6 +710,8 @@ function uiStep(step: Step): HumanStep {
     case 'wait': return { text: `Wait ${step.timeout_ms ? Math.round(step.timeout_ms / 1000) + ' s' : 'a moment'}`, expected: 'The page is given time to settle.' };
     case 'screenshot': return { text: 'Take a screenshot of the page', expected: 'A screenshot is stored as evidence.' };
     case 'sandbench_upload': return { text: `Upload the file "${val}" through the import screen${step.markdown_file ? ` together with its companion document "${step.markdown_file}"` : ''}`, expected: 'The upload is accepted and the file appears in the list of uploads.', testData: `File ${val}${step.markdown_file ? ` + ${step.markdown_file}` : ''}` };
+    case 'agent_act': return { text: `Have the agent do it: ${val}`, expected: 'The agent carries the action out on the page.' };
+    case 'agent_assert': return { text: `Have the agent check: ${val}`, expected: 'The agent confirms it is true.' };
     default: return { text: `${cap(a.replace(/_/g, ' '))}${step.selector ? ` on ${sel}` : ''}${val ? ` with "${val}"` : ''}`, expected: exp ? `Expected: ${exp}.` : 'The step completes without error.' };
   }
 }

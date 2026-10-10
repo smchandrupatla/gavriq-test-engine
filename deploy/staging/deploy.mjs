@@ -95,12 +95,45 @@ function exportSource(ref) {
     rmSync(path.join(sources, `${tag}.tar`), { force: true });
     console.log(`[staging] exported ${ref} (${tag}) → ${dir}`);
   }
+  patchSource(dir);
   let version = '0.0.0';
   try {
     version = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version || version;
   } catch { /* keep default */ }
   const subject = run('git', ['-C', repo, 'log', '-1', '--format=%s', commit]);
   return { ref, commit, tag, dir, version, subject };
+}
+
+/**
+ * Known Sand Bench defects worked around on export — recorded here so the test
+ * engine can baseline staging without inheriting them. Idempotent: a second
+ * patch after the first finds nothing to change.
+ *
+ *   nginx.conf.template: the generated:service-proxy-sets block omits
+ *   $sbe_kafka, $sbe_mq, $sbe_apiportal, but their location blocks reference
+ *   them — nginx fails to start with `unknown "sbe_kafka" variable`. Insert
+ *   the three missing `set` directives before the END marker.
+ */
+function patchSource(dir) {
+  const tmpl = path.join(dir, 'apps/web/nginx.conf.template');
+  if (!existsSync(tmpl)) return;
+  const text = readFileSync(tmpl, 'utf8');
+  if (text.includes('set $sbe_kafka')) return;
+  const anchor = '  # END generated:service-proxy-sets';
+  if (!text.includes(anchor)) return;
+  // Sand Bench's render-entrypoint.sh does not substitute KAFKA/MQ/APIPORTAL
+  // via envsubst (its second sed call overwrites the first and omits them), so
+  // use literal URLs that nginx can parse at boot. Staging has no real Kafka,
+  // MQ or API portal — point the three stubs at the testhub stand-in so any
+  // code that proxies through still answers rather than crashing nginx.
+  const insert = [
+    '  set $sbe_kafka "http://testhub:8091";',
+    '  set $sbe_mq "http://testhub:8091";',
+    '  set $sbe_apiportal "http://testhub:8091";',
+    anchor,
+  ].join('\n');
+  writeFileSync(tmpl, text.replace(anchor, insert));
+  console.log('[staging] patched nginx.conf.template with missing sbe_kafka/mq/apiportal set directives');
 }
 
 function pruneSources(keepTag) {
@@ -156,7 +189,7 @@ async function verify() {
     const res = await fetch(`${host}:${ports.api}/api/v1/session/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tenantSlug: 'acme-demo', username: 'operator.acme' }),
+      body: JSON.stringify({ username: 'operator', password: 'password' }),
       signal: AbortSignal.timeout(10_000),
     });
     const body = await res.json().catch(() => ({}));
@@ -181,7 +214,7 @@ async function seed() {
   const post = (url, body, headers = {}) =>
     fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
 
-  const login = await post(`${api}/api/v1/session/login`, { tenantSlug: 'acme-demo', username: 'operator.acme' });
+  const login = await post(`${api}/api/v1/session/login`, { username: 'operator', password: 'password' });
   const { token } = await login.json().catch(() => ({}));
   if (!login.ok || !token) throw new Error(`baseline seed: demo sign-in returned HTTP ${login.status}`);
   const auth = { authorization: `Bearer ${token}` };
@@ -232,9 +265,13 @@ async function register(state) {
         testhub: `${host}:${ports.testhub}`,
         dbviewer: `${host}:${ports.dbviewer}`,
         engine,
-        tenant: 'acme-demo',
-        username: 'operator.acme',
-        password: '',
+        tenant: 'default',
+        username: 'operator',
+        password: 'password',
+        kafkaPortal: 'http://127.0.0.1:8095',
+        mqPortal: 'http://127.0.0.1:8092',
+        ftpPortal: 'http://127.0.0.1:18102',
+        apiPortal: 'http://127.0.0.1:8093',
       },
       secret_env: { password: 'SB_STAGING_PASSWORD' },
       // Managed by the engine's infrastructure lifecycle (apps/api/src/infra.ts): the infra agent
