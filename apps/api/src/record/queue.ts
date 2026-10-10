@@ -158,6 +158,17 @@ export function dropSession(id: string): void {
   if (i >= 0) queue.splice(i, 1);
 }
 
+/** Sessions a reloaded console tab (or a different client) should adopt — any that are in flight or finished-but-uncommitted, scoped to the current application if given. Newest first. */
+export function listUiAdoptable(applicationKey?: string): ReturnType<typeof viewSession>[] {
+  const live: RecordSession[] = [];
+  for (const s of sessions.values()) {
+    if (applicationKey && s.applicationKey !== applicationKey) continue;
+    if (s.state === 'queued' || s.state === 'launching' || s.state === 'recording' || s.state === 'done') live.push(s);
+  }
+  live.sort((a, b) => b.queuedAt - a.queuedAt);
+  return live.map(viewSession);
+}
+
 export function viewSession(s: RecordSession) {
   return {
     id: s.id,

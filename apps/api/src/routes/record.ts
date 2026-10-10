@@ -38,6 +38,7 @@ import {
   registerAgent,
   recordAgentOnline,
   recordAgentView,
+  listUiAdoptable,
   type Browser,
   type StartSnapshot,
 } from '../record/queue.js';
@@ -160,6 +161,15 @@ export async function recordRoutes(app: FastifyInstance) {
 
   app.get('/api/v1/record/agent', async (_req, reply) => {
     return reply.send({ data: recordAgentView() });
+  });
+
+  // Any session the console tab should adopt (recording in flight or
+  // finished-but-uncommitted). Lets a page that was reloaded, or a session
+  // started from a different client, pick up where things are.
+  app.get<{ Querystring: { application_key?: string } }>('/api/v1/record/sessions/pending-ui', async (req, reply) => {
+    const key = req.query?.application_key;
+    const live = listUiAdoptable(key);
+    return reply.send({ data: live });
   });
 
   // Ask the host-side infra-agent to spawn the record agent on demand. The
