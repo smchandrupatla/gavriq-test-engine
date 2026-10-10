@@ -32,10 +32,12 @@ import { SANDBENCH_PORTAL_CASES, SANDBENCH_PORTAL_SUITES } from './catalog/sandb
 import { SANDBENCH_API_COVERAGE_CASES, SANDBENCH_API_COVERAGE_SUITE } from './catalog/sandbench-api-coverage-cases.js';
 import { SANDBENCH_EVENT_RT_CASES, SANDBENCH_EVENT_RT_SUITES } from './catalog/sandbench-event-roundtrip-cases.js';
 import { SANDBENCH_PENDING_CASES, SANDBENCH_PENDING_SUITE } from './catalog/sandbench-pending-feature-cases.js';
+import { SANDBENCH_RESILIENCE_CASES, SANDBENCH_RESILIENCE_SUITE } from './catalog/sandbench-resilience-cases.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
 import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from './catalog/record-and-play-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 import { screenFields, type AppContext } from './catalog/plain-language.js';
+import { annotateAppendOnlyCases, bindCaseToPool, poolDefaults, poolSecretEnvDefaults } from './catalog/user-pool.js';
 
 // Per application: the environment its cases are written for, where cases
 // that need prepared fixtures run, and the team that owns its defects.
@@ -56,6 +58,11 @@ const APP_CONTEXT: Record<string, AppContext> = {
 // (apps/api/src/catalog/sandbench-cases.ts) still reads it to confirm that row
 // exists; no login case uses it any more. `username`/`password` are a real demo
 // persona -- login now always requires a password.
+// Default single-user identity (legacy, used by cases that still reference
+// {{username}}/{{password}} directly). The user pool (pool_user_0..N,
+// pool_admin_0..M) is seeded alongside — once Sand Bench side carries the
+// matching N pool identities, cases built with userLoginStep(key) / pickUser
+// get a distinct slot per case and run safely in parallel. See docs/USER-POOL.md.
 const HOST_VARS = {
   web: 'http://127.0.0.1:8080',
   api: 'http://127.0.0.1:8787',
@@ -65,13 +72,22 @@ const HOST_VARS = {
   tenant: 'default',
   username: 'analyst',
   password: 'SandBenchDemo1234',
+  admin_username: 'admin',
+  // Until the Sand Bench side ships the extra pool identities, every pool slot
+  // falls back to the single existing demo user — parallel runs still collide,
+  // but every pool-aware case is wire-ready for the day the pool exists.
+  ...poolDefaults('analyst', 'admin'),
 };
 
 // Duplicates of sand-bench-local from before the worker re-pointed loopback
 // targets itself. Retired, not deleted: past executions still reference them.
 const RETIRED_ENVIRONMENTS = ['sand-bench-container', 'local-dev'];
 
-const SECRET_ENV = { password: 'SB_DEMO_PASSWORD' };
+const SECRET_ENV = {
+  password: 'SB_DEMO_PASSWORD',
+  admin_password: 'SB_DEMO_ADMIN_PASSWORD',
+  ...poolSecretEnvDefaults('SB_DEMO_PASSWORD', 'SB_DEMO_ADMIN_PASSWORD'),
+};
 
 const SAFETY = {
   functional_smoke: 'allowed',
@@ -92,6 +108,11 @@ const WITH_SUITES = !argv.includes('--no-suites');
 const wanted = (appKey: string) => !ONLY_APP || ONLY_APP === appKey;
 
 async function upsertApplication(key: string, name: string, description: string, types: TypeMeta[], suites: SuiteDef[], cases: CaseDef[]) {
+  // Auto-tag cases that write only to append-only audit/event endpoints: the
+  // atomic contract has nothing to clean up for them, so they get a
+  // no-cleanup-endpoint atomicityNote (idempotent — skips cases already
+  // annotated by the author).
+  annotateAppendOnlyCases(cases);
   const counts = new Map<string, number>();
   for (const c of cases) {
     const suite = suites.find((s) => s.key === c.suiteKey);
@@ -173,7 +194,7 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
     if (!suite || (WITH_SUITES && !suiteId)) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
     const validationRules = {
       ...(c.validationRules || {}),
-      ...(c.cleanupSteps?.length ? { cleanup_steps: c.cleanupSteps } : {}),
+      ...(c.cleanupSteps?.length ? { cleanup_steps: bindCaseToPool(c.key, c.cleanupSteps) } : {}),
       ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
       data_profile: c.dataProfile,
     };
@@ -182,6 +203,13 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
     // environment, duration, links and triage notes. Steps keep their runner
     // fields, so the worker executes exactly what the screen describes.
     const sf = screenFields(c, suite, ctx);
+    // Parallel-safe login: rebind this case's steps + cleanupSteps to its own
+    // user-pool slot (apps/api/src/catalog/user-pool.ts). Catalog authors keep
+    // using the shared API_LOGIN / ADMIN_LOGIN constants with the templates
+    // {{username}}/{{password}}/{{token}} and {{admin_username}}/
+    // {{admin_password}}/{{adminToken}}; this renames them per case so N
+    // parallel cases hold N distinct Sand Bench sessions. See docs/USER-POOL.md.
+    sf.steps = bindCaseToPool(c.key, sf.steps) as typeof sf.steps;
     const { rows } = await query(
       `INSERT INTO test_cases (
          key, name, description, application_id, test_type, test_level,
@@ -297,8 +325,8 @@ async function main() {
   // 4) Applications, each with the environment it is developed on and its suites + cases.
   const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
   if (wanted('sand-bench')) {
-    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, SANDBENCH_API_COVERAGE_SUITE, ...SANDBENCH_EVENT_RT_SUITES, SANDBENCH_PENDING_SUITE, recordAndPlaySuite('sand-bench')];
-    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES, ...SANDBENCH_API_COVERAGE_CASES, ...SANDBENCH_EVENT_RT_CASES, ...SANDBENCH_PENDING_CASES];
+    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, SANDBENCH_API_COVERAGE_SUITE, ...SANDBENCH_EVENT_RT_SUITES, SANDBENCH_PENDING_SUITE, SANDBENCH_RESILIENCE_SUITE, recordAndPlaySuite('sand-bench')];
+    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES, ...SANDBENCH_API_COVERAGE_CASES, ...SANDBENCH_EVENT_RT_CASES, ...SANDBENCH_PENDING_CASES, ...SANDBENCH_RESILIENCE_CASES];
     const sbId = await upsertApplication(
       'sand-bench', 'Sand Bench',
       'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
