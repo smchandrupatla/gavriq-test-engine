@@ -20,6 +20,13 @@ const DEFAULT_BASE_URL = process.env.TARGET_BASE_URL || 'http://127.0.0.1:8001';
 const WORKER_API_KEY = process.env.WORKER_API_KEY || '';
 /** How often a running job asks whether it has been cancelled. */
 const CANCEL_POLL_MS = Number(process.env.WORKER_CANCEL_POLL_MS || 5000);
+/**
+ * How many runs this worker services in parallel. The poll loop keeps claiming
+ * queued runs until this many are in flight; it stops claiming until one finishes.
+ * The register call publishes this as `max_concurrency` so the console shows what
+ * the worker will actually accept.
+ */
+const MAX_CONCURRENCY = Number(process.env.WORKER_MAX_CONCURRENCY || 3);
 
 /**
  * Inside a container "127.0.0.1"/"localhost" is the worker itself, not the
@@ -68,7 +75,7 @@ async function register() {
         'out_of_container', 'in_container', 'ui', 'smoke',
       ],
       labels: { kind: 'multi', runtime: 'node' },
-      max_concurrency: 3,
+      max_concurrency: MAX_CONCURRENCY,
     }),
   });
   console.log(`[worker ${WORKER_ID}] registered at ${API}`);
@@ -105,7 +112,10 @@ type EngineSettings = {
   test_type_timeout_minutes?: Record<string, number>;
   consecutive_failure_limit?: number;
 };
-const DEFAULT_CASE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+// The engine's blanket default when the settings API has not published a
+// per-type override. Each test case gets 30 s before the per-case abort
+// signal cuts the runner off and the result is recorded as timed out.
+const DEFAULT_CASE_TIMEOUT_MS = 30_000;
 const DEFAULT_FAILURE_LIMIT = 20;
 
 async function fetchSettings(): Promise<EngineSettings> {
@@ -463,20 +473,34 @@ async function runJob(execution: any) {
   console.log(`[worker] completed ${execution.key} → ${anyFailed ? 'failed' : 'passed'}${circuitBroken ? ' (circuit breaker stopped the run early)' : ''}`);
 }
 
+let inFlight = 0;
+
 async function pollLoop() {
   await register();
   setInterval(heartbeat, 15_000);
   for (;;) {
+    // When a claim lands, poll again immediately so the worker rapidly fills
+    // its concurrency slots instead of waiting POLL_MS between back-to-back
+    // claims. Only an empty queue (or an error) backs off for POLL_MS.
+    let claimedSomething = false;
     try {
-      const claimed = await api('/api/v1/executions/claim', {
-        method: 'POST',
-        body: JSON.stringify({ worker_id: WORKER_ID }),
-      });
-      if (claimed?.data) await runJob(claimed.data);
+      if (inFlight < MAX_CONCURRENCY) {
+        const claimed = await api('/api/v1/executions/claim', {
+          method: 'POST',
+          body: JSON.stringify({ worker_id: WORKER_ID }),
+        });
+        if (claimed?.data) {
+          claimedSomething = true;
+          inFlight++;
+          runJob(claimed.data)
+            .catch((err) => console.warn(`[runJob] ${claimed.data?.key || '?'}`, (err as Error).message))
+            .finally(() => { inFlight--; });
+        }
+      }
     } catch (err) {
       console.warn('[poll]', (err as Error).message);
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    if (!claimedSomething) await new Promise((r) => setTimeout(r, POLL_MS));
   }
 }
 
