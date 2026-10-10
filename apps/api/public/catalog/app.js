@@ -90,6 +90,8 @@ const state={
   runsList:{rows:[],total:0,offset:0,loading:false,loaded:false},
   // Overview: multi-select test types to run together, and which of its tabs is open
   selectedTypes:new Set(),overviewTab:'summary',
+  // Within the Summary tab the user flips between QA, QC, SIT console and Baselines sub-tabs.
+  summarySub:'qa',
   // Schedule runs: list (null = not loaded) + the create form. "What to run" is a scope, not a saved suite.
   schedules:null,schedFormOpen:false,
   schedForm:{name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:'',when:'once',at:'',cron:'0 2 * * *'},
@@ -657,6 +659,33 @@ function overviewGroups(){
   groups.push({title:'Baselines & builds',tiles:more});
   return groups;
 }
+function summarySubTabsHtml(){
+  // Group every overview section under the four sub-tabs the user asked for.
+  // A section whose title matches CAT.qa goes under "Quality assurance";
+  // CAT.qc under "Quality control"; "SIT console" under its own tab; the
+  // leftover "Baselines & builds" section under its own.
+  const groups=overviewGroups();
+  const buckets={qa:[],qc:[],sit:[],baselines:[]};
+  for(const g of groups){
+    const title=String(g.title||'');
+    if(title==='SIT console')buckets.sit.push(g);
+    else if(title==='Baselines & builds')buckets.baselines.push(g);
+    else if(title===CAT.qa)buckets.qa.push(g);
+    else if(title===CAT.qc)buckets.qc.push(g);
+    else buckets.qc.push(g);
+  }
+  // Default to the first non-empty bucket if the current one has nothing to show.
+  const sub=state.summarySub||'qa';
+  const order=['qa','qc','sit','baselines'];
+  const active=buckets[sub]&&buckets[sub].length?sub:(order.find(k=>buckets[k]&&buckets[k].length)||'qa');
+  if(active!==state.summarySub)state.summarySub=active;
+  const labelOf=k=>({qa:CAT.qa,qc:CAT.qc,sit:'SIT console',baselines:'Baselines & builds'})[k];
+  const countOf=k=>buckets[k].reduce((n,g)=>n+((g.tiles||[]).length),0);
+  const btn=k=>`<button class="tab-btn${active===k?' active':''}" data-action="summary-sub" data-sub="${k}"${buckets[k].length?'':' disabled'}>${esc(labelOf(k))}${buckets[k].length?' <span class="muted small">· '+countOf(k)+'</span>':''}</button>`;
+  const bar=`<div class="tabs" style="margin:12px 0 10px">${order.map(btn).join('')}</div>`;
+  const body=(buckets[active]||[]).map(tileGroupHtml).join('');
+  return bar+body;
+}
 function overviewTabsHtml(live){
   const tab=state.overviewTab||'summary';
   const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="overview-tab" data-tab="${id}">${label}</button>`;
@@ -731,7 +760,7 @@ function renderOverview(){
     '</div>';
     if(state.search)h+=caseSectionHtml({title:'Matching cases',cases:filterCases(state.cases),label:'search results'});
     h+=legendHtml();
-    h+=overviewGroups().map(tileGroupHtml).join('');
+    h+=summarySubTabsHtml();
   }
   el('content').innerHTML=h;
 }
@@ -776,7 +805,16 @@ const RECORD_BROWSERS=['chromium','firefox','webkit'];
 function recordAgentBanner(){
   const r=state.record;const a=r.agent;
   if(!a)return '<div class="muted small">Checking host record agent…</div>';
-  if(!a.online)return `<div class="banner">The host record agent is not running on this machine. In a terminal on your PC, run <code>.\\scripts\\start-record-agent.ps1</code> (Windows) or <code>scripts/start-record-agent.sh</code> (macOS/Linux); the Start button lights up once the engine sees it.</div>`;
+  if(!a.online){
+    const starting=r.agentStarting?' · <span class="muted small">starting…</span>':'';
+    const err=r.agentStartError?`<div class="muted small" style="color:#c62828;margin-top:4px">${esc(r.agentStartError)}</div>`:'';
+    return `<div class="card" style="margin:0;padding:10px;border:1px solid var(--line);background:var(--panel2)">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px"><b>Host record agent is not running on this machine.</b><div class="muted small">A real browser can only open when the host agent is up. Click to start it; the infra-agent on this machine will spawn it.</div></div>
+        <button class="btn primary" data-action="record-agent-start" ${r.agentStarting?'disabled':''}>Start host record agent${starting}</button>
+      </div>${err}
+    </div>`;
+  }
   const bs=(a.browsers||[]).join(', ')||'(none installed)';
   const sel=r.browser;
   const missing=sel&&!a.browsers.includes(sel);
@@ -951,6 +989,20 @@ async function recordCancel(){
   try{await postJson('/api/v1/record/'+encodeURIComponent(r.session.id)+'/cancel',{});}catch(e){}
   if(r.poll){clearInterval(r.poll);r.poll=null;}
   r.session=null;renderCurrentView();
+}
+async function recordAgentStart(){
+  const r=state.record;
+  r.agentStarting=true;r.agentStartError='';renderCurrentView();
+  try{
+    await postJson('/api/v1/record/agent/start',{});
+    // The agent takes a moment to spawn and heartbeat; let the 3s poll pick it up.
+    setTimeout(recordAgentCheck,1500);
+  }catch(err){
+    r.agentStartError=err.message;
+  }finally{
+    r.agentStarting=false;
+    renderCurrentView();
+  }
 }
 // recordStop now fetches a preview — the parsed steps the user reviews and can
 // amend before committing. recordCommit sends the final steps to the server.
@@ -1385,6 +1437,7 @@ function renderConfigView(){
         ${bulkBar}
         <div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table></div>
       </div></div>
+    ${renderPerTypeRetention(s)}
     <div class="card" style="margin-top:12px"><div class="card-head"><h2>Failure circuit breaker</h2></div>
       <div class="hp-body">
         <p class="muted small">If this many test cases in a row fail — at the start of a run or partway through it — the rest of that run is stopped instead of continuing to burn through a broken build.</p>
@@ -2048,6 +2101,10 @@ function handleAction(action,node){
   else if(action==='timeouts-bulk-set')timeoutsBulkSet();
   else if(action==='timeouts-bulk-delta')timeoutsBulkDelta();
   else if(action==='timeouts-reset-defaults')timeoutsResetDefaults();
+  else if(action==='retention-bulk-set')retentionBulkSet();
+  else if(action==='retention-bulk-delta')retentionBulkDelta();
+  else if(action==='retention-reset-defaults')retentionResetDefaults();
+  else if(action==='save-retention-per-type')savePerTypeRetention(node);
   else if(action==='save-suite')saveAsSuite();
   else if(action==='apply-run-filters')applyRunFilters();
   else if(action==='clear-run-filters'){state.runsFilter={environment_id:'',status:'',trigger_source:'',application_version:'',from:'',to:''};loadRunsList(true);}
@@ -2060,6 +2117,7 @@ function handleAction(action,node){
   else if(action==='home-pick'){const key=node.dataset.app;if(key)switchApplication(key);location.hash='#/overview';}
   else if(action==='run-types')runSelectedTypes();
   else if(action==='overview-tab'){state.overviewTab=node.dataset.tab;renderCurrentView();}
+  else if(action==='summary-sub'){state.summarySub=node.dataset.sub;renderCurrentView();}
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
   else if(action==='sched-save')saveSchedule(node);
   else if(action==='sched-preset'){const c=el('schedCron');if(c){c.value=node.dataset.cron;state.schedForm.cron=node.dataset.cron;}}
@@ -2091,6 +2149,7 @@ function handleAction(action,node){
   else if(action==='infra-job-log'){state.infraOpenJob=state.infraOpenJob===node.dataset.id?null:node.dataset.id;renderCurrentView();}
   else if(action==='record-mode'){recordStateFromForm();state.record.mode=node.dataset.mode;state.record.error='';renderCurrentView();}
   else if(action==='record-pick-browser'){state.record.browser=node.value;renderCurrentView();}
+  else if(action==='record-agent-start')recordAgentStart();
   else if(action==='record-start')recordStart();
   else if(action==='record-stop')recordStop();
   else if(action==='record-cancel')recordCancel();
@@ -2208,6 +2267,64 @@ function showTimeoutsError(msg){
   if(!err)return;
   if(!msg){err.hidden=true;err.textContent='';return;}
   err.hidden=false;err.textContent=msg;
+}
+function renderPerTypeRetention(s){
+  const map=s.test_type_retention||{};
+  const types=Object.keys(map).sort();
+  if(!types.length)return '';
+  const rows=types.map(t=>{
+    const n=Number(map[t])||2;
+    const label=t.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());
+    return `<tr><td><input type="checkbox" class="retentionPick" data-type="${esc(t)}" aria-label="Select ${esc(label)} for bulk edit"></td><td>${esc(label)} <span class="muted small">${esc(t)}</span></td><td><input type="number" class="retentionCount" data-type="${esc(t)}" min="1" max="1000" value="${esc(n)}" style="width:80px"> runs</td></tr>`;
+  }).join('');
+  const bulk=`<div class="toolbar" style="border:none;padding:4px 0 10px;gap:10px;align-items:center;flex-wrap:wrap">
+    <label class="muted small"><input type="checkbox" id="retentionPickAll" aria-label="Select all"> Select all</label>
+    <span class="spacer" style="flex:1"></span>
+    <label class="muted small">Keep <input type="number" id="bulkSetRetention" min="1" max="1000" value="2" style="width:72px"> per type <button class="btn" data-action="retention-bulk-set">Apply</button></label>
+    <label class="muted small">Change by <input type="number" id="bulkDeltaRetention" min="-999" max="999" value="1" style="width:72px"> <button class="btn" data-action="retention-bulk-delta">Apply</button></label>
+    <button class="btn" data-action="retention-reset-defaults" title="Reset selected rows to 2">Reset to 2</button>
+    <button class="btn primary" data-action="save-retention-per-type">Save per-type retention</button>
+    <div id="retentionPerTypeError" class="field-error" hidden></div>
+  </div>`;
+  return `<div class="card" style="margin-top:12px"><div class="card-head"><h2>Past runs retained per test type</h2></div>
+    <div class="hp-body">
+      <p class="muted small">The retention sweep keeps only this many most-recent runs of each test type; older runs are deleted along with their evidence. Default 2. Runs with no evidence are deleted regardless.</p>
+      ${bulk}
+      <div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Test type</th><th>Keep</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </div></div>`;
+}
+function pickedRetentionInputs(){
+  const picks=[...document.querySelectorAll('.retentionPick')];
+  const sel=picks.filter(p=>p.checked);
+  const target=sel.length?sel:picks;
+  return target.map(p=>document.querySelector(`.retentionCount[data-type="${CSS.escape(p.dataset.type)}"]`)).filter(Boolean);
+}
+function clampRetention(n){return Math.max(1,Math.min(1000,Math.round(n)));}
+function retentionBulkSet(){
+  const v=Number(el('bulkSetRetention').value);
+  if(!Number.isInteger(v)||v<1||v>1000)return;
+  for(const inp of pickedRetentionInputs())inp.value=String(clampRetention(v));
+}
+function retentionBulkDelta(){
+  const d=Number(el('bulkDeltaRetention').value);
+  if(!Number.isFinite(d)||!Number.isInteger(d))return;
+  for(const inp of pickedRetentionInputs()){const cur=Number(inp.value)||2;inp.value=String(clampRetention(cur+d));}
+}
+function retentionResetDefaults(){for(const inp of pickedRetentionInputs())inp.value='2';}
+async function savePerTypeRetention(btn){
+  const err=el('retentionPerTypeError');if(err){err.hidden=true;err.textContent='';}
+  const test_type_retention={};
+  for(const inp of document.querySelectorAll('.retentionCount')){
+    const n=Number(inp.value);
+    if(!Number.isInteger(n)||n<1||n>1000){if(err){err.hidden=false;err.textContent='Each row must be a whole integer 1-1000.';}return;}
+    test_type_retention[inp.dataset.type]=n;
+  }
+  if(btn)btn.disabled=true;
+  try{
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_retention})})).data;
+    toast('Per-type retention saved');
+    renderCurrentView();
+  }catch(e){if(err){err.hidden=false;err.textContent='Save failed: '+e.message;} if(btn)btn.disabled=false;}
 }
 async function saveTimeouts(btn){
   showTimeoutsError(null);
@@ -2745,6 +2862,10 @@ content.addEventListener('change',e=>{
   if(e.target.matches('#runsEnvFilter,#runsStatusFilter,#runsTriggerFilter,#runsVersionFilter,#runsFromFilter,#runsToFilter')){applyRunFilters();return;}
   if(e.target.id==='timeoutPickAll'){
     const on=e.target.checked;for(const p of document.querySelectorAll('.timeoutPick'))p.checked=on;
+    return;
+  }
+  if(e.target.id==='retentionPickAll'){
+    const on=e.target.checked;for(const p of document.querySelectorAll('.retentionPick'))p.checked=on;
     return;
   }
   if(e.target.matches('select[data-action="runs-page-size"]')){

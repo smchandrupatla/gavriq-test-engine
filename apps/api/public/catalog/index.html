@@ -21,6 +21,9 @@ a{color:var(--gold-text);text-decoration:none}a:hover{text-decoration:underline}
 button,select,input{font:inherit;color:inherit}
 .shell{display:flex;min-height:100vh}
 .sidebar{width:280px;flex:0 0 280px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+/* Home screen: the whole left-hand sidebar is suppressed so the user focuses on
+   the application tiles. The top app/env/version bar still renders. */
+body.home-only .sidebar{display:none}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
 .brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#1e3a5f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex:0 0 auto;font-size:12px}
 .brand-title{font-weight:600;font-size:15px}
@@ -88,7 +91,8 @@ td.key,.key{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var
 .case-name:hover{text-decoration:underline}
 .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
 .badge.passed{background:var(--green-soft);color:var(--green)}
-.badge.failed,.badge.error,.badge.timed_out{background:var(--red-soft);color:var(--red)}
+.badge.failed,.badge.error{background:var(--red-soft);color:var(--red)}
+.badge.timed_out{background:var(--amber-soft);color:var(--amber)}
 .badge.running,.badge.queued,.badge.preparing,.badge.claiming{background:var(--amber-soft);color:var(--amber)}
 .badge.skipped,.badge.blocked,.badge.cancelled,.badge.never{background:var(--panel2);color:var(--muted)}
 .badge.sit{background:var(--blue-soft);color:var(--blue)}
@@ -250,6 +254,13 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
 .run-tile-name{font-size:13px;font-weight:600;overflow-wrap:anywhere}
 .run-case-bar{display:flex;gap:8px;align-items:center;margin-top:4px}
 .field-error{color:var(--red);font-size:12px;margin-top:8px}
+.run-plan{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.run-plan-row{display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel2)}
+.run-plan-pos{min-width:28px;font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.run-plan-name{flex:1 1 auto;overflow-wrap:anywhere;color:inherit;text-decoration:none}
+.run-plan-name:hover{text-decoration:underline}
+.run-plan-row .key{opacity:.7}
+.rc-icon.skipped{background:var(--panel2);color:var(--muted)}.rc-icon.queued{color:var(--muted)}
 /* Overview: staged deploy → run → teardown progress bar */
 .pbar-wrap{margin:-2px 0 14px}
 .pbar{display:flex;align-items:stretch;flex-wrap:wrap;gap:0}

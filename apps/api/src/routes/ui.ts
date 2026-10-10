@@ -424,6 +424,20 @@ export async function uiRoutes(app: FastifyInstance) {
     return reply.send({ data: { deleted: rowCount || 0 } });
   });
 
+  // Cancel a selected batch of runs — only those still in a cancellable state
+  // (queued/preparing/running) are updated; already-finished rows are skipped.
+  app.post<{ Body: { ids?: unknown } }>('/api/v1/executions/cancel-batch', async (req, reply) => {
+    const raw = Array.isArray((req.body as any)?.ids) ? ((req.body as any).ids as unknown[]) : [];
+    const ids = raw.filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x));
+    if (!ids.length) return reply.code(400).send({ error: 'ids array required (uuids)' });
+    const { rowCount } = await query(
+      `UPDATE executions SET status = 'cancelled', finished_at = now()
+         WHERE id = ANY($1::uuid[]) AND status IN ('queued','preparing','running')`,
+      [ids]
+    );
+    return reply.send({ data: { cancelled: rowCount || 0, requested: ids.length } });
+  });
+
   app.get('/api/v1/ui/build-history', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
