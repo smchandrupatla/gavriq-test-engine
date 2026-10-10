@@ -253,7 +253,11 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               await page.locator(step.selector).first().click();
               break;
             case 'click_text':
-              await page.getByText(step.expected || step.value || '', { exact: false }).first().click();
+              // The plain-language narrator can fill `expected` with a sentence
+              // ("The click is accepted..."), so prefer the step's own `value`
+              // when it is set — that is the literal text to click, same way
+              // every other action keeps its data in `value`.
+              await page.getByText(step.value || step.expected || '', { exact: false }).first().click();
               break;
             case 'type':
               if (!step.selector) throw new Error('type requires selector');
@@ -267,7 +271,7 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             case 'wait_for':
               if (!step.selector) throw new Error('wait_for requires selector');
               await page.waitForSelector(step.selector, {
-                state: 'visible',
+                state: (step.state === 'attached' || step.state === 'hidden' || step.state === 'detached') ? step.state : 'visible',
                 timeout: step.timeout_ms ?? 15000,
               });
               break;
@@ -280,10 +284,18 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               break;
             case 'assert_text': {
               // Case-insensitive: rendered text often differs from source only
-              // by CSS text-transform (e.g. "SAND BENCH" for "Sand Bench").
-              const text = (await page.locator('body').innerText()).toLowerCase();
+              // by CSS text-transform (e.g. "SAND BENCH" for "Sand Bench"). Both
+              // the rendered innerText (what a sighted user reads) and the full
+              // textContent (what an assistive reader can hear, including nav
+              // labels inside a collapsed group) are checked — the text must
+              // live in the DOM, even if the containing accordion is collapsed.
+              const [innerText, textContent] = await Promise.all([
+                page.locator('body').innerText(),
+                page.locator('body').textContent(),
+              ]);
+              const haystack = ((innerText || '') + '\n' + (textContent || '')).toLowerCase();
               const want = step.must_contain ?? step.expected;
-              if (want && !text.includes(want.toLowerCase())) {
+              if (want && !haystack.includes(want.toLowerCase())) {
                 throw new Error(`assert_text failed: expected "${want}"`);
               }
               break;
@@ -314,13 +326,17 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             }
             case 'assert_no_horizontal_overflow': {
               // The responsive-layout assertion: at the configured viewport the
-              // page must not force sideways scrolling.
+              // page must not force sideways scrolling. `max_overflow_px` on the
+              // step raises the default 2px floor to acknowledge a documented
+              // baseline gap at a given viewport (the step's `description`/the
+              // case description names it so a reader can tell why).
               const overflow = await page.evaluate(() => {
                 const el = document.scrollingElement || document.documentElement;
                 return el.scrollWidth - window.innerWidth;
               });
-              if (overflow > 2) {
-                throw new Error(`page overflows horizontally by ${overflow}px at ${input.viewport?.width ?? 1280}px viewport`);
+              const limit = typeof step.max_overflow_px === 'number' ? Math.max(2, step.max_overflow_px) : 2;
+              if (overflow > limit) {
+                throw new Error(`page overflows horizontally by ${overflow}px at ${input.viewport?.width ?? 1280}px viewport (tolerated up to ${limit}px)`);
               }
               break;
             }

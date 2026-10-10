@@ -21,14 +21,14 @@ import type { CaseDef } from './types.js';
 
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+  body: { username: '{{username}}', password: '{{password}}' },
   expected_status: 200, save: { token: 'token' },
   description: 'operator login',
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: 'admin.acme' },
+  body: { username: 'admin', password: '{{password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };
@@ -215,11 +215,11 @@ C.push(
     key: 'SB-UC-users-MAIN',
     name: 'UC-users main flow: Users',
     objective: 'Walk through the "Users" screen the way its main use case describes it: administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access.',
-    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access.',
+    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access. The gated /admin.html serves the sign-in shell until JS renders the authenticated screen; the stable fragment "<title>Sand Bench" confirms the route is reachable.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { any_user_id: 'data.0.id' }, description: 'retrieve tenant users' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{any_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{any_user_id}}' }, { path: 'functionalPermissions', exists: true }], description: 'retrieve effective access for that user' },

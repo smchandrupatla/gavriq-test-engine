@@ -11,39 +11,46 @@ export async function applicationRoutes(app: FastifyInstance) {
   // Application detail with related data — home screen for an application
   app.get<{ Params: { id: string } }>('/api/v1/applications/:id', async (req, reply) => {
     const { rows } = await query(
-      'SELECT * FROM applications WHERE id = $1 OR key = $1',
+      // id is a UUID column; comparing a text key against it directly raises
+      // Postgres "operator does not exist: text = uuid". Cast the uuid side to
+      // text for the OR-branch that accepts the application's human-readable
+      // key alongside its uuid.
+      'SELECT * FROM applications WHERE id::text = $1 OR key = $1',
       [req.params.id]
     );
-    if (!app.rows[0]) return reply.status(404).send({ error: 'Application not found' });
+    const application = rows[0];
+    if (!application) return reply.status(404).send({ error: 'Application not found' });
 
     // Fetch related test cases for this application
     const testCases = await query(
-      `SELECT tc.*, 
-              (SELECT count(*)::int FROM execution_results er 
+      `SELECT tc.*,
+              (SELECT count(*)::int FROM execution_results er
                WHERE er.test_case_id = tc.id AND er.status = 'failed') AS failed_execution_count,
-              (SELECT count(*)::int FROM execution_results er 
+              (SELECT count(*)::int FROM execution_results er
                WHERE er.test_case_id = tc.id AND er.status = 'passed') AS passed_execution_count
-       FROM test_cases tc 
-       WHERE tc.application_id = $1 
+       FROM test_cases tc
+       WHERE tc.application_id = $1
        ORDER BY tc.lifecycle DESC, tc.updated_at DESC`,
-      [app.rows[0].id]
+      [application.id]
     );
 
-    // Fetch recent executions for this application
+    // Fetch recent executions for this application. Executions have no direct
+    // application_id column; the application is carried on each execution's
+    // metadata.application_key, same shape every other route reads.
     const recentExecutions = await query(
-      `SELECT e.*, 
-              (SELECT count(*)::int FROM execution_results er 
+      `SELECT e.*,
+              (SELECT count(*)::int FROM execution_results er
                WHERE er.execution_id = e.id AND er.status = 'failed') AS failed_results
-       FROM executions e 
-       WHERE e.application_id = $1 
-       ORDER BY e.created_at DESC 
+       FROM executions e
+       WHERE e.metadata->>'application_key' = $1
+       ORDER BY e.created_at DESC
        LIMIT 5`,
-      [app.rows[0].id]
+      [application.key]
     );
 
     return reply.send({
       data: {
-        ...app.rows[0],
+        ...application,
         test_cases: testCases.rows,
         recent_executions: recentExecutions.rows,
       },

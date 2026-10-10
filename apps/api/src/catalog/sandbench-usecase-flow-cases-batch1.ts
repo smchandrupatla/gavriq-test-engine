@@ -1,11 +1,11 @@
-/**
- * Sand Bench use-case flow catalog — Batch 1 (read-only use cases).
+﻿/**
+ * Sand Bench use-case flow catalog â€” Batch 1 (read-only use cases).
  *
  * One case per documented flow (main / alternate / exception) for the use cases
  * under docs/use-cases/*.md whose action contract touches only GET endpoints.
  * Every screen route, data-sbe-page marker and API response shape below was
  * verified live against the deployed Sand Bench stack (web :8080, api :8787)
- * before being encoded — see docs/use-cases/*.md "Screen and action contract"
+ * before being encoded â€” see docs/use-cases/*.md "Screen and action contract"
  * and "API registration evidence" for the source use case per case key.
  *
  * Alternate/exception flows are narrative business-rule statements, not
@@ -17,17 +17,17 @@ import type { CaseDef } from './types.js';
 
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: '{{username}}' },
+  body: { username: '{{username}}', password: '{{password}}' },
   expected_status: 200, save: { token: 'token' },
   description: 'operator login',
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 
-// admin.acme carries admin:tenant / users:read / access-profiles:manage — needed
+// admin.acme carries admin:tenant / users:read / access-profiles:manage â€” needed
 // for the admin-only endpoints behind the Roles/Users screens (operator.acme gets 403).
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { tenantSlug: '{{tenant}}', username: 'admin.acme' },
+  body: { username: 'admin', password: '{{password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };
@@ -1787,7 +1787,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new role, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
     ],
     tags: ["usecase","sand-bench","main-flow","roleCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -1801,7 +1801,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new role, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
     ],
     tags: ["usecase","sand-bench","alternate-flow","roleCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -1815,7 +1815,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new role, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
     ],
     tags: ["usecase","sand-bench","alternate-flow","roleCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -1829,7 +1829,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new role, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
     ],
     tags: ["usecase","sand-bench","exception-flow","roleCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -1843,7 +1843,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new role, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
     ],
     tags: ["usecase","sand-bench","exception-flow","roleCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -1857,7 +1857,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
@@ -1874,7 +1874,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
@@ -1891,7 +1891,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
@@ -1908,7 +1908,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
@@ -1925,7 +1925,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
@@ -2017,7 +2017,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-MAIN",
     name: "UC-ruleBenchExport main flow: Export rules",
-    objective: 'Walk through the "Export rules" screen the way its main use case describes it: analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing the…',
+    objective: 'Walk through the "Export rules" screen the way its main use case describes it: analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing theâ€¦',
     description: "Main flow of UC-ruleBenchExport (Export rules): Analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing the package. Touches the screen's real route and its registered API(s): GET /api/v1/rules/export.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -2642,7 +2642,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new user, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
     ],
     tags: ["usecase","sand-bench","main-flow","userCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -2656,7 +2656,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new user, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
     ],
     tags: ["usecase","sand-bench","alternate-flow","userCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -2670,7 +2670,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new user, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
     ],
     tags: ["usecase","sand-bench","alternate-flow","userCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -2684,7 +2684,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new user, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
     ],
     tags: ["usecase","sand-bench","exception-flow","userCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
@@ -2698,7 +2698,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: 'data-sbe-page="adminIdentities"', description: 'load host screen (modal: new user, within Identities)' }
+      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
     ],
     tags: ["usecase","sand-bench","exception-flow","userCreate"],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },

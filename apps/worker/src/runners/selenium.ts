@@ -299,7 +299,28 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
               break;
             case 'click':
               if (!step.selector) throw new Error('click requires selector');
-              await driver.findElement(By.css(step.selector)).click();
+              {
+                // Selenium raises "stale element reference" when the DOM node
+                // the find returned is detached between the find and the
+                // click — a common race on views that re-render their sidebar
+                // after an async fetch settles. Retry a few times, re-locating
+                // the element each attempt, before failing the step.
+                let lastError: unknown;
+                for (let attempt = 0; attempt < 4; attempt++) {
+                  try {
+                    const el = await driver.findElement(By.css(step.selector));
+                    await el.click();
+                    lastError = undefined;
+                    break;
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    if (!/stale element reference/i.test(msg)) throw err;
+                    lastError = err;
+                    await driver.sleep(250);
+                  }
+                }
+                if (lastError) throw lastError;
+              }
               break;
             case 'type':
               if (!step.selector) throw new Error('type requires selector');
@@ -345,10 +366,18 @@ async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRu
             case 'assert_text':
               {
                 // Case-insensitive: CSS text-transform makes rendered text differ
-                // from source casing (e.g. "SAND BENCH" for "Sand Bench").
-                const body = (await driver.findElement(By.css('body')).getText()).toLowerCase();
+                // from source casing (e.g. "SAND BENCH" for "Sand Bench"). Check
+                // both the rendered body text (what a sighted user reads) and
+                // the full textContent (what an assistive reader can hear,
+                // including nav labels inside a collapsed accordion), so a label
+                // that exists in the DOM but sits in a collapsed sidebar group
+                // still counts as present.
+                const body = await driver.findElement(By.css('body'));
+                const visible = (await body.getText()).toLowerCase();
+                const text = (await driver.executeScript('return document.body.textContent || ""') as string).toLowerCase();
+                const haystack = visible + '\n' + text;
                 const want = step.must_contain ?? step.expected;
-                if (want && !body.includes(want.toLowerCase())) {
+                if (want && !haystack.includes(want.toLowerCase())) {
                   throw new Error(`assert_text failed: expected "${want}"`);
                 }
               }

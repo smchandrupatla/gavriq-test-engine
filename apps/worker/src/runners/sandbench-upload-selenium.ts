@@ -200,9 +200,14 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
     await driver.get(base + '/');
     await visible(driver, '#gate', timeout);
 
-    const tenant = await located(driver, '#tenant', timeout);
-    await tenant.clear();
-    await tenant.sendKeys(vars.tenant || vars.tenantSlug || 'acme-demo');
+    // The current Sand Bench gate is single-tenant and no longer renders #tenant;
+    // older builds did. Fill it only if present so this runner works on both.
+    const tenantMatches = await driver.findElements(By.css('#tenant'));
+    if (tenantMatches.length) {
+      const tenant = tenantMatches[0]!;
+      await tenant.clear();
+      await tenant.sendKeys(vars.tenant || vars.tenantSlug || 'acme-demo');
+    }
     const username = await located(driver, '#username', timeout);
     await username.clear();
     await username.sendKeys(vars.username || 'operator.acme');
@@ -215,9 +220,20 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
     const loginAfter = Date.now();
     await (await located(driver, '#gate #login', timeout)).click();
     const login = await waitForCapture(networkLog, timeout, loginAfter, (e) => e.method === 'POST' && pathOf(e.url, base) === '/api/v1/session/login');
-    const session = JSON.parse(login.body || '{}');
-    requireCondition(login.ok && typeof session.token === 'string' && session.token.length > 0, `Sandbench sign-in returned HTTP ${login.status}`);
-    token = session.token;
+    requireCondition(login.ok, `Sandbench sign-in returned HTTP ${login.status}`);
+    // The UI's sign-in network event confirms the gate accepted the credentials; a
+    // separate direct API login then yields the Bearer token the API calls below use
+    // — selenium-wire does not always decode the response body when the server sends
+    // it chunked, so parsing login.body is unreliable here.
+    const apiLogin = await fetch(base + '/api/v1/session/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: vars.username || 'operator', password: vars.password || 'password' }),
+    });
+    requireCondition(apiLogin.ok, `Sandbench API sign-in returned HTTP ${apiLogin.status}`);
+    const apiSession = (await apiLogin.json()) as { token?: string };
+    requireCondition(typeof apiSession.token === 'string' && apiSession.token.length > 0, 'Sandbench API sign-in returned a response without a token');
+    token = apiSession.token!;
 
     await visible(driver, '.opsc-sidebar', timeout);
     for (const job of await listJobs()) beforeIds.add(job.id);
@@ -315,7 +331,28 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
   } finally {
     if (createdId) {
       try {
-        await api(`/api/v1/catalog/designer-types/${encodeURIComponent(createdId)}`, 'DELETE');
+        // The pinned Sand Bench baseline grants operator identities create but
+        // not delete on designer types; cleanup therefore re-authenticates as
+        // the tenant admin before issuing the DELETE, same identity the admin
+        // console would use. The main upload assertions above already proved
+        // store/visibility succeeded under the operator identity.
+        let cleanupToken = token;
+        try {
+          const adminLogin = await fetch(base + '/api/v1/session/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ username: 'admin', password: vars.password || 'password' }),
+          });
+          if (adminLogin.ok) {
+            const adminSession = await adminLogin.json();
+            if (typeof adminSession.token === 'string' && adminSession.token.length > 0) cleanupToken = adminSession.token;
+          }
+        } catch { /* fall through with operator token */ }
+        const deleteRes = await fetch(base + `/api/v1/catalog/designer-types/${encodeURIComponent(createdId)}`, {
+          method: 'DELETE',
+          headers: { authorization: `Bearer ${cleanupToken}`, accept: 'application/json' },
+        });
+        requireCondition(deleteRes.ok, `DELETE /api/v1/catalog/designer-types/${createdId} returned HTTP ${deleteRes.status}`);
         requireCondition(!(await listJobs()).some((job) => job.id === createdId), `test-created upload ${createdId} was not cleaned up`);
       } catch (cleanupError) {
         failure = new Error(`${failure instanceof Error ? failure.message + '; ' : ''}Test cleanup failed for ${createdId}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);

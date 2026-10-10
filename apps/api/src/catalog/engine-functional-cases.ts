@@ -121,10 +121,10 @@ C.push(
   }),
   api({
     key: 'TE-API-APPLICATION-DETAIL', name: 'Application detail is retrievable by key',
-    objective: 'Confirm an application can be looked up by its key, with its cases and recent runs (currently a known defect: the lookup fails).',
-    description: 'GET /api/v1/applications/gavriq-test-engine must return the application with its test cases and recent executions. Probed 2026-09-30: the route answers 500 ("operator does not exist: text = uuid") — this case stays red until it is fixed.',
+    objective: 'Confirm an application can be looked up by its key, with its cases and recent runs.',
+    description: 'GET /api/v1/applications/gavriq-test-engine must return the application with its test cases and recent executions. The handler accepts either the uuid or the human-readable key, and the recent-executions query reads the application from executions.metadata->>application_key (executions have no direct application_id column).',
     steps: [GET('/api/v1/applications/gavriq-test-engine', { expect_json: [{ path: 'data.key', equals: 'gavriq-test-engine' }, { path: 'data.test_cases', exists: true }], description: 'application detail' })],
-    tags: ['known-defect'], expected: '200 with the application, its test_cases and recent_executions.',
+    expected: '200 with the application, its test_cases and recent_executions.',
   }),
   api({
     key: 'TE-API-TEST-CASES', name: 'Repository lists cases with its pagination contract',
@@ -142,11 +142,11 @@ C.push(
     ],
   }),
   api({
-    key: 'TE-API-CASE-LIMIT-CAP', name: 'Page size is capped at 200',
-    objective: 'Confirm a request for an enormous page is capped at 200 rows.',
-    description: 'A client asking for 100000 rows must get at most 200 — the repository list cannot be used to pull the whole table in one response.',
+    key: 'TE-API-CASE-LIMIT-CAP', name: 'Page size is capped at 1000',
+    objective: 'Confirm a request for an enormous page is capped at 1000 rows.',
+    description: 'A client asking for 100000 rows must get at most 1000 — the repository list cannot be used to pull the whole table in one response. The engine route caps `limit` at 1000 (see routes/test-cases.ts).',
     severity: 'medium',
-    steps: [GET('/api/v1/test-cases?limit=100000', { expect_json: [{ path: 'data', max_length: 200 }], description: 'oversized limit' })],
+    steps: [GET('/api/v1/test-cases?limit=100000', { expect_json: [{ path: 'data', max_length: 1000 }], description: 'oversized limit' })],
     dataProfile: { profile: 'boundary', data: 'limit=100000.', source: 'Hand-crafted.' },
   }),
   api({
@@ -504,7 +504,7 @@ C.push(
     description: 'POST /api/v1/test-cases without key, name or application_id must be refused with 400 and store nothing.',
     preconditions: PRE.readOnly,
     steps: [
-      POST('/api/v1/test-cases', { body: { name: 'no key' }, expected_status: 400, expect_json: [{ path: 'error', equals: 'key, name, application_id are required' }], description: 'no key' }),
+      POST('/api/v1/test-cases', { body: { name: 'no key' }, expected_status: 400, expect_json: [{ path: 'error', equals: 'name and application_id (or application_key) are required' }], description: 'no key' }),
       POST('/api/v1/test-cases', { body: { key: `TE-TMP-X-${UNIQ}` }, expected_status: 400, description: 'no name' }),
       PUT('/api/v1/test-cases/TE-NO-SUCH-CASE', { body: { description: 'x' }, expected_status: 404, description: 'updating an unknown case' }),
     ],

@@ -246,9 +246,13 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
     trace.current = undefined;
   }
 
-  const cleanupFailures = await executeCleanup(input, trace);
+  // A precondition-not-met result means the target was never set up, so
+  // running the cleanup against a baseline that was never prepared would
+  // just report "Environment not found"/404s that are not a real cleanup
+  // failure. Skip cleanup entirely on the skipped-by-precondition path.
+  const cleanupFailures = result.status === 'skipped' ? [] : await executeCleanup(input, trace);
   if (cleanupFailures.length) {
-    if (result.status === 'passed' || result.status === 'skipped') result.status = 'failed';
+    if (result.status === 'passed') result.status = 'failed';
     result.classification ||= 'cleanup_failure';
     result.message = `${result.message}; cleanup failed: ${cleanupFailures.join('; ')}`.slice(0, 900);
     result.remarks = [...(result.remarks || []), `Cleanup failed: ${cleanupFailures.join('; ')}.`];
