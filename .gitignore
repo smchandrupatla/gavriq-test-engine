@@ -13,3 +13,5 @@ evidence/
 .docker-results/
 # Infra agent pid file (scripts/start-infra-agent.ps1); its logs are covered by *.log
 infra-agent.pid
+# Record agent pid file (scripts/start-record-agent.ps1); its logs are covered by *.log
+record-agent.pid

@@ -1,33 +1,52 @@
 /**
- * Record & play — HTTP endpoints that drive a `playwright codegen` session and
- * save its result as a normal test case.
+ * Record & play HTTP surface.
  *
- *   POST /api/v1/record/start         { url, application_key, environment? }
- *     spawn codegen on the host (opens a Chromium window on the user's screen
- *     when the engine runs locally)
+ * The engine does not spawn browsers itself (it runs in Docker without a
+ * display). Instead it owns a short queue and a session store; a host-side
+ * agent (apps/record-agent) polls `/pending`, launches `playwright codegen`
+ * on the user's machine with the chosen browser, and POSTs the captured
+ * script back to `/sessions/:id/finished`. The console form drives the
+ * engine over the three UI endpoints below (start/get/stop/import).
  *
- *   GET  /api/v1/record/:id           → current state + last codegen log line
- *   POST /api/v1/record/:id/stop      kill codegen, parse the recording, save
- *                                     a new case, return it
+ *   -- console-facing --
+ *   POST /api/v1/record/start                 queue a recording request
+ *   GET  /api/v1/record/agent                 is the host agent connected? which browsers?
+ *   GET  /api/v1/record/:id                   session state
+ *   POST /api/v1/record/:id/stop              parse the captured script, save a test case
+ *   POST /api/v1/record/:id/cancel            drop a queued/in-flight session
+ *   POST /api/v1/record/import                parse a pasted codegen script, save a case
  *
- *   POST /api/v1/record/import        { script, application_key, url?, title? }
- *     fallback path when the engine runs without a display: user pastes a
- *     codegen script they recorded locally with `npx playwright codegen`.
- *
- * The saved case lives in the application's "Record & play" suite with
- * `created_by = 'record-and-play'`. Reseeding leaves it alone (the seed only
- * prunes rows it created itself).
+ *   -- agent-facing --
+ *   POST /api/v1/record/agent                 heartbeat + installed browsers
+ *   GET  /api/v1/record/pending               claim the next queued request
+ *   POST /api/v1/record/sessions/:id/progress live progress (state, message, step count)
+ *   POST /api/v1/record/sessions/:id/finished script + optional snapshot, or error
  */
 import type { FastifyInstance } from 'fastify';
 import { query, withTransaction } from '../db/client.js';
 import { uniqueName } from '../lib/naming.js';
 import { caseView } from './test-cases.js';
-import { startRecording, stopRecording, getRecording, cleanupRecording, viewSession } from '../record/codegen.js';
+import {
+  enqueueRecording,
+  getSession,
+  updateSession,
+  finishSession,
+  cancelSession,
+  dropSession,
+  viewSession,
+  claimNext,
+  registerAgent,
+  recordAgentOnline,
+  recordAgentView,
+  type Browser,
+  type StartSnapshot,
+} from '../record/queue.js';
 import { parseCodegen, recordingTitle, type RecordedStep } from '../record/parser.js';
 import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from '../catalog/record-and-play-cases.js';
 import { TYPE_TO_ENUM } from '../catalog/types.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BROWSERS: ReadonlySet<Browser> = new Set(['chromium', 'firefox', 'webkit']);
 
 async function resolveApplication(idOrKey: unknown): Promise<{ id: string; key: string } | null> {
   if (typeof idOrKey !== 'string' || !idOrKey) return null;
@@ -40,7 +59,6 @@ async function resolveApplication(idOrKey: unknown): Promise<{ id: string; key: 
   return rows[0] ? { id: rows[0].id as string, key: rows[0].key as string } : null;
 }
 
-/** Ensure the application has the Record & play suite; return its id. */
 async function ensureRecordSuite(appId: string, appKey: string): Promise<string> {
   const suite = recordAndPlaySuite(appKey);
   const { rows } = await query(
@@ -71,6 +89,7 @@ async function createRecordedCase(opts: {
   warnings: string[];
   actor: string | null;
   source: string;
+  browser: Browser;
 }) {
   const base = opts.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'recording';
   const key = `REC-${base.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
@@ -85,14 +104,14 @@ async function createRecordedCase(opts: {
          severity, priority, tags, author_id, created_by, updated_by,
          automation_status, lifecycle,
          objective, environment, visibility, automation_link,
-         known_workarounds
+         known_workarounds, validation_rules
        ) VALUES (
          $1, $2, $3, $4, $5::test_type, 'system',
          $6, 'playwright', $7::jsonb, $8,
          'medium', 'p2', $9::text[], $10, 'record-and-play', 'record-and-play',
-         'automated', 'draft',
+         'automated', 'active',
          $11, NULL, 'Team', $12,
-         $13
+         $13, $14::jsonb
        ) RETURNING *`,
       [
         key,
@@ -103,11 +122,12 @@ async function createRecordedCase(opts: {
         opts.preconditions,
         JSON.stringify(opts.steps),
         opts.steps.length ? `All ${opts.steps.length} recorded steps replay without an error.` : 'The recorded flow replays without an error.',
-        ['record-and-play', 'playwright'],
+        ['record-and-play', 'playwright', `browser:${opts.browser}`],
         opts.actor,
         opts.objective,
         opts.source,
         notes,
+        JSON.stringify({ browser: opts.browser }),
       ]
     );
     await client.query(
@@ -126,86 +146,129 @@ async function createRecordedCase(opts: {
   return caseView(row);
 }
 
+async function waitForSession(id: string, isDone: (state: string) => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const s = getSession(id);
+    if (s && isDone(s.state)) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 export async function recordRoutes(app: FastifyInstance) {
-  app.post<{ Body: { url?: string; application_key?: string; application_id?: string } }>(
+  // ---------------------------------------------------------------- console-facing
+
+  app.get('/api/v1/record/agent', async (_req, reply) => {
+    return reply.send({ data: recordAgentView() });
+  });
+
+  app.post<{ Body: { url?: string; application_key?: string; application_id?: string; browser?: string } }>(
     '/api/v1/record/start',
     async (req, reply) => {
       const b = req.body || {};
       if (!b.url || typeof b.url !== 'string') return reply.status(400).send({ error: 'url is required' });
+      const browser = (typeof b.browser === 'string' ? b.browser.toLowerCase() : 'chromium') as Browser;
+      if (!BROWSERS.has(browser)) return reply.status(400).send({ error: `browser must be one of chromium, firefox, webkit (got "${b.browser}")` });
       const appRef = await resolveApplication(b.application_id || b.application_key);
-      if (!appRef) return reply.status(400).send({ error: 'application_id or application_key is required and must resolve to a known application' });
-      try {
-        const s = await startRecording(b.url);
-        return reply.status(202).send({ data: { ...viewSession(s), application: appRef } });
-      } catch (err) {
-        return reply.status(409).send({ error: (err as Error).message });
+      if (!appRef) return reply.status(400).send({ error: 'application_id or application_key must resolve to a known application' });
+      if (!recordAgentOnline()) {
+        return reply.status(503).send({
+          error: 'The host record agent is not connected. Start it on your machine with: .\\scripts\\start-record-agent.ps1 (Windows) or scripts/start-record-agent.sh (macOS/Linux).',
+          data: { agent: recordAgentView() },
+        });
       }
+      const agent = recordAgentView();
+      if (!agent.browsers.includes(browser)) {
+        return reply.status(422).send({
+          error: `${browser} is not installed on this machine. Install it with: npx playwright install ${browser}`,
+          data: { agent, requested: browser },
+        });
+      }
+      const s = enqueueRecording({ url: b.url, browser, applicationKey: appRef.key });
+      return reply.status(202).send({ data: { ...viewSession(s), application: appRef } });
     }
   );
 
   app.get<{ Params: { id: string } }>('/api/v1/record/:id', async (req, reply) => {
-    const s = getRecording(req.params.id);
+    const s = getSession(req.params.id);
     if (!s) return reply.status(404).send({ error: 'No such recording session.' });
     return reply.send({ data: viewSession(s) });
   });
 
-  app.post<{ Params: { id: string }; Body: { application_key?: string; application_id?: string; title?: string; preconditions?: string } }>(
-    '/api/v1/record/:id/stop',
+  // /stop is now a PREVIEW: parse the current output and return steps so the
+  // user can review + amend them before committing to a case. /commit takes
+  // the (possibly edited) steps and creates the case.
+  app.post<{ Params: { id: string } }>('/api/v1/record/:id/stop', async (req, reply) => {
+    const s = getSession(req.params.id);
+    if (!s) return reply.status(404).send({ error: 'No such recording session.' });
+    if (s.state === 'queued' || s.state === 'launching' || s.state === 'recording') {
+      await waitForSession(req.params.id, (st) => st === 'done' || st === 'error' || st === 'cancelled', 20_000);
+    }
+    const latest = getSession(req.params.id);
+    if (!latest || latest.state !== 'done') {
+      return reply.status(409).send({ error: `recording did not finish cleanly: ${latest?.error || latest?.state || 'unknown'}`, data: latest ? viewSession(latest) : null });
+    }
+    const parsed = parseCodegen(latest.output);
+    const combined = [...parsed.steps, ...((latest.autoAssertions as RecordedStep[] | undefined) || [])];
+    return reply.send({ data: { session: viewSession(latest), steps: combined, warnings: parsed.warnings, start_url: parsed.startUrl || latest.url } });
+  });
+
+  app.post<{ Params: { id: string }; Body: { application_key?: string; application_id?: string; title?: string; preconditions?: string; steps?: RecordedStep[] } }>(
+    '/api/v1/record/:id/commit',
     async (req, reply) => {
       const b = req.body || {};
       const appRef = await resolveApplication(b.application_id || b.application_key);
       if (!appRef) return reply.status(400).send({ error: 'application_id or application_key is required' });
-      const s = stopRecording(req.params.id);
-
-      // Wait up to 20s for codegen's exit handler to flush the file.
-      const deadline = Date.now() + 20_000;
-      while ((s.state === 'closing' || s.state === 'recording') && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      if (s.state !== 'done') {
-        return reply.status(409).send({ error: `recording did not finish cleanly: ${s.error || s.state}`, data: viewSession(s) });
-      }
+      const s = getSession(req.params.id);
+      if (!s) return reply.status(404).send({ error: 'No such recording session.' });
+      if (s.state !== 'done') return reply.status(409).send({ error: `cannot commit a session in state ${s.state}`, data: viewSession(s) });
 
       const parsed = parseCodegen(s.output);
-      if (!parsed.steps.length) {
-        return reply.status(422).send({ error: 'the recording captured no runnable actions', data: viewSession(s) });
-      }
+      const defaultSteps = [...parsed.steps, ...((s.autoAssertions as RecordedStep[] | undefined) || [])];
+      const steps = Array.isArray(b.steps) && b.steps.length ? b.steps : defaultSteps;
+      if (!steps.length) return reply.status(422).send({ error: 'the recording captured no runnable actions', data: viewSession(s) });
 
       const suiteId = await ensureRecordSuite(appRef.id, appRef.key);
-      const title = (b.title || '').trim() || recordingTitle(parsed.startUrl || s.url, 'Recorded flow');
+      const startUrl = parsed.startUrl || s.url;
+      const title = (b.title || '').trim() || recordingTitle(startUrl, 'Recorded flow');
       const extra = (b.preconditions || '').trim();
       const snap = s.snapshot;
       const snapLine = snap
-        ? `Before the recording began the page at ${parsed.startUrl || s.url} showed “${snap.title || '(no title)'}”${snap.summary ? ` — opening text: ${snap.summary.slice(0, 240)}${snap.summary.length > 240 ? '…' : ''}` : ''}.`
+        ? `Before the recording began the page at ${startUrl} showed “${snap.title || '(no title)'}”${snap.summary ? ` — opening text: ${snap.summary.slice(0, 240)}${snap.summary.length > 240 ? '…' : ''}` : ''}.`
         : '';
-      const precondBody = extra
-        ? extra
-        : 'The user has whatever access the recorded flow needed (sign-in, permissions, pre-existing data).';
+      const precondBody = extra || 'The user has whatever access the recorded flow needed (sign-in, permissions, pre-existing data).';
       const createdCase = await createRecordedCase({
         applicationId: appRef.id,
         suiteId,
         name: title,
-        startUrl: parsed.startUrl || s.url,
-        steps: parsed.steps,
-        objective: `Replay the ${parsed.steps.length} action${parsed.steps.length === 1 ? '' : 's'} a user performed on ${parsed.startUrl || s.url} and confirm each one still works.`,
-        preconditions: [`The application is reachable at ${parsed.startUrl || s.url}.`, precondBody, snapLine].filter(Boolean).join(' '),
+        startUrl,
+        steps,
+        objective: `Replay the ${steps.length} action${steps.length === 1 ? '' : 's'} a user performed on ${startUrl} and confirm each one still works.`,
+        preconditions: [`The application is reachable at ${startUrl}.`, precondBody, snapLine].filter(Boolean).join(' '),
         warnings: parsed.warnings,
         actor: req.actor?.id ?? null,
         source: 'codegen',
+        browser: s.browser,
       });
-
-      await cleanupRecording(s.id);
+      dropSession(s.id);
       return reply.status(201).send({ data: createdCase, warnings: parsed.warnings });
     }
   );
 
-  app.post<{ Body: { script?: string; application_key?: string; application_id?: string; url?: string; title?: string; preconditions?: string } }>(
+  app.post<{ Params: { id: string } }>('/api/v1/record/:id/cancel', async (req, reply) => {
+    const s = cancelSession(req.params.id);
+    if (!s) return reply.status(404).send({ error: 'No such recording session.' });
+    return reply.send({ data: viewSession(s) });
+  });
+
+  app.post<{ Body: { script?: string; application_key?: string; application_id?: string; url?: string; title?: string; preconditions?: string; browser?: string } }>(
     '/api/v1/record/import',
     async (req, reply) => {
       const b = req.body || {};
       if (!b.script || typeof b.script !== 'string') return reply.status(400).send({ error: 'script is required (the codegen output)' });
       const appRef = await resolveApplication(b.application_id || b.application_key);
       if (!appRef) return reply.status(400).send({ error: 'application_id or application_key is required' });
+      const browser = (typeof b.browser === 'string' && BROWSERS.has(b.browser.toLowerCase() as Browser) ? b.browser.toLowerCase() : 'chromium') as Browser;
       const parsed = parseCodegen(b.script);
       if (!parsed.steps.length) return reply.status(422).send({ error: 'the pasted script contains no runnable actions' });
 
@@ -224,9 +287,57 @@ export async function recordRoutes(app: FastifyInstance) {
         warnings: parsed.warnings,
         actor: req.actor?.id ?? null,
         source: 'import',
+        browser,
       });
-
       return reply.status(201).send({ data: createdCase, warnings: parsed.warnings });
+    }
+  );
+
+  // ---------------------------------------------------------------- agent-facing
+
+  app.post<{ Body: { browsers?: unknown; version?: string; machine?: string } }>(
+    '/api/v1/record/agent',
+    async (req, reply) => {
+      const b = req.body || {};
+      const browsers = Array.isArray(b.browsers)
+        ? (b.browsers.filter((x): x is Browser => typeof x === 'string' && BROWSERS.has(x as Browser)))
+        : [];
+      registerAgent({ browsers, version: b.version, machine: b.machine });
+      return reply.send({ data: recordAgentView() });
+    }
+  );
+
+  app.get('/api/v1/record/pending', async (_req, reply) => {
+    const s = claimNext();
+    if (!s) return reply.status(204).send();
+    return reply.send({ data: viewSession(s) });
+  });
+
+  app.post<{ Params: { id: string }; Body: { state?: string; message?: string; live_step_count?: number; live_steps?: Array<{ action: string; text: string }> } }>(
+    '/api/v1/record/sessions/:id/progress',
+    async (req, reply) => {
+      const b = req.body || {};
+      const s = updateSession(req.params.id, {
+        state: (b.state === 'launching' || b.state === 'recording' ? b.state : undefined) as any,
+        message: typeof b.message === 'string' ? b.message : undefined,
+        liveStepCount: Number.isFinite(Number(b.live_step_count)) ? Number(b.live_step_count) : undefined,
+        liveSteps: Array.isArray(b.live_steps) ? b.live_steps.slice(-20).map((x) => ({ action: String(x.action || ''), text: String(x.text || '') })) : undefined,
+      });
+      if (!s) return reply.status(404).send({ error: 'No such recording session.' });
+      return reply.send({ data: viewSession(s) });
+    }
+  );
+
+  app.post<{ Params: { id: string }; Body: { output?: string; error?: string; snapshot?: StartSnapshot; auto_assertions?: RecordedStep[] } }>(
+    '/api/v1/record/sessions/:id/finished',
+    async (req, reply) => {
+      const b = req.body || {};
+      const s = finishSession(req.params.id, { output: typeof b.output === 'string' ? b.output : undefined, error: typeof b.error === 'string' ? b.error : undefined, snapshot: b.snapshot });
+      if (s && Array.isArray(b.auto_assertions)) {
+        updateSession(req.params.id, { autoAssertions: b.auto_assertions });
+      }
+      if (!s) return reply.status(404).send({ error: 'No such recording session.' });
+      return reply.send({ data: viewSession(s) });
     }
   );
 }
