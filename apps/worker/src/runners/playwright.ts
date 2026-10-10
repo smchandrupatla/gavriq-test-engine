@@ -33,7 +33,7 @@ export interface PlaywrightRunInput {
   baseUrl: string;
   timeoutSeconds?: number;
   steps?: PlaywrightStep[];
-  browser?: 'chromium' | 'firefox' | 'webkit';
+  browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'msedge' | 'safari';
   viewport?: { width: number; height: number };
   vars?: Record<string, string>;
   /** Run with a visible browser window instead of headless. Defaults to headless. */
@@ -145,10 +145,80 @@ function remarksOf(log: RunLog, result: { status: string; message: string; durat
   return lines;
 }
 
+/**
+ * Browser pool — one long-lived Playwright Browser per (engine, channel,
+ * headless) combination for the lifetime of the worker. Each case opens a
+ * fresh context on the pooled Browser (newContext takes ~50 ms) instead of
+ * relaunching the whole binary (launch takes 1–2 s). The 1-2 s saved per case
+ * is the Step 2 win in the strategy doc. Idle browsers hold ~150–300 MiB of
+ * RAM each; the pool caps at the live set of engines a worker is asked for.
+ *
+ * Shutdown: closeBrowserPool() is wired at the end of this module and called
+ * on SIGINT/SIGTERM so the browsers exit cleanly when the worker container
+ * stops. A context is still closed per case (above the pool) so leaks don't
+ * accumulate inside one browser.
+ */
+interface PoolKey { label: string; channel?: 'chrome' | 'msedge'; headless: boolean }
+const browserPool = new Map<string, Browser>();
+function poolKey(k: PoolKey): string {
+  return `${k.label}|${k.channel || ''}|${k.headless ? 'h' : 'v'}`;
+}
+async function getPooledBrowser(
+  resolved: { engine: typeof chromium; channel?: 'chrome' | 'msedge'; label: string },
+  opts: { headless: boolean }
+): Promise<Browser> {
+  const key = poolKey({ label: resolved.label, channel: resolved.channel, headless: opts.headless });
+  const existing = browserPool.get(key);
+  if (existing && existing.isConnected()) return existing;
+  if (existing) browserPool.delete(key); // disconnected — drop and relaunch
+  const browser = await (resolved.engine as any).launch({
+    headless: opts.headless,
+    channel: resolved.channel,
+    executablePath: resolved.label === 'chromium' ? process.env.CHROME_BIN || undefined : undefined,
+    args: resolved.label === 'chromium' || resolved.channel ? ['--no-sandbox', '--disable-dev-shm-usage'] : [],
+  });
+  browserPool.set(key, browser);
+  return browser;
+}
+export async function closeBrowserPool(): Promise<void> {
+  for (const [k, b] of browserPool.entries()) {
+    try { await b.close(); } catch { /* already gone */ }
+    browserPool.delete(k);
+  }
+  sessionCache.clear();
+}
+
+/**
+ * Step 3 — Session storage cache. Keyed by `<base>::<username>` so each
+ * environment × identity has its own cached storageState. Hit = skip the
+ * sign-in dance entirely (open context with the saved cookies + localStorage).
+ * Miss = perform the full sign-in and persist the state. Cleared on worker
+ * shutdown via closeBrowserPool.
+ */
+type PWStorageState = Awaited<ReturnType<Awaited<ReturnType<typeof chromium.launch>>['newContext'] extends (...a: any) => Promise<infer C> ? C extends { storageState: (...a: any) => Promise<infer S> } ? () => Promise<S> : never : never>>;
+const sessionCache = new Map<string, PWStorageState>();
+
+/**
+ * Resolve a browser alias to (engine, optional Playwright channel). Aliases
+ *   - chrome  → chromium + channel 'chrome'  (needs Google Chrome installed)
+ *   - edge, msedge → chromium + channel 'msedge'  (needs Microsoft Edge installed)
+ *   - safari  → webkit  (closest Linux equivalent; real Safari drives WebKit on macOS)
+ */
+function resolveBrowser(name: string): { engine: typeof chromium; channel?: 'chrome' | 'msedge'; label: string } {
+  const n = (name || 'chromium').toLowerCase();
+  if (n === 'firefox') return { engine: firefox as any, label: 'firefox' };
+  if (n === 'webkit' || n === 'safari') return { engine: webkit as any, label: n };
+  if (n === 'chrome') return { engine: chromium, channel: 'chrome', label: 'chrome' };
+  if (n === 'edge' || n === 'msedge') return { engine: chromium, channel: 'msedge', label: n };
+  return { engine: chromium, label: 'chromium' };
+}
+
 async function execute(input: PlaywrightRunInput, log: RunLog): Promise<PlaywrightRunResult> {
   const start = Date.now();
   const engineName = input.browser || 'chromium';
-  const engine = ENGINES[engineName];
+  const resolved = resolveBrowser(engineName);
+  const engine = resolved.engine as any;
+  const engineLabel = resolved.label;
   if (!engine) {
     return {
       status: 'error',
@@ -161,10 +231,11 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
   const vars: Record<string, string> = { base, ...(input.vars || {}) };
   log.vars = vars;
   let browser: Browser | null = null;
+  let context: Awaited<ReturnType<Browser['newContext']>> | null = null;
   let page: Page | null = null;
   const evidence: EvidenceItem[] = [];
 
-  /** Final page state goes on record before the browser closes — a pass is evidenced like a fail. */
+  /** Final page state goes on record before the context closes — a pass is evidenced like a fail. */
   const settle = async (outcome: 'pass' | 'fail') => {
     if (!page) return;
     log.url = page.url();
@@ -173,19 +244,15 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
     if (shot) evidence.push(shot);
   };
 
-  // Cancelling closes the browser; the action in flight then fails and the finally below cleans up.
-  const onAbort = () => { browser?.close().catch(() => undefined); };
+  // Cancelling closes only this case's context; the pooled browser keeps serving other cases.
+  const onAbort = () => { context?.close().catch(() => undefined); };
   input.signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
     if (input.signal?.aborted) throw new Error('Run cancelled');
-    browser = await engine.launch({
-      headless: input.headless ?? true,
-      executablePath: engineName === 'chromium' ? process.env.CHROME_BIN || undefined : undefined,
-      args: engineName === 'chromium' ? ['--no-sandbox', '--disable-dev-shm-usage'] : [],
-    });
+    browser = await getPooledBrowser(resolved, { headless: input.headless ?? true });
     if (input.signal?.aborted) throw new Error('Run cancelled');
-    const context = await browser.newContext({
+    context = await browser.newContext({
       viewport: input.viewport || { width: 1280, height: 800 },
     });
     page = await context.newPage();
@@ -348,6 +415,139 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             case 'wait':
               await page.waitForTimeout(Number(step.value) || 1000);
               break;
+            case 'sign_in': {
+              // Step 3: sign in with caching. First time we see this (base, user)
+              // pair, perform the full gate dance and save the context's
+              // storageState in a module-level cache. On every later case with
+              // the same identity, load the cached state into a FRESH context
+              // so the gate is already past before the case even starts.
+              const username = typeof step.value === 'string' ? substitute(step.value, vars) : (vars.username || '');
+              const password = typeof step.expected === 'string' ? substitute(step.expected, vars) : (vars.password || '');
+              const sessionKey = `${base}::${username}`;
+              const cached = sessionCache.get(sessionKey);
+              if (cached) {
+                // Load the cached state into THIS context: close the current
+                // page, re-create the context with the storage state, re-open
+                // the page. Playwright does not support hot-swapping storage
+                // on an existing context.
+                const vp = context!.viewport() || { width: 1280, height: 800 };
+                await page!.close().catch(() => undefined);
+                await context!.close().catch(() => undefined);
+                context = await browser!.newContext({ viewport: vp, storageState: cached });
+                page = await context.newPage();
+                page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
+                await page.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: step.timeout_ms || 15000 });
+                try {
+                  await page.locator('#gate').waitFor({ state: 'hidden', timeout: 5000 });
+                } catch {
+                  // Cached state didn't actually sign us in (expired, invalidated).
+                  // Fall through to a fresh sign-in and overwrite the cache.
+                  sessionCache.delete(sessionKey);
+                }
+              }
+              if (!sessionCache.has(sessionKey)) {
+                await page!.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: step.timeout_ms || 15000 });
+                await page!.locator('#gate #login').waitFor({ timeout: 15000 });
+                await page!.locator('#gate #username').fill(username);
+                await page!.locator('#gate #password').fill(password);
+                await page!.locator('#gate #login').click();
+                await page!.locator('#gate').waitFor({ state: 'hidden', timeout: 20000 });
+                try {
+                  const state = await context!.storageState();
+                  sessionCache.set(sessionKey, state);
+                } catch { /* best effort — not fatal if save fails */ }
+              }
+              break;
+            }
+            case 'press_key': {
+              // Press a keyboard key on a focused element (or the page). The key
+              // name is Playwright's own (e.g. 'Enter', 'Tab', 'Escape'). When
+              // step.selector is set we focus-and-press that element; otherwise
+              // the press targets whatever has focus.
+              const key = String(step.value || 'Enter');
+              if (step.selector) {
+                await page.locator(step.selector).press(key, { timeout: step.timeout_ms || 5000 });
+              } else {
+                await page.keyboard.press(key);
+              }
+              break;
+            }
+            case 'hover': {
+              if (!step.selector) throw new Error('hover needs a selector');
+              await page.locator(step.selector).hover({ timeout: step.timeout_ms || 5000 });
+              break;
+            }
+            case 'assert_attribute': {
+              // Assert a specific attribute on the first element matching the
+              // selector equals (or contains) a value. step.value is the attr
+              // name; step.expected is the required attribute value.
+              if (!step.selector || !step.value) throw new Error('assert_attribute needs selector and value (attribute name)');
+              const attr = String(step.value);
+              const expected = step.expected !== undefined ? String(step.expected) : undefined;
+              const actual = await page.locator(step.selector).first().getAttribute(attr, { timeout: step.timeout_ms || 5000 });
+              if (actual === null) throw new Error(`attribute ${attr} is not set on ${step.selector}`);
+              if (expected !== undefined && actual !== expected) {
+                throw new Error(`attribute ${attr} on ${step.selector}: "${actual}" !== "${expected}"`);
+              }
+              break;
+            }
+            case 'assert_attribute_exists': {
+              // Same as assert_attribute but accepts any non-null value.
+              if (!step.selector || !step.value) throw new Error('assert_attribute_exists needs selector and value (attribute name)');
+              const attr = String(step.value);
+              const actual = await page.locator(step.selector).first().getAttribute(attr, { timeout: step.timeout_ms || 5000 });
+              if (actual === null) throw new Error(`attribute ${attr} is not set on ${step.selector}`);
+              break;
+            }
+            case 'assert_every_selector_has_attribute': {
+              // Every element matching the selector must have the given
+              // attribute set. Used for "every link has an href", "every image
+              // has an alt", "every button has visible text or aria-label".
+              if (!step.selector || !step.value) throw new Error('assert_every_selector_has_attribute needs selector and value (attribute name)');
+              const attr = String(step.value);
+              const missing = await page.locator(step.selector).evaluateAll((els: Element[], a: string) => {
+                const bad: string[] = [];
+                els.forEach((el, i) => {
+                  const v = el.getAttribute(a);
+                  if (v === null || v === '') bad.push(`#${i} ${el.tagName.toLowerCase()}${el.textContent ? ` "${(el.textContent || '').trim().slice(0, 40)}"` : ''}`);
+                });
+                return bad;
+              }, attr);
+              if (missing.length > 0) {
+                throw new Error(`${missing.length} element(s) missing @${attr}: ${missing.slice(0, 5).join('; ')}`);
+              }
+              break;
+            }
+            case 'assert_computed_style': {
+              // The CSS computed value of a property on the first element
+              // matching the selector must equal step.expected, or merely be
+              // non-empty when step.expected is omitted.
+              if (!step.selector || !step.value) throw new Error('assert_computed_style needs selector and value (CSS property)');
+              const prop = String(step.value);
+              const expected = step.expected !== undefined ? String(step.expected) : undefined;
+              const actual = await page.locator(step.selector).first().evaluate(
+                (el: Element, p: string) => window.getComputedStyle(el).getPropertyValue(p).trim(),
+                prop
+              );
+              if (!actual) throw new Error(`computed ${prop} is empty on ${step.selector}`);
+              if (expected !== undefined && actual !== expected) {
+                throw new Error(`computed ${prop} on ${step.selector}: "${actual}" !== "${expected}"`);
+              }
+              break;
+            }
+            case 'assert_computed_style_matches': {
+              // The computed value of a CSS property matches a RegExp.
+              // step.expected is the regex source (JS regex syntax, no flags).
+              if (!step.selector || !step.value || !step.expected) throw new Error('assert_computed_style_matches needs selector, value (CSS property), and expected (regex source)');
+              const prop = String(step.value);
+              const re = new RegExp(String(step.expected));
+              const actual = await page.locator(step.selector).first().evaluate(
+                (el: Element, p: string) => window.getComputedStyle(el).getPropertyValue(p).trim(),
+                prop
+              );
+              if (!re.test(actual)) throw new Error(`computed ${prop} on ${step.selector}: "${actual}" does not match ${re.source}`);
+              break;
+            }
             default:
               throw new Error(`Unknown step: ${step.action}`);
           }
@@ -399,6 +599,8 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
     };
   } finally {
     input.signal?.removeEventListener('abort', onAbort);
-    if (browser) await browser.close().catch(() => undefined);
+    // Close only the context — the browser stays warm in the pool for the
+    // next case. closeBrowserPool() tears down the pool on worker shutdown.
+    if (context) await context.close().catch(() => undefined);
   }
 }

@@ -842,6 +842,7 @@ C.push(
     ],
     dataProfile: HOSTILE('Two event names bound to nothing.'),
     expected: 'Nothing started.',
+    atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Triggers event names bound to no schedules — the API returns 202 with executions_started=0, so nothing is persisted. There is no cleanup to perform.' },
   }),
   pen({
     key: 'TE-PEN-POLICY-BYPASS', name: 'A prohibited category cannot be queued by not naming it',
@@ -1013,6 +1014,7 @@ C.push(
     ],
     dataProfile: SANDBOX_DATA('Two executions of TE-FIX-PASS, each with its own artefact.'),
     expected: 'A fail, B pass — one result each.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'Interleaving is only observable with ≥2 concurrent executions; the "no cross-leakage" invariant IS the single behaviour under test.' },
   })
 );
 

@@ -1,11 +1,11 @@
 /**
- * Sand Bench use-case flow catalog — Batch 2a (safe, scoped-to-own-data create flows).
+ * Sand Bench use-case flow catalog ï¿½ Batch 2a (safe, scoped-to-own-data create flows).
  *
  * Covers the use cases whose main flow creates a resource (schedule, rule, test
  * case, test suite, dataset, run) via a real POST against the deployed API.
  * Every create uses a {{ts}}/{{rand}}-unique name and every follow-on lifecycle
  * call (stage, validate, assemble, delete) operates on that SAME just-created
- * resource — never on pre-existing shared tenant data — so this suite is safe
+ * resource ï¿½ never on pre-existing shared tenant data ï¿½ so this suite is safe
  * to run repeatedly against the shared Sand Bench deployment.
  *
  * Request/response shapes below were read from the live source
@@ -54,7 +54,7 @@ function cleanupRule(id: string) {
 const C: CaseDef[] = [];
 
 /* ------------------------------------------------------------------------ */
-/* UC-schNew — New schedule                                                  */
+/* UC-schNew ï¿½ New schedule                                                  */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -94,6 +94,7 @@ C.push(
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'Three schedules, one per cadence, all uniquely named TE-UC-SCH-*-{{ts}}.', source: 'Generated per run.' },
     expected: 'All three cadences are accepted, each with its own next_run_at.',
+    atomicityNote: { reason: 'pending-split', detail: 'Checks three cadences (once/hourly/weekly) in one case; follow-up: split into SB-UC-schNew-ALT-1a/1b/1c, one cadence each.' },
   },
   {
     key: 'SB-UC-schNew-ALT-2',
@@ -131,7 +132,7 @@ C.push(
     key: 'SB-UC-schNew-EXC-2',
     name: 'UC-schNew exc flow 2: A sch_local fallback is not evidence that a scheduler will execute a durable record.',
     objective: 'Check that "New schedule" fails safely: a sch_local fallback is not evidence that a scheduler will execute a durable record.',
-    description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id — proving it is a real persisted row, not a client-side-only fallback id.',
+    description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id ï¿½ proving it is a real persisted row, not a client-side-only fallback id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
@@ -143,12 +144,12 @@ C.push(
     cleanupSteps: [...cleanupSchedule('new_sch_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'One uniquely named schedule, read back by its returned id.', source: 'Generated per run.' },
-    expected: 'The created id is independently readable — a real persisted row, not a local-only id.',
+    expected: 'The created id is independently readable ï¿½ a real persisted row, not a local-only id.',
   }
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchCreate — Create new rule                                      */
+/* UC-ruleBenchCreate ï¿½ Create new rule                                      */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -190,14 +191,14 @@ C.push(
     key: 'SB-UC-ruleBenchCreate-ALT-2',
     name: 'UC-ruleBenchCreate alt flow 2: Analyst leaves without saving; no rule is inferred from a partially completed form.',
     objective: 'Check an alternative path of "Create new rule": analyst leaves without saving; no rule is inferred from a partially completed form.',
-    description: 'Alternate flow 2 of UC-ruleBenchCreate (Create new rule): "Analyst leaves without saving; no rule is inferred from a partially completed form." No backing API call is made for this flow by design — leaving the form is evidenced only by the screen loading and no POST ever firing.',
+    description: 'Alternate flow 2 of UC-ruleBenchCreate (Create new rule): "Analyst leaves without saving; no rule is inferred from a partially completed form." No backing API call is made for this flow by design ï¿½ leaving the form is evidenced only by the screen loading and no POST ever firing.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-create.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchCreate"', description: 'load screen' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchCreate'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload — deliberately no POST is made.', source: 'n/a' },
+    dataProfile: { profile: 'none (read-only)', data: 'No request payload ï¿½ deliberately no POST is made.', source: 'n/a' },
     expected: 'Screen loads; no rule is created by this case.',
   },
   {
@@ -218,8 +219,8 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-EXC-2',
     name: 'UC-ruleBenchCreate exc flow 2: A lost save response is unconfirmed; a second write is not evidence that the first failed.',
-    objective: 'Check that "Create new rule" fails safely: a lost save response is unconfirmed; a second write is not evidence that the first failed. Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
-    description: 'Exception flow 2 of UC-ruleBenchCreate (Create new rule): "A lost save response is unconfirmed; a second write is not evidence that the first failed." Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
+    objective: 'Check that "Create new rule" fails safely: a lost save response is unconfirmed; a second write is not evidence that the first failed. Two independent creates with distinct names each get their own distinct id ï¿½ a dropped response for one call is never inferred from the other succeeding.',
+    description: 'Exception flow 2 of UC-ruleBenchCreate (Create new rule): "A lost save response is unconfirmed; a second write is not evidence that the first failed." Two independent creates with distinct names each get their own distinct id ï¿½ a dropped response for one call is never inferred from the other succeeding.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
@@ -231,11 +232,12 @@ C.push(
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchCreate'],
     dataProfile: { profile: 'synthetic-named', data: 'Two independently-named rules, each expected to carry its own distinct id.', source: 'Generated per run.' },
     expected: 'Both creates succeed with distinct ids; neither is treated as a retry of the other.',
+    atomicityNote: { reason: 'tests-independence', detail: 'Verifies two creates are treated as separate resources, not retries of each other â€” the invariant requires both calls.' },
   }
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchStage — Stage rules                                           */
+/* UC-ruleBenchStage ï¿½ Stage rules                                           */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -268,7 +270,7 @@ C.push(
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-stage.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchStage"', description: 'load screen' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchStage'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload — deliberately no stage call.', source: 'n/a' },
+    dataProfile: { profile: 'none (read-only)', data: 'No request payload ï¿½ deliberately no stage call.', source: 'n/a' },
     expected: 'Screen loads; no rule is staged by this case.',
   },
   {
@@ -325,7 +327,7 @@ C.push(
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchValidate — Validate rules                                     */
+/* UC-ruleBenchValidate ï¿½ Validate rules                                     */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -368,8 +370,8 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-ALT-2',
     name: 'UC-ruleBenchValidate alt flow 2: A broader test run is a separate action from the rule validation endpoint.',
-    objective: 'Check an alternative path of "Validate rules": a broader test run is a separate action from the rule validation endpoint. Validating a rule does not itself create a run row — the matching read count is unaffected by the validate call above.',
-    description: 'Alternate flow 2 of UC-ruleBenchValidate (Validate rules): "A broader test run is a separate action from the rule validation endpoint." Validating a rule does not itself create a run row — GET /api/v1/runs count is unaffected by the validate call above.',
+    objective: 'Check an alternative path of "Validate rules": a broader test run is a separate action from the rule validation endpoint. Validating a rule does not itself create a run row ï¿½ the matching read count is unaffected by the validate call above.',
+    description: 'Alternate flow 2 of UC-ruleBenchValidate (Validate rules): "A broader test run is a separate action from the rule validation endpoint." Validating a rule does not itself create a run row ï¿½ GET /api/v1/runs count is unaffected by the validate call above.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [

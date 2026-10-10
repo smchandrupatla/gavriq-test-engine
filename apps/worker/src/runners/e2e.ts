@@ -39,6 +39,10 @@ export interface E2ERunInput {
   vars?: Record<string, string>;
   timeoutSeconds?: number;
   signal?: AbortSignal;
+  /** Stable identifier used to keep the agent's planned-action cache (/.e2e-cache)
+   *  across runs. Without this each run creates a fresh runDir and the first-run
+   *  plan is paid every time, which on a cold local model is many minutes. */
+  caseKey?: string;
 }
 
 export interface E2ERunResult {
@@ -125,11 +129,16 @@ export async function runE2E(input: E2ERunInput): Promise<E2ERunResult> {
     };
   }
 
-  // Where this case's generated files live. One directory per run keeps the
-  // replay cache (./.e2e-cache) scoped to the case; we don't share plans across
-  // cases because each one is a different user journey.
+  // Where this case's generated files live. When the caller supplied a stable
+  // caseKey the directory is pinned to it so the agent's planned-action cache
+  // (./.e2e-cache) survives across runs — the first-run plan takes several
+  // minutes on a cold local model, subsequent replays are near-instant.
+  // Without a caseKey (older callers) fall back to the per-run directory.
   const runRoot = process.env.E2E_RUN_ROOT || path.join(tmpdir(), 'e2e-runs');
-  const runDir = path.join(runRoot, `run-${process.pid}-${started}`);
+  const caseSlug = input.caseKey ? input.caseKey.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) : null;
+  const runDir = caseSlug
+    ? path.join(runRoot, `case-${caseSlug}`)
+    : path.join(runRoot, `run-${process.pid}-${started}`);
   mkdirSync(runDir, { recursive: true });
 
   const modelBaseUrl = process.env.E2E_MODEL_BASE_URL || 'http://host.docker.internal:11434/v1';

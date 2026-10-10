@@ -89,12 +89,20 @@ services:
     environment:
       TEST_ENGINE_API: http://test-engine:8787
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
-      WORKER_POLL_MS: "4000"
+      WORKER_POLL_MS: "2000"
+      WORKER_MAX_CONCURRENCY: ${WORKER_MAX_CONCURRENCY:-5}
       WORKER_API_KEY: ${WORKER_API_KEY:-}
       CHROME_BIN: /usr/bin/chromium
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       EVIDENCE_DIR: /data/evidence
+      # Sand Bench demo credentials. The DB stores which env var name holds a
+      # secret (`secret_env`), never the secret itself; the worker resolves it
+      # from its own process environment. Dev stack ships 'password'; override
+      # for staging/other deployments via a .env file or shell export.
+      SB_DEMO_PASSWORD: ${SB_DEMO_PASSWORD:-password}
+      SB_DEMO_ADMIN_PASSWORD: ${SB_DEMO_ADMIN_PASSWORD:-password}
+      SB_STAGING_PASSWORD: ${SB_STAGING_PASSWORD:-password}
     volumes:
       - test-engine-evidence:/data/evidence
     extra_hosts:

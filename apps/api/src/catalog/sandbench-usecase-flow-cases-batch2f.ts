@@ -35,7 +35,7 @@ const API_LOGIN = {
 const BEARER = { authorization: 'Bearer {{token}}' };
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { username: 'admin', password: '{{password}}' },
+  body: { username: '{{admin_username}}', password: '{{admin_password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };
@@ -589,10 +589,16 @@ C.push(
       ADMIN_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/security/records', headers: ADMIN_BEARER, body: { resource: 'te-uc-security-{{ts}}', data: 'TE synthetic protected payload {{ts}}' }, expected_status: 200, expect_json: [{ path: 'id', exists: true }, { path: 'encryptionStatus', exists: true } ], save: { record_id: 'id' }, description: 'create a synthetic protected record' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/security/records/{{record_id}}', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{record_id}}' }], description: 'reveal the record through the supported access path' },
+      /* ATOMICITY: this case persists one synthetic security record per run.
+       * The API has no /security/records/{id} delete route (noted in the file
+       * header: PATCH /security/encryption, POST /security/rotate and
+       * /security/remediate are NOT fired because they change tenant-wide key
+       * material). Marked `pending-cleanup` below until a cleanup route lands. */
     ],
     tags: ['usecase', 'sand-bench', 'main-flow', 'security'],
     dataProfile: { profile: 'synthetic-named', data: 'One synthetic protected record with a unique resource name/payload.', source: 'Generated per run.' },
     expected: 'A real record id is created and independently readable back, with an honest encryptionStatus.',
+    atomicityNote: { reason: 'pending-cleanup', detail: 'Creates one /security/records row per run; the Sand Bench API has no corresponding delete route today, so the row persists. Follow-up: either add a cleanup endpoint on Sand Bench side or redesign the case around /security/health only.' },
   },
   {
     key: 'SB-UC-security-ALT-1',

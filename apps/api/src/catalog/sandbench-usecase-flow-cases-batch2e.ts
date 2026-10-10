@@ -28,7 +28,7 @@ const API_LOGIN = {
 const BEARER = { authorization: 'Bearer {{token}}' };
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
-  body: { username: 'admin', password: '{{password}}' },
+  body: { username: '{{admin_username}}', password: '{{admin_password}}' },
   expected_status: 200, save: { adminToken: 'token' },
   description: 'tenant admin login',
 };

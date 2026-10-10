@@ -30,11 +30,13 @@ COPY package.json package-lock.json* ./
 RUN npm install
 
 # Firefox and WebKit builds for the pinned Playwright version, plus their
-# system libraries. Chromium cases keep using the apt Chrome above (CHROME_BIN).
+# system libraries, plus the Google Chrome and Microsoft Edge channels for the
+# cross-browser matrix (browser:chrome and browser:edge cases need these).
+# Chromium cases keep using the apt Chrome above (CHROME_BIN).
 # Must run through the repo's own playwright CLI: a bare `npx playwright`
 # resolves a different version and installs browsers this one cannot launch.
 RUN env -u PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD \
-    node node_modules/playwright/cli.js install --with-deps firefox webkit \
+    node node_modules/playwright/cli.js install --with-deps firefox webkit chrome msedge \
     && rm -rf /var/lib/apt/lists/*
 
 COPY apps ./apps
