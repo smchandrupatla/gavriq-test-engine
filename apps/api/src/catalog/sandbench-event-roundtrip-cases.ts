@@ -184,7 +184,7 @@ const EVENTS: EventSpec[] = [
     title: 'message generation',
     trigger: {
       action: 'request', method: 'POST', url: '{{api}}/api/v1/generated-messages',
-      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, seed: 'SBE-EV-FILE-{{ts}}' },
+      headers: BEARER, body: { messageTypeCode: 'pacs.008.001.14', count: 1, seed: 'SBE-EV-FILE-{{rand}}-{{ts}}' },
       expected_status: [200, 202],
       description: 'generate messages',
     },

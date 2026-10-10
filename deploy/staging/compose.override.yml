@@ -43,6 +43,19 @@ services:
       # from the operator's /api/v1/inbound/events. Default without this is
       # tenant_demo_acme, which has no accounts in the pinned commit.
       SBE_PUBLIC_TENANT: tenant_default
+      # Portal features (feat/portal-features branch of sand-bench-enterprise).
+      # The FTP portal mounts sbe-shared-ftp:/ftp:ro and lists what Sand Bench
+      # writes here. The portal URLs let POST /dispatch forward to the right
+      # standalone portal container.
+      FTP_DROP_ROOT: /ftp
+      FTP_DROP_SUBDIR: sandbench
+      SBE_API_PORTAL_BASE: http://host.docker.internal:8093
+      SBE_MQ_PORTAL_BASE: http://host.docker.internal:8092
+      SBE_KAFKA_PORTAL_BASE: http://host.docker.internal:8095
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - sbe-shared-ftp:/ftp
 
   worker:
     image: sand-bench-staging-app:${SBE_STAGING_TAG}
@@ -52,6 +65,10 @@ services:
         SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
     environment:
       ENVIRONMENT_CLASSIFICATION: test
+      FTP_DROP_ROOT: /ftp
+      FTP_DROP_SUBDIR: sandbench
+    volumes:
+      - sbe-shared-ftp:/ftp
 
   web:
     image: sand-bench-staging-web:${SBE_STAGING_TAG}
@@ -72,3 +89,8 @@ services:
     image: sand-bench-staging-testhub:${SBE_STAGING_TAG}
     ports: !override
       - "127.0.0.1:${STAGING_TESTHUB_PORT:-18091}:8091"
+
+volumes:
+  sbe-shared-ftp:
+    external: true
+    name: sbe-shared-ftp
