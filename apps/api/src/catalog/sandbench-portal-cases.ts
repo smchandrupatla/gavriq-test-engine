@@ -807,4 +807,40 @@ C.push(
   },
 );
 
+/* ------------------------------------------------------------------------- */
+/* API portal — ISO consumer coverage                                        */
+/* ------------------------------------------------------------------------- */
+
+const ISO_TYPES: { code: string; title: string }[] = [
+  { code: 'pacs.008.001.14', title: 'Customer Credit Transfer (v14)' },
+  { code: 'pacs.008.001.08', title: 'FI to FI Customer Credit Transfer (v8)' },
+  { code: 'pain.001.001.09', title: 'Customer Credit Transfer Initiation' },
+  { code: 'pain.002.001.10', title: 'Customer Payment Status Report' },
+  { code: 'camt.053.001.08', title: 'Bank to Customer Statement' },
+];
+
+for (const t of ISO_TYPES) {
+  const safeKey = 'SB-API-PORTAL-INBOUND-' + t.code.replace(/\./g, '-').toUpperCase();
+  C.push({
+    key: safeKey,
+    name: `API portal consumes a ${t.code} inbound call`,
+    objective: `Confirm the standalone API portal records a ${t.title} (${t.code}) message when it arrives on its generic /inbound/{code} endpoint.`,
+    description: `POST {{apiPortal}}/inbound/${t.code} with a per-run tag; GET {{apiPortal}}/app/log carries that tag within a short poll window.`,
+    suiteKey: 'sb-api-portal', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'API portal up; ledger reachable.',
+    steps: [
+      { action: 'request', method: 'POST', url: `{{apiPortal}}/inbound/${t.code}`,
+        body: { tag: `API-ISO-${t.code.toUpperCase().replace(/\./g, '-')}-{{rand}}-{{ts}}`, messageTypeCode: t.code, payload: { msg: `api-portal-${t.code}` } },
+        expected_status: [200, 201, 202], description: `portal /inbound/${t.code}` },
+      { action: 'request', method: 'GET', url: '{{apiPortal}}/app/log', expected_status: 200,
+        expected_body_contains: `API-ISO-${t.code.toUpperCase().replace(/\./g, '-')}-{{rand}}-{{ts}}`,
+        poll: { timeout_ms: 5000, interval_ms: 500 },
+        description: 'log contains the per-run tag' },
+    ],
+    tags: ['integration', 'portal', 'api', 'iso', t.code],
+    dataProfile: { profile: 'synthetic', data: `A disposable inbound body tagged with the ${t.code} code.`, source: 'generated at run time' },
+    expected: `Inbound accepted; log reflects the tag for ${t.code}.`,
+  });
+}
+
 export const SANDBENCH_PORTAL_CASES: CaseDef[] = tagSource(FILE, C);
