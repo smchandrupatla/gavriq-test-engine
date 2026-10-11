@@ -126,6 +126,14 @@ export interface CaseDef {
   /** Catalog module the case is defined in (set by tagSource; used for the automation link). */
   sourceFile?: string;
   /**
+   * Opt the case out of the 30-minute run-SLA budget. The run planner still
+   * queues the case; it just does not count it toward the SLA budget, so a
+   * deliberate long soak does not force the planner to scale workers
+   * unnecessarily. The `cat:long-running` tag has the same effect and is the
+   * recommended marker because it also surfaces in the console filter.
+   */
+  slaExempt?: boolean;
+  /**
    * Justification when a case intentionally creates the same kind of resource
    * more than once (so the atomic-single-purpose lint lets it through). Without
    * this, the lint requires an HTTP case to POST at most one creation to any
@@ -139,7 +147,8 @@ export interface CaseDef {
       | 'tests-independence'   // separate creates verify an independence invariant
       | 'pending-split'        // acknowledged non-atomic, scheduled for a split
       | 'pending-cleanup'      // acknowledged leaky, cleanup to be added
-      | 'no-cleanup-endpoint'; // the application exposes no delete/archive route for the created resource
+      | 'no-cleanup-endpoint'  // the application exposes no delete/archive route for the created resource
+      | 'reads-baseline';      // intentionally read-only against the application's installation baseline (seeded catalog, tenant default, published config); no setup/cleanup needed
     detail: string;            // one sentence explaining why or what the follow-up is
   };
 }

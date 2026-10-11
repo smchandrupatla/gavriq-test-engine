@@ -1103,6 +1103,7 @@ C.push(
     objective: 'Confirm cases marked automated actually carry steps to run and a documented data profile.',
     description: 'A case marked automated with no steps runs nothing and passes nothing. The seeded HTTP cases must carry at least one request step with a URL, and their documented data profile.',
     severity: 'critical',
+    atomicityNote: { reason: 'reads-baseline', detail: 'Read-only inspection of the engine\'s own seeded catalog (TE-SMOKE-HEALTH, TE-API-APPLICATIONS) — a data-quality check on the installation baseline, with no mutation and nothing to clean up.' },
     steps: [
       // The braces are escaped so the runner asserts on the stored template, not on its substituted value.
       GET('/api/v1/test-cases/TE-SMOKE-HEALTH', { expect_json: [{ path: 'data.steps', min_length: 1 }, { path: 'data.steps.0.url', matches: '^\\{\\{engine\\}\\}/health$' }, { path: 'data.validation_rules.data_profile.source', exists: true }, { path: 'data.test_data_ref', exists: true }], description: 'http case' }),

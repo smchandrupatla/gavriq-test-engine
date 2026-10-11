@@ -1395,7 +1395,21 @@ function renderRun(){
     :'<div class="empty">This run has no planned cases.</div>';
   const parallelNote=`<div class="muted small" style="margin-top:8px">The engine runs these cases strictly in the order shown — one worker claims the run and executes each case before the next. Parallel execution happens across runs: another worker can be claiming a different run at the same time.</div>`;
   const planCard=`<div class="card"><div class="card-head"><h2>Order of execution</h2><span class="muted small">${plural(planRows.length,'case')} · ${methodSummary||'no methods declared'}</span></div><div class="hp-body">${planBody}${parallelNote}</div></div>`;
-  el('content').innerHTML=`<div class="card run-head">
+  // SLA banner: planner output + live breach status. r.sla is produced by
+  // apps/api/src/routes/trigger.ts's /api/v1/runs/:runId handler.
+  const slaHtml=(()=>{
+    const s=r.sla;if(!s)return '';
+    const p=s.plan||{};
+    const tone=s.breached?'red':(s.on_track?'green':'amber');
+    const mins=v=>Math.round(Number(v||0)/60);
+    const label=s.breached?'SLA breached':(s.on_track?'On track':'At risk');
+    const bottleneck=p.bottleneck?`<div class="muted small" style="margin-top:4px">⚠ ${esc(p.bottleneck)}</div>`:'';
+    const breach=s.breached?`<div class="muted small" style="margin-top:4px"><b>Breach reason:</b> ${esc(s.breach_reason||'')}</div>`:'';
+    const excluded=(p.cases_excluded||[]).length?` · ${p.cases_excluded.length} exempt`:'';
+    const projFin=s.projected_finish_at?when(s.projected_finish_at):'—';
+    return `<div class="card" style="border-left:3px solid var(--dot-${tone},#888)"><div class="card-head"><h2>Run SLA plan — ${esc(label)}</h2><span class="muted small">rate ${Number(p.observed_rate_cases_per_slot_s||0).toFixed(2)} cases/slot/s · ${esc(p.learning_applied||'')}</span></div><div class="hp-body"><dl class="kv run-kv"><dt>Target</dt><dd>${mins(p.sla_target_s)} min for ${p.cases_in_sla} cases${excluded}</dd><dt>Workers</dt><dd>${p.available_workers}/${p.target_workers} needed · ${p.worker_max_concurrency}× concurrent</dd><dt>Started</dt><dd>${esc(when(s.started_at))}</dd><dt>Projected finish</dt><dd>${esc(projFin)}</dd><dt>Deadline</dt><dd>${esc(when(s.deadline_at))}</dd>${s.actual_finish_at?`<dt>Actual finish</dt><dd>${esc(when(s.actual_finish_at))}</dd>`:''}</dl>${bottleneck}${breach}</div></div>`;
+  })();
+  el('content').innerHTML=slaHtml+`<div class="card run-head">
       <div class="card-head"><div class="live-head">${active&&!stalled?`<span class="pulse ${esc(r.status)}"></span>`:''}<span class="run-key big">${esc(r.name||r.key)}</span>${badge(r.status)}${stalled?'<span class="stall">stalled — no new results</span>':''}</div>
         <div class="hp-actions"><button class="btn" data-action="nav-back">← Back</button><button class="btn" data-action="rerun"${ids.length?'':' disabled'}>Run again</button>${active?`<button class="btn" data-action="cancel-run" data-id="${esc(r.id)}">Cancel</button>`:''}</div></div>
       <div class="run-body">

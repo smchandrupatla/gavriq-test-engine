@@ -7,15 +7,27 @@ description: 'Use when creating, editing, or reviewing automated test cases, tes
 
 ## Contract
 
+**Reiterated by the user five times (2026-10-10 → 2026-10-11). Non-negotiable.**
+
 Every test case must run independently by key, start from the repository's single documented baseline, and end with the application restored to that baseline. Prerequisites and all case-owned setup belong to the case, not to another case, suite ordering, manual operator work, or undocumented environment state. Suites group cases; they must not provide hidden shared setup or teardown.
+
+The clause the user has emphasised most: **a case must not expect a specific data point to pre-exist.** If the behaviour under test needs a record, the case creates that record itself through the application's own API before exercising the behaviour, and removes it through the application's own API afterwards.
 
 Concretely:
 - A case that **views** an entity must first **create** it, then view, then **delete** it.
 - A case that **deletes** an entity must first **create** it, then delete it.
 - A case that **modifies** an entity must create it, modify, verify, then remove it (or restore the pre-modification state).
+- A case that **lists** entities and asserts min_length ≥ N must create N entities itself before the list call, and remove them after.
+- A case that **fetches** by id must have created the record referenced by that id in the same case.
 - The environment state at the end of a case must be bit-for-bit the same as at the start.
 
 Cases must be runnable **in parallel**. No cross-case or sequential dependencies — nothing may rely on another case having run or on undocumented environment state.
+
+## Application-baseline carve-out
+
+Application-wide configuration seeded at **install time** — the list of supported channels, the ISO 20022 catalog shipped with the product, the single-tenant default (`tenant_default`), the engine's own seeded self-test fixtures (`TE-FIX-*`, `TE-SMOKE-*`), the demo persona roster (`user_demo_*`), and access profiles (`fap_*`, `dap_*`) — is considered part of the application itself, not test data. GETs on `/channel-targets`, `/message-types`, baseline fixture lookups like `GET /test-cases/TE-FIX-PASS`, and references to `tenant_default` are allowed without creation/cleanup.
+
+Anything else carrying a specific id — a UUID, a resource-prefix slug like `rule_` / `exec_` / `draft_`, or an uppercase keyed id like `TE-API-META` — must either be created by the case itself, or carry a case-level `atomicityNote: { reason: 'reads-baseline', detail: ... }` explaining why that record is baseline.
 
 ## Parallel-safe logins
 

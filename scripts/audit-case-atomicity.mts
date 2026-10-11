@@ -35,6 +35,7 @@ export interface Finding {
     | 'patch-put-without-create-or-echo'
     | 'reads-shared-record'
     | 'ui-mutates-no-cleanup'
+    | 'reads-hardcoded-record'
     | 'ok';
   detail: string;
 }
@@ -120,7 +121,7 @@ function isSubResource(url: string): boolean {
   // skipped — the triage queue is for unflagged leaks, not revisiting the ones
   // already catalogued.
   const reason = c.atomicityNote?.reason;
-  if (reason === 'pending-cleanup' || reason === 'no-cleanup-endpoint') return;
+  if (reason === 'pending-cleanup' || reason === 'no-cleanup-endpoint' || reason === 'reads-baseline') return;
   const steps = (c.steps || []) as Step[];
   const cleanup = (c.cleanupSteps || []) as Step[];
 
@@ -274,6 +275,37 @@ function isSubResource(url: string): boolean {
       findings.push({ key: c.key, method: c.method, category: 'patch-put-without-create-or-echo', detail: `${method} ${urlTemplate(url)} references ${uncreated.join(',')} with no prior create` });
     } else if (refs.length === 0 && /\/[a-f0-9-]{8,}\/?$/i.test(url)) {
       findings.push({ key: c.key, method: c.method, category: 'patch-put-without-create-or-echo', detail: `${method} ${urlTemplate(url)} targets a literal probe id while permitting 2xx — tighten expected_status to 4xx-only or create+modify a real record` });
+    }
+  }
+
+  // 3b) ANY step whose URL carries a hardcoded record identifier (UUID, slug
+  //     starting with a known resource prefix like `tc_`, `rule_`, `exec_`,
+  //     etc., or an uppercase keyed id like `TE-API-META`) that is NOT a
+  //     baseline fixture or documented 404 probe. The atomic contract: a
+  //     case must not expect a specific record to pre-exist.
+  for (const s of steps) {
+    if (s.action !== 'request') continue;
+    const url = String(s.url || '');
+    const path = url.replace(/^\{\{[^}]+\}\}/, '').split('?')[0];
+    // 404-probe and zero-UUID: already handled.
+    if (/\/00000000-0000-/.test(path)) continue;
+    if (/\/(does-not-exist|not-a-uuid|no-such-|run_does_not_exist_)/i.test(path)) continue;
+    // Baseline carve-outs: engine fixture cases, Sand Bench tenant default,
+    // smoke/retired fixtures, demo tenant users (seeded identities).
+    const BASELINE = /^(TE-FIX-|TE-SMOKE-|TE-RETIRED-|TE-ARCHIVE-|TE-NO-SUCH|tenant_default|tenant_demo_|user_demo_|dap_|fap_|dc_|dp_)/i;
+    const segments = path.split('/').filter(Boolean);
+    for (const seg of segments) {
+      if (BASELINE.test(seg)) continue;
+      // Flag only shapes that are clearly a specific record identifier:
+      // - UUID
+      // - resource-prefix slug (rule_, exec_, run_, draft_, ds_)
+      // - uppercase keyed id with hyphens (e.g. TE-API-META)
+      if (/^[a-f0-9]{8}-[a-f0-9]{4}-/i.test(seg)
+          || /^(rule_|exec_|run_|draft_|ds_)/i.test(seg)
+          || /^TE-[A-Z]{2,}-[A-Z0-9-]+$/.test(seg)) {
+        findings.push({ key: c.key, method: c.method, category: 'reads-hardcoded-record', detail: `${String(s.method||'GET').toUpperCase()} ${path} references a specific record (${seg}) that this case did not create` });
+        break;
+      }
     }
   }
 

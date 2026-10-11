@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
+import { validateCaseShape } from './case-shape.js';
 import { runPerformance } from './runners/performance.js';
 import { runSit, isSitScript } from './runners/sit.js';
 import { runE2E } from './runners/e2e.js';
@@ -175,6 +176,24 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
   const script = tc?.script || '';
   const rules = tc?.validation_rules || {};
   const vars = buildVars(env);
+
+  // Atomic-contract pre-flight: refuse to run a case that references a var
+  // it cannot resolve. Keeps the worker from executing a half-defined case
+  // against a shared environment.
+  const shapeProblem = validateCaseShape(tc, vars);
+  if (shapeProblem) {
+    return {
+      status: 'failed',
+      verdict: 'fail',
+      duration_ms: 0,
+      message: shapeProblem.slice(0, 500),
+      classification: 'atomic_contract_violation',
+      metrics: {},
+      evidence: [],
+      remarks: [`Pre-flight: ${shapeProblem}.`],
+    };
+  }
+
   const viewport =
     rules.viewport && Number(rules.viewport.width) > 0
       ? { width: Number(rules.viewport.width), height: Number(rules.viewport.height) || 800 }

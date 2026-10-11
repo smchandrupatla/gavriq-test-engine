@@ -509,6 +509,7 @@ C.push(
     objective: 'Make sure deployment files (environment templates, compose file, Dockerfile, manifests) cannot be read over the web.',
     description: 'The image holds .env templates, the compose file, the Dockerfile and package manifests. None may be reachable over HTTP.',
     severity: 'critical', priority: 'p0',
+    atomicityNote: { reason: 'reads-baseline', detail: 'Negative probes on fixed asset paths (/.env, /.git/HEAD, /compose.yaml, …) that must answer 404. Nothing created, nothing to clean up.' },
     steps: [
       probe404('/.env', 'DATABASE_URL'), probe404('/.env.example', 'DATABASE_URL'), probe404('/.git/config', '[core]'), probe404('/.git/HEAD', 'ref:'),
       probe404('/package.json', '"dependencies"'), probe404('/package-lock.json', '"lockfileVersion"'), probe404('/compose.yaml', 'POSTGRES_PASSWORD'),
@@ -1253,6 +1254,7 @@ C.push(
     key: 'TE-DR-MULTI-PATH-READ', name: 'One case reads the same on every path',
     objective: 'Confirm five different ways of reading one case all return the same key and name.',
     description: 'The repository detail, the filtered list, the global search, the console summary and the combined status each read the same case with their own query. All must return the same key and name.',
+    atomicityNote: { reason: 'reads-baseline', detail: 'Read-only consistency check across five routes that all serve the seeded TE-API-META case definition — part of the engine\'s installation baseline, no mutation.' },
     steps: [
       GET('/api/v1/test-cases/TE-API-META', { expect_json: [{ path: 'data.name', equals: 'Capability map is published' }], save: { case_id: 'data.id' }, description: 'detail' }),
       GET('/api/v1/test-cases?q=TE-API-META&limit=5', { expect_json: [{ path: 'data', contains: '"id":"{{case_id}}"' }], description: 'filtered list' }),
