@@ -19,6 +19,7 @@ import { gateMode } from '../evidence-gate.js';
 import { evidenceUrl } from '../evidence-store.js';
 import { humanDateTime } from '../lib/naming.js';
 import { deployFirstIfDown } from '../infra.js';
+import { observeHistoricalSlotRate, planRun, type PlannerCase, type RunPlan } from '../run-planner.js';
 
 const ACTIVE = ['queued', 'preparing', 'running'];
 const VERDICT_STATUSES = new Set(['passed', 'failed']);
@@ -305,6 +306,33 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   const groups = [...plan.values()];
   const totalCases = groups.reduce((n, g) => n + g.case_ids.length, 0);
   const workers = await onlineWorkers();
+
+  // --- Run-SLA planner --------------------------------------------------
+  // Compute a projected finish for this run against the 30-minute SLA, so the
+  // console (and the operator in CI) can see up-front whether the run will
+  // land in budget — and if not, how many more workers it would take.
+  const includedCaseIds = new Set(groups.flatMap((g) => g.case_ids));
+  const plannerCases: PlannerCase[] = candidates
+    .filter((c: any) => includedCaseIds.has(c.id))
+    .map((c: any) => ({
+      id: c.id,
+      key: c.key,
+      execution_method: c.execution_method || 'unknown',
+      timeout_seconds: null,
+      tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
+      sla_exempt: false,
+    }));
+  const workerMaxConcurrency = Number(process.env.WORKER_MAX_CONCURRENCY || 5);
+  const historical = await observeHistoricalSlotRate().catch(() => null);
+  const runPlan: RunPlan = await planRun(
+    {
+      cases: plannerCases,
+      availableWorkers: Math.max(1, workers),
+      workerMaxConcurrency,
+    },
+    historical,
+  );
+
   const planView = {
     application: application.key,
     environment: environment.key,
@@ -314,6 +342,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
     excluded,
     workers_online: workers,
     evidence_gate: gateMode(),
+    sla_plan: runPlan,
   };
 
   if (r.dry_run === true) return { status: 200, body: { data: planView } };
@@ -348,6 +377,8 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
           application_key: application.key,
           environment_key: environment.key,
           trigger: { reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : null, scope },
+          sla_plan: runPlan,
+          sla_run_started_at: new Date().toISOString(),
         }),
         `${what} — ${stamp}`,
       ]
@@ -457,7 +488,42 @@ export async function triggerRoutes(app: FastifyInstance) {
       .filter((r: any) => VERDICT_STATUSES.has(r.status) && !r.evidence_count)
       .slice(0, 100)
       .map((r: any) => ({ result_id: r.id, case_key: r.case_key, status: r.status }));
-    return reply.send({ data: { ...summary, problems, missing_evidence: missingEvidence } });
+    // --- SLA plan + breach audit ---------------------------------------
+    const firstMeta: any = run.executions[0]?.metadata || {};
+    const slaPlan = firstMeta.sla_plan || null;
+    const slaStartedAt = firstMeta.sla_run_started_at || summary.started_at || null;
+    let slaStatus: any = null;
+    if (slaPlan && slaStartedAt) {
+      const start = Date.parse(slaStartedAt);
+      const finish = summary.finished_at ? Date.parse(summary.finished_at) : null;
+      const nowOrFinish = finish ?? Date.now();
+      const elapsed = Math.max(0, Math.round((nowOrFinish - start) / 1000));
+      const projectedFinish = start + Number(slaPlan.projected_wall_clock_s || 0) * 1000;
+      const slaDeadline = start + Number(slaPlan.sla_target_s || 1800) * 1000;
+      const breached = finish ? finish > slaDeadline : nowOrFinish > slaDeadline;
+      let reason: string | null = null;
+      if (breached) {
+        if (summary.totals.reported < slaPlan.cases_in_sla) {
+          reason = `only ${summary.totals.reported} of ${slaPlan.cases_in_sla} SLA cases reported — workers claimed slower than the planner projected`;
+        } else if ((slaPlan.available_workers || 0) < (slaPlan.target_workers || 0)) {
+          reason = `ran with ${slaPlan.available_workers} workers; the plan called for ${slaPlan.target_workers}`;
+        } else {
+          reason = 'cases finished slower than the historical rate; the planner input needs recalibration';
+        }
+      }
+      slaStatus = {
+        plan: slaPlan,
+        started_at: new Date(start).toISOString(),
+        elapsed_s: elapsed,
+        projected_finish_at: new Date(projectedFinish).toISOString(),
+        deadline_at: new Date(slaDeadline).toISOString(),
+        on_track: finish ? finish <= slaDeadline : nowOrFinish <= slaDeadline,
+        breached,
+        breach_reason: reason,
+        actual_finish_at: finish ? new Date(finish).toISOString() : null,
+      };
+    }
+    return reply.send({ data: { ...summary, problems, missing_evidence: missingEvidence, sla: slaStatus } });
   });
 
   app.get<{ Params: { runId: string } }>('/api/v1/runs/:runId/evidence', async (req, reply) => {

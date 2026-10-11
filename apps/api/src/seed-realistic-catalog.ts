@@ -201,6 +201,10 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
       ...(c.validationRules || {}),
       ...(c.cleanupSteps?.length ? { cleanup_steps: bindCaseToPool(c.key, c.cleanupSteps) } : {}),
       ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
+      // The worker's pre-flight shape check at `apps/worker/src/worker.ts`
+      // reads this field to let `reads-baseline` / `no-cleanup-endpoint` cases
+      // bypass the var-resolution gate.
+      ...(c.atomicityNote ? { atomicity_note: c.atomicityNote } : {}),
       data_profile: c.dataProfile,
     };
     // The Test cases screen representation: objective, plain-language steps
