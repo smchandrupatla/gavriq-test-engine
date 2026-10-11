@@ -18,8 +18,9 @@ import { audit } from '../middleware/rbac.js';
 import { gateMode } from '../evidence-gate.js';
 import { evidenceUrl } from '../evidence-store.js';
 import { humanDateTime } from '../lib/naming.js';
-import { deployFirstIfDown } from '../infra.js';
+import { deployFirstIfDown, queueWorkerScale } from '../infra.js';
 import { observeHistoricalSlotRate, planRun, type PlannerCase, type RunPlan } from '../run-planner.js';
+import { clampAttempts, fixLoopDefaultMaxAttempts, startFixLoop } from '../run-fix-loop.js';
 
 const ACTIVE = ['queued', 'preparing', 'running'];
 const VERDICT_STATUSES = new Set(['passed', 'failed']);
@@ -352,6 +353,23 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
 
   const runId = `run-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
   const requestedBy = (typeof r.requested_by === 'string' && r.requested_by) || actorId || null;
+
+  // Auto-scale workers to hit the SLA. When the planner wants more workers
+  // than we have online, queue a scale_workers job the infra-agent executes
+  // via `docker compose up -d --scale`. Caps on both sides (WORKER_SCALE_MAX),
+  // one pending job at a time, no-op when the target already matches. Opt out
+  // by setting AUTO_SCALE_WORKERS=0 on the engine process.
+  if (process.env.AUTO_SCALE_WORKERS !== '0' && runPlan.target_workers > workers) {
+    try {
+      await queueWorkerScale(runPlan.target_workers, `SLA plan for ${runId} needs ${runPlan.target_workers} workers; ${workers} online.`, {
+        current: workers,
+        requested_by: requestedBy,
+      });
+    } catch (err) {
+      // Scaling is best-effort — never block the run itself.
+      console.warn(`[auto-scale] queueWorkerScale failed for ${runId}: ${(err as Error).message}`);
+    }
+  }
   const source = typeof r.trigger_source === 'string' && /^[\w-]{1,40}$/.test(r.trigger_source) ? r.trigger_source : 'api';
   const callerMeta = r.metadata && typeof r.metadata === 'object' ? r.metadata : {};
   const created: any[] = [];
@@ -386,6 +404,37 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
     created.push({ ...rows[0], suite_key: g.suite_key, cases: g.case_ids.length });
   }
 
+  // Auto-fix loop opt-in: start a per-run loop that reruns failing cases up to a
+  // configured cap. See apps/api/src/run-fix-loop.ts. A nested rerun carries
+  // auto_fix_parent but not auto_fix.enabled, so a retry never spawns its own loop.
+  const autoFixRaw = (callerMeta as any).auto_fix;
+  const autoFixOn =
+    autoFixRaw && typeof autoFixRaw === 'object' && (autoFixRaw.enabled === true || autoFixRaw.enabled === 'true');
+  let autoFixInfo: { enabled: true; max_attempts: number } | null = null;
+  if (autoFixOn) {
+    const defaultMax = await fixLoopDefaultMaxAttempts();
+    const maxAttempts = clampAttempts(autoFixRaw.max_attempts ?? defaultMax);
+    const trackedCaseIds = new Set<string>(groups.flatMap((g) => g.case_ids));
+    const caseKeys = candidates
+      .filter((c: any) => trackedCaseIds.has(c.id))
+      .map((c: any) => String(c.key))
+      .filter(Boolean);
+    try {
+      await startFixLoop({
+        run_id: runId,
+        application_key: application.key,
+        environment_key: environment.key,
+        case_keys: caseKeys,
+        max_attempts: maxAttempts,
+        requested_by: requestedBy,
+      });
+      autoFixInfo = { enabled: true, max_attempts: maxAttempts };
+    } catch (err) {
+      // Loop creation is best-effort — never block the run itself.
+      console.warn(`[auto-fix] failed to start loop for ${runId}: ${(err as Error).message}`);
+    }
+  }
+
   return {
     status: 202,
     body: {
@@ -395,6 +444,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
         executions: created,
         status_url: `/api/v1/runs/${runId}`,
         evidence_url: `/api/v1/runs/${runId}/evidence`,
+        ...(autoFixInfo ? { auto_fix: autoFixInfo } : {}),
       },
       message: `Queued ${totalCases} cases in ${created.length} executions`,
       ...(workers === 0 ? { warning: 'No worker is online — the run stays queued until one registers' } : {}),
@@ -451,7 +501,8 @@ export async function triggerRoutes(app: FastifyInstance) {
        LEFT JOIN environments env ON env.id = e.environment_id
        WHERE ${clauses.join(' AND ')}
        GROUP BY 1
-       ORDER BY min(e.created_at) DESC
+       ORDER BY (count(*) FILTER (WHERE e.status = ANY('{queued,preparing,running}'::execution_status[])) > 0) DESC,
+                min(e.created_at) DESC
        LIMIT $${params.length}`,
       params
     );

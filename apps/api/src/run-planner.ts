@@ -17,7 +17,10 @@
 import type { PoolClient } from 'pg';
 import { pool } from './db/client.js';
 
-export const DEFAULT_SLA_SECONDS = 30 * 60;
+// Target wall-clock for a run (planner budget). Default 30 minutes; the engine
+// reads SLA_SECONDS at startup so an operator can tighten the budget without
+// touching code — e.g. SLA_SECONDS=600 for a 10-minute target.
+export const DEFAULT_SLA_SECONDS = Math.max(60, Number(process.env.SLA_SECONDS) || 30 * 60);
 
 export interface PlannerCase {
   id: string;

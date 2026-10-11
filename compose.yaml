@@ -39,6 +39,12 @@ services:
       EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-0}
       SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
       TRIGGER_API_KEYS: ${TRIGGER_API_KEYS:-}
+      # Run SLA budget in seconds (planner target). 600 = 10 minutes.
+      SLA_SECONDS: ${SLA_SECONDS:-600}
+      # Upper bound on auto-scaling. Keep comfortably above the planner's
+      # target so a slow case profile has headroom.
+      WORKER_SCALE_MAX: ${WORKER_SCALE_MAX:-40}
+      AUTO_SCALE_WORKERS: ${AUTO_SCALE_WORKERS:-1}
       # Quality Insights: with a key "Refresh insights" is written by Claude, without one by the built-in rules.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       INSIGHTS_MODEL: ${INSIGHTS_MODEL:-claude-opus-5}
@@ -73,6 +79,14 @@ services:
         source: ./config
         target: /app/config
         read_only: true
+      # The fixer-agent runs on the host and edits catalog files under
+      # apps/api/src/catalog/. The engine's reseed subprocess (spawned fresh
+      # via tsx by seed-realistic-catalog.ts) reads the on-disk files, so the
+      # host and container must see the same bytes. Mount is read-write so the
+      # engine can also git-checkout to roll back a sibling-regressing patch.
+      - type: bind
+        source: ./apps/api/src/catalog
+        target: /app/apps/api/src/catalog
     healthcheck:
       test:
         [

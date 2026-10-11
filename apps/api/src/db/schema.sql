@@ -461,7 +461,7 @@ ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS preparation_prune_job_id UUID;
 --   prune     params {projects, image_prefixes, build_cache_hours, dry_run}
 CREATE TABLE IF NOT EXISTS infra_jobs (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  kind            TEXT NOT NULL CHECK (kind IN ('deploy', 'teardown', 'prune')),
+  kind            TEXT NOT NULL CHECK (kind IN ('deploy', 'teardown', 'prune', 'scale_workers')),
   environment_id  UUID REFERENCES environments(id) ON DELETE CASCADE,
   deployment_id   UUID REFERENCES deployments(id) ON DELETE SET NULL,
   status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
@@ -479,6 +479,15 @@ CREATE TABLE IF NOT EXISTS infra_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_infra_jobs_status ON infra_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_infra_jobs_env ON infra_jobs(environment_id, created_at DESC);
+-- The check constraint on `kind` grew to include 'scale_workers' for the
+-- SLA-driven auto-scaler. Older databases came up with the three-value
+-- constraint, so drop + re-add it so an existing stack doesn't reject the new
+-- kind on insert. Idempotent.
+DO $$ BEGIN
+  ALTER TABLE infra_jobs DROP CONSTRAINT IF EXISTS infra_jobs_kind_check;
+  ALTER TABLE infra_jobs ADD CONSTRAINT infra_jobs_kind_check CHECK (kind IN ('deploy','teardown','prune','scale_workers'));
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
 
 -- The agents themselves: one row per host process, kept alive by heartbeats.
 CREATE TABLE IF NOT EXISTS infra_agents (
@@ -723,6 +732,12 @@ ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_threshold_pct 
 -- keys absent here take the defaults in apps/api/src/infra.ts.
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS infra_policy JSONB NOT NULL DEFAULT '{}';
 
+-- Per-run auto-fix loop: default cap on how many attempts the engine makes before it
+-- parks the loop and logs the failing cases as defects. Each run can override this.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS auto_fix_default_max_attempts INT NOT NULL DEFAULT 2;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS fixer_agent_mode TEXT NOT NULL DEFAULT 'auto';           -- off | propose | auto
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS fixer_agent_diff_cap_lines INT NOT NULL DEFAULT 400;
+
 -- ---------------------------------------------------------------------------
 -- Quality Insights: versioned reviews of an application's test quality.
 -- snapshot holds the facts the engine computed, analysis the review written
@@ -846,6 +861,72 @@ CREATE TABLE IF NOT EXISTS defect_log_comments (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS defect_log_comments_log_idx ON defect_log_comments (defect_log_id, created_at);
+
+-- Per-run auto-fix loop (run-fix-loop.ts): one row per run_group the operator opted
+-- into "auto-fix on failure" for. The loop looks at the latest attempt's failing
+-- cases, classifies them (transient vs. real), reruns the failing subset after a
+-- redeploy where applicable, and parks after `max_attempts` tries so the remaining
+-- failures land in the defect log for a person.
+CREATE TABLE IF NOT EXISTS run_fix_loops (
+  run_id            TEXT PRIMARY KEY,                      -- the original run_group
+  application_key   TEXT NOT NULL,
+  environment_key   TEXT NOT NULL,
+  max_attempts      INT NOT NULL DEFAULT 2,
+  attempt           INT NOT NULL DEFAULT 1,                -- the attempt number of current_run_id (1 = original)
+  state             TEXT NOT NULL DEFAULT 'running',       -- running | converged | parked | stopped
+  phase             TEXT NOT NULL DEFAULT 'waiting_results', -- waiting_results | classifying | redeploying | rerunning | capped
+  current_run_id    TEXT NOT NULL,                         -- run_group of the attempt we are watching
+  case_keys         TEXT[] NOT NULL DEFAULT '{}',          -- the cases this loop is tracking (shrinks as cases pass)
+  parked_case_keys  TEXT[] NOT NULL DEFAULT '{}',          -- cases that hit the cap without going green
+  reason            TEXT,                                  -- user-visible status note
+  last_error        TEXT,
+  requested_by      TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS run_fix_loops_state_idx ON run_fix_loops (state);
+CREATE INDEX IF NOT EXISTS run_fix_loops_current_idx ON run_fix_loops (current_run_id);
+
+-- Per-attempt audit of what the loop did (rerun / redeploy / park / stop) so the
+-- console can show a step history without re-reading every attempt's run.
+ALTER TABLE run_fix_loops ADD COLUMN IF NOT EXISTS fix_actions JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ---------------------------------------------------------------------------
+-- AI test-case fixer: one row per proposed patch an off-engine fixer agent
+-- is asked to produce. Lifecycle: pending -> claimed -> applied|rejected|failed
+-- (or regressed, if the apply caused a sibling case to go red on the next
+-- attempt). See apps/api/src/run-fix-loop.ts (awaiting_patch phase) and
+-- apps/api/src/routes/fix-proposals.ts.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fix_proposals (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id            TEXT NOT NULL,                        -- the original run_group (loops.run_id)
+  attempt           INT NOT NULL,                         -- which attempt of the loop opened this
+  case_key          TEXT NOT NULL,
+  source_file       TEXT NOT NULL,                        -- apps/api/src/catalog/<file>.ts (relative to repo root)
+  status            TEXT NOT NULL DEFAULT 'pending',      -- pending|claimed|applied|rejected|failed|regressed
+  classification    TEXT,                                 -- test_broken|test_data_broken|prod_defect|unknown
+  rationale         TEXT,
+  rationale_inputs  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- the signals the agent saw (message, evidence, drift, ...)
+  before_source     TEXT,
+  after_source      TEXT,
+  diff              TEXT,
+  signature         TEXT,                                 -- hash(case_key, step_idx, status, first_assertion_line)
+  commit_sha        TEXT,
+  agent_id          TEXT,
+  reason            TEXT,                                 -- user-visible status note (why rejected / regressed / failed)
+  siblings_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,   -- {case_key: last_known_status} for the file at apply time
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  claimed_at        TIMESTAMPTZ,
+  completed_at      TIMESTAMPTZ,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Serializes claim/apply per case so two schedules firing the same minute
+-- cannot open two concurrent proposals for the same case.
+CREATE UNIQUE INDEX IF NOT EXISTS fix_proposals_pending_per_case
+  ON fix_proposals(case_key) WHERE status IN ('pending','claimed');
+CREATE INDEX IF NOT EXISTS fix_proposals_run_idx ON fix_proposals(run_id);
+CREATE INDEX IF NOT EXISTS fix_proposals_status_idx ON fix_proposals(status);
 
 -- Feedback loop (feedback-loop.ts): one row per application. The loop runs the
 -- application's suite, lets the Defect Manager file reports, requests reruns of

@@ -47,6 +47,34 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
   const scope = s.scope && typeof s.scope === 'object' ? s.scope : {};
   const runType = typeof scope.run_type === 'string' ? scope.run_type.trim() : '';
   const appVersion = typeof scope.application_version === 'string' ? scope.application_version.trim() : '';
+  // "Stop after N runs" (schedule form). Count prior fires by distinct run_group
+  // on executions tagged with this schedule_id, falling back to execution key
+  // for the legacy case-id path that writes one row per fire. When the cap is
+  // reached, pause the schedule so the poller stops picking it up.
+  const maxFires = Number((scope as any).max_fires) || 0;
+  if (maxFires > 0) {
+    const { rows: countRows } = await query<{ n: string }>(
+      `SELECT COUNT(DISTINCT COALESCE(metadata->>'run_group', key))::text AS n
+         FROM executions
+        WHERE metadata->>'schedule_id' = $1`,
+      [s.id]
+    );
+    const fired = Number(countRows[0]?.n || 0);
+    if (fired >= maxFires) {
+      await query('UPDATE schedules SET enabled = false WHERE id = $1', [s.id]);
+      return { status: 409, body: { error: `Schedule "${s.name}" has reached its ${maxFires}-run limit; paused.`, code: 'max_fires_reached' } };
+    }
+  }
+  // Auto-fix opt-in on a schedule (scope.auto_fix on the form) flows through to
+  // queueRun via metadata.auto_fix, which is what opens the per-run fix loop
+  // (apps/api/src/run-fix-loop.ts). Each firing of the schedule opens its own
+  // loop, so a nightly "retry twice on failure" schedule yields one fresh loop
+  // per night rather than reusing yesterday's.
+  const autoFix = (scope as any).auto_fix;
+  const autoFixMeta =
+    autoFix && typeof autoFix === 'object' && (autoFix.enabled === true || autoFix.enabled === 'true')
+      ? { auto_fix: { enabled: true, max_attempts: Number(autoFix.max_attempts) || undefined } }
+      : {};
   const scheduleMeta: Record<string, unknown> = {
     schedule_id: s.id,
     schedule_name: s.name,
@@ -54,6 +82,7 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
     ...(opts.metadata || {}),
     ...(appVersion ? { application_version: appVersion } : {}),
     ...(runType ? { run_type: runType } : {}),
+    ...autoFixMeta,
   };
   const reason = opts.event ? `${s.name} (${opts.event})` : s.name;
 

@@ -54,8 +54,18 @@ const state={
   view:'overview',typeId:null,sitGroupId:null,runId:null,suiteId:null,
   // Application under test: the console is generic — every data call is scoped to appKey.
   appKey:null,applications:[],
-  // One lean summary call; case bodies, run results, evidence and history load on demand.
+  // Lazy-loading contract: the summary call never carries case rows. state.cases
+  // starts empty and grows as a sparse CACHE from any /ui/cases response. Views
+  // that need cases (type, suite, method, tag, search, scope picker) fetch what
+  // they need on demand. state.loaded flips true once the lean summary (envs +
+  // application + suites + counts) has landed — enough to render the chrome.
   loaded:false,cases:[],suites:[],environments:[],application:null,typesFromDb:null,build:null,stats:{},idx:null,
+  // Per-type status rollup for Overview tiles + sidebar tone dots. Loaded from
+  // /ui/overview-stats on Overview + whenever the sidebar needs tone colours.
+  overviewStats:null,
+  // Per-view case lists cached by scope key (method/tag/search) so a return
+  // navigation to the same scope paints from cache without re-fetching.
+  viewCases:new Map(),
   // Live poll (/api/v1/ui/live)
   liveLoaded:false,executions:[],workers:[],since:null,catalogSig:null,liveSig:'',skew:0,lastPoll:null,
   // UI
@@ -80,6 +90,8 @@ const state={
   methodName:null,tagName:null,
   // Configuration page (run retention)
   settings:null,
+  // Remote-execution triggers (read-only on the Settings page; source is config/remote-triggers.json)
+  remoteTriggers:null,
   // Catalog coverage audit (plain-language fields missing/thin): populated by loadCoverage.
   coverage:null,
   // Test Runs page: full paginated/filterable history (separate from the live poll's capped tail)
@@ -101,6 +113,12 @@ const state={
   // Schedule runs: list (null = not loaded) + the create form. "What to run" is a scope, not a saved suite.
   schedules:null,schedFormOpen:false,
   schedForm:{name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:'',when:'once',at:'',cron:'0 2 * * *'},
+  // Fix log: AI-fixer proposals (null = not loaded).
+  fixProposals:null,
+  // Overview run-bar auto-fix opt-in (persisted in localStorage). Matches the
+  // testbench S.autoFix/S.autoFixAttempts pair so the same preference applies
+  // regardless of where the operator kicks a run off.
+  autoFix:false,autoFixMax:2,
   // Reports: filter form + the last preview
   reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
   report:{data:null,loading:false,error:null,busy:''},
@@ -171,26 +189,53 @@ function suiteHref(s){
   for(const t of typeList()){if(suitesForType(t.id).some(x=>x.id===s.id))return '#/type/'+encodeURIComponent(t.id)+'/suite/'+s.id;}
   return '#/type/other';
 }
+// Lazy index: suiteById comes from the summary (small). caseById + the by-type
+// / by-suite / by-sit-group maps grow sparsely as /ui/cases responses hydrate
+// them. A fresh indexSummary preserves whatever cache we already built so the
+// live poll's incremental status updates keep hitting known cases.
 function indexSummary(){
-  const caseById=new Map(state.cases.map(c=>[c.id,c]));
   const suiteById=new Map(state.suites.map(s=>[s.id,s]));
-  const casesBySuite=new Map(),casesByType=new Map();
+  const prev=state.idx||{};
+  const caseById=prev.caseById instanceof Map?prev.caseById:new Map();
+  const casesBySuite=prev.casesBySuite instanceof Map?prev.casesBySuite:new Map();
+  const casesByType=prev.casesByType instanceof Map?prev.casesByType:new Map();
+  const sitGroupSuites=new Map(),sitGroupCases=prev.sitGroupCases instanceof Map?prev.sitGroupCases:new Map();
+  for(const g of SIT_GROUPS)sitGroupSuites.set(g.id,sitSuitesInGroup(g));
+  state.idx={caseById,suiteById,casesBySuite,casesByType,sitGroupSuites,sitGroupCases};
+}
+// Rebuild the per-type / per-suite / per-SIT-group buckets from state.cases
+// (which is the sparse cache of every case the user has pulled). Called when a
+// /ui/cases response hydrates fresh rows, so views that iterate casesForType etc.
+// see every case we have in memory.
+function reindexCases(){
+  if(!state.idx)indexSummary();
+  const idx=state.idx;
   const types=typeList().some(t=>t.id==='selenium-baseline')?typeList():typeList().concat(TYPES.filter(t=>t.id==='selenium-baseline'));
+  const caseById=new Map(state.cases.map(c=>[c.id,c]));
+  const casesBySuite=new Map(),casesByType=new Map();
   for(const c of state.cases){
     for(const sid of c.suite_ids||[]){if(!casesBySuite.has(sid))casesBySuite.set(sid,[]);casesBySuite.get(sid).push(c);}
-    const t=typeOfCase(c,types,suiteById);
+    const t=typeOfCase(c,types,idx.suiteById);
     if(!casesByType.has(t))casesByType.set(t,[]);
     casesByType.get(t).push(c);
   }
-  const sitGroupSuites=new Map(),sitGroupCases=new Map();
+  const sitGroupCases=new Map();
   for(const g of SIT_GROUPS){
-    const suites=sitSuitesInGroup(g);
+    const suites=idx.sitGroupSuites.get(g.id)||sitSuitesInGroup(g);
     const seen=new Map();
     for(const s of suites)for(const c of casesBySuite.get(s.id)||[])seen.set(c.id,c);
-    sitGroupSuites.set(g.id,suites);
     sitGroupCases.set(g.id,[...seen.values()]);
   }
-  state.idx={caseById,suiteById,casesBySuite,casesByType,sitGroupSuites,sitGroupCases};
+  state.idx={...idx,caseById,casesBySuite,casesByType,sitGroupCases};
+}
+// Fold a /ui/cases page response into the sparse case cache so iteration
+// helpers (casesForType, casesInSuite, sitGroupCases) see them.
+function hydrateCases(rows){
+  if(!rows||!rows.length)return;
+  const byId=new Map(state.cases.map(c=>[c.id,c]));
+  for(const r of rows)byId.set(r.id,r);
+  state.cases=[...byId.values()];
+  reindexCases();
 }
 const casesForType=id=>(state.idx&&state.idx.casesByType.get(id))||[];
 const casesInSuite=id=>(state.idx&&state.idx.casesBySuite.get(id))||[];
@@ -234,10 +279,9 @@ async function loadApplications(){
   renderAppSelect();
 }
 // Catalog-counts loads before summary so the sidebar + Overview tiles have
-// numbers the moment the first paint happens, instead of waiting for the full
-// summary (which, with 12k+ cases, downloads in the megabytes). The summary
-// still populates state.cases afterwards for the pages that iterate individual
-// cases.
+// numbers the moment the first paint happens. It returns per-type and per-suite
+// counts in a payload a few KB large regardless of catalog size — this is one
+// of the two cheap boot calls (the other is /ui/summary, now equally lean).
 async function loadCatalogCounts(){
   try{
     const d=(await api('/api/v1/ui/catalog-counts'+appQuery())).data||{};
@@ -252,14 +296,37 @@ async function loadSummary(retry){
   renderEnvSelect();
   // The environment is only known once the list arrives (first visit, or a saved one that was retired).
   if(state.envId!==sent&&!retry)return loadSummary(true);
-  state.cases=d.cases||[];state.suites=d.suites||[];
-  state.application=d.application||null;state.build=d.build||null;state.stats=d.stats||{};
+  // state.cases is lazily populated — summary no longer carries case rows.
+  // Keep whatever has been cached from earlier /ui/cases responses on the
+  // same application, so a return to a visited view paints instantly.
+  if(state.appKey!==state._lastSummaryApp){state.cases=[];state.viewCases.clear();state._lastSummaryApp=state.appKey;}
+  state.suites=d.suites||[];
+  state.application=d.application||null;
+  // build + 7-day stats now live on /ui/overview-stats so a user who only
+  // opens Test cases or Runs never pays for them. Overview triggers a load.
   const meta=d.application&&d.application.types;
   state.typesFromDb=Array.isArray(meta)&&meta.length?meta.map(t=>({id:t.key,title:t.label||t.key,summary:t.subtitle||'',category:t.category==='qc'?'qc':'qa'})):null;
   if(d.now)state.since=d.now;
   state.loaded=true;state.buildRows=null;
   indexSummary();
   markHistoryStale();
+}
+// Overview-stats: per-type status rollup + build summary + 7-day run stats.
+// Only loaded when the user opens Overview (or the sidebar needs tone colour
+// for its type items). A single aggregated query — kilobytes, not megabytes.
+async function loadOverviewStats(force){
+  if(!force&&state.overviewStats&&state.overviewStats._loadedForApp===state.appKey&&state.overviewStats._loadedForEnv===state.envId)return;
+  if(state.overviewStats&&state.overviewStats._loading)return;
+  state.overviewStats={...(state.overviewStats||{}),_loading:true};
+  try{
+    const d=(await api('/api/v1/ui/overview-stats'+appQuery()+envQuery())).data||{};
+    state.overviewStats={by_type:d.by_type||{},_loadedForApp:state.appKey,_loadedForEnv:state.envId,_loading:false};
+    state.build=d.build||null;
+    state.stats=d.stats||{};
+  }catch(e){state.overviewStats={...(state.overviewStats||{}),_loading:false,error:e.message};}
+  // Overview and sidebar depend on this rollup for tile stats and tone colour.
+  if(state.view==='overview'||state.view==='home'){renderSideNav();renderCurrentView();}
+  else renderSideNav();
 }
 let polling=false,pollTimer=null;
 async function pollLive(){
@@ -327,7 +394,7 @@ async function applyLive(d){
   // Form screens show no live data; re-rendering them on a poll would wipe what is being typed.
   if(dirty){renderSideNav();if(!FORM_VIEWS.has(state.view))renderCurrentView();}
 }
-const FORM_VIEWS=new Set(['config-retention','config-apps','config-envs','schedules','reports','case','test-cases','test-case-form','test-suites','test-suite-form']);
+const FORM_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-remote-triggers','config-apps','config-envs','schedules','reports','case','test-cases','test-case-form','test-suites','test-suite-form']);
 async function loadRun(id){
   try{
     const [run,ev]=await Promise.all([
@@ -350,9 +417,14 @@ async function loadBuildRows(){
   try{state.buildRows=(await api('/api/v1/build-results'+appQuery())).data||[];}catch{state.buildRows=[];}
   if(state.view==='builds')renderCurrentView();
 }
+const SETTINGS_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix']);
 async function loadSettings(){
   try{state.settings=(await api('/api/v1/settings')).data;}catch(e){state.settings={error:e.message};}
-  if(state.view==='config-retention')renderCurrentView();
+  if(SETTINGS_VIEWS.has(state.view))renderCurrentView();
+}
+async function loadRemoteTriggers(){
+  try{state.remoteTriggers=(await api('/api/v1/webhooks/git')).data;}catch(e){state.remoteTriggers={error:e.message};}
+  if(state.view==='config-remote-triggers')renderCurrentView();
 }
 const RUNS_PAGE=25;
 function runsQuery(){
@@ -389,15 +461,31 @@ async function loadHistory(tile){
   state.history.set(tile.key,{...(prev||{}),loading:true});
   let next;
   try{
-    const res=tile.kind==='build'
-      ?await api('/api/v1/ui/build-history'+appQuery()+'&limit=30')
-      :await postJson('/api/v1/ui/history',{case_ids:(tile.cases||[]).map(c=>c.id),limit:30,environment_id:state.envId});
+    let res;
+    if(tile.kind==='build')res=await api('/api/v1/ui/build-history'+appQuery()+'&limit=30');
+    else if(tile.all)res=await postJson('/api/v1/ui/history',{all:true,application_key:state.appKey||'sand-bench',limit:30,environment_id:state.envId});
+    else res=await postJson('/api/v1/ui/history',{case_ids:(tile.cases||[]).map(c=>c.id),limit:30,environment_id:state.envId});
     next={data:res.data};
   }catch(e){next={data:prev&&prev.data,error:e.message};}
   state.history.set(tile.key,next);
   if(state.panels.has(tile.key))renderCurrentView();
 }
 async function loadHealth(){try{const h=await api('/health');el('healthPill').textContent='engine ok · v'+(h.version||'?');el('healthPill').className='pill ok';}catch(e){el('healthPill').textContent='engine unreachable';el('healthPill').className='pill bad';}}
+// Lazy script bundle loader: fetches a sibling script once, on demand. Used
+// for insights.js so its 33 KB stays off the first-paint path for users who
+// never open #/insights.
+const _bundles=new Map();
+function loadBundle(src){
+  if(_bundles.has(src))return _bundles.get(src);
+  const p=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.async=true;s.onload=()=>resolve();s.onerror=()=>reject(new Error('Could not load '+src));document.head.appendChild(s);});
+  _bundles.set(src,p);
+  return p;
+}
+async function loadInsightsBundle(){
+  try{await loadBundle('/catalog/insights.js');}
+  catch(e){el('content').innerHTML=`<div class="card empty">Could not load Quality insights (${esc(e.message)}). <button class="btn" data-action="retry-insights">Retry</button></div>`;return;}
+  if(state.view==='insights'&&typeof renderInsightsView==='function')renderInsightsView();
+}
 
 // ---------------------------------------------------------------------------
 // Live state helpers
@@ -414,12 +502,36 @@ function liveCaseState(){
   }
   return {inRun,current};
 }
+// Compute a tile's status rollup.
+//   tile.rollup — authoritative pre-aggregated numbers from /ui/overview-stats.
+//                 Preferred whenever present (lazy-loading contract).
+//   tile.cases  — a case array; used only when no rollup is provided (e.g. a
+//                 saved-selection scope tile that has no server-side identity).
+//   tile.total  — fallback count (from /ui/catalog-counts) when neither the
+//                 rollup nor the cases array is available yet.
 function tileStats(tile){
   if(tile.kind==='build'){
     const b=state.build;
     if(!b)return {total:0,passed:0,failed:0,other:0,never:0,lastAt:null,running:null,tone:'never'};
     const other=Math.max(0,b.total-b.passed-b.failed);
     return {total:b.total,passed:b.passed,failed:b.failed,other,never:0,lastAt:b.reported_at,running:null,tone:b.failed?'fail':b.passed?'pass':other?'warn':'never'};
+  }
+  if(tile.rollup){
+    const r=tile.rollup;
+    const total=Number(r.total||0),passed=Number(r.passed||0),failed=Number(r.failed||0),other=Number(r.other||0),never=Number(r.never||0);
+    const lastAt=r.lastAt||null;
+    let running=null;
+    // Running state is still client-side (live poll): any active execution
+    // whose case id is in the rollup's scope shows the running chip. We don't
+    // have per-type case id lists on the client in lazy mode — a tile's
+    // 'running' flag therefore falls back to any active run of the same tile
+    // scope. For now we only light the chip on tiles whose cases array has
+    // been hydrated; tiles that never loaded case rows simply don't show it.
+    if(tile.cases&&tile.cases.length){
+      for(const c of tile.cases){const r2=state.live.inRun.get(c.id);if(r2==='running'||(r2&&!running))running=r2;}
+    }
+    const tone=!total?'empty':failed?'fail':passed?'pass':other?'warn':'never';
+    return {total,passed,failed,other,never,lastAt,running,tone};
   }
   const cases=tile.cases||[];
   let passed=0,failed=0,other=0,never=0,lastAt=null,running=null;
@@ -430,12 +542,7 @@ function tileStats(tile){
     const r=state.live.inRun.get(c.id);
     if(r==='running'||(r&&!running))running=r;
   }
-  // The total prefers the counts-endpoint number so a tile shows the real size
-  // even before /ui/summary finishes streaming the per-case rows. Once summary
-  // lands, cases.length catches up and the two agree.
   const total=Number.isFinite(tile.total)?Math.max(Number(tile.total),cases.length):cases.length;
-  // When summary has not arrived (we have a total but no cases to classify),
-  // 'never' absorbs the unknown ones so the tone stays accurate.
   if(!cases.length&&total>0){never=total;}
   const tone=!total?'empty':failed?'fail':passed?'pass':other?'warn':'never';
   return {total,passed,failed,other,never,lastAt,running,tone};
@@ -493,6 +600,27 @@ function tileGroupHtml(group){
   const open=group.tiles.find(t=>t.key===state.tile);
   return `<section class="tile-group"><div class="group-head"><h2>${esc(group.title)}</h2>${group.sub?`<span class="muted small">${esc(group.sub)}</span>`:''}</div><div class="stiles">${tiles}</div>${open?historyPanelHtml(open):''}</section>`;
 }
+// Live rows for the tile's history panel — list every active execution whose
+// cases overlap with this tile and show "now running <case>". Empty for a tile
+// with no live overlap, so quiet tiles stay quiet.
+function tileLiveCasesHtml(tile){
+  const live=activeRuns();
+  if(!live.length)return '';
+  const tileIds=tile.all||tile.kind==='build'?null:new Set((tile.cases||[]).map(c=>c.id));
+  const matches=live.filter(e=>{
+    if(!tileIds)return true;
+    const ids=e.test_case_ids||[];
+    return ids.some(id=>tileIds.has(id));
+  });
+  if(!matches.length)return '';
+  const rows=matches.map(e=>{
+    const cur=e.current_case_id&&state.idx&&state.idx.caseById.get(e.current_case_id);
+    const total=Math.max(e.total||0,e.done||0);
+    const now=e.status==='running'?(cur?`now running <b>${esc(cur.name)}</b>`:'finishing up'):e.status==='queued'?'queued':'preparing';
+    return `<li style="margin:4px 0"><a href="#/run/${esc(e.id)}" style="text-decoration:none"><b>${esc(e.name||e.key)}</b></a> · ${now} · ${e.done||0}/${total} done${e.failed?` · <span style="color:var(--red)">${e.failed} failed</span>`:''}</li>`;
+  }).join('');
+  return `<div class="hp-live" style="padding:10px 14px;background:var(--panel2);border-bottom:1px solid var(--line)"><h3 style="margin:0 0 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Running now <span class="pulse running" style="display:inline-block;margin-left:4px"></span></h3><ul style="margin:0;padding-left:20px;list-style:disc">${rows}</ul></div>`;
+}
 function historyPanelHtml(tile,opts){
   const fixed=opts&&opts.fixed;
   state.tiles.set(tile.key,tile);state.panels.add(tile.key);
@@ -530,8 +658,10 @@ function historyPanelHtml(tile,opts){
   const details=fixed?'':tile.inline?'<button class="btn" data-action="scroll-details">View cases ↓</button>':tile.href?`<a class="btn" href="${esc(tile.href)}">Open details →</a>`:'';
   const run=isBuild?'':`<button class="btn primary" data-action="run-tile" data-key="${esc(tile.key)}"${s.total?'':' disabled'}>Run ${plural(s.total,'case')}</button>`;
   const close=fixed?'':'<button class="icon-btn" style="display:inline-block" data-action="close-tile" aria-label="Close history">✕</button>';
+  const liveRows=tileLiveCasesHtml(tile);
   return `<div class="card hp tone-${s.tone}" id="${fixed?'hp-'+esc(tile.key):'hp'}">
     <div class="card-head"><div><h2><span class="chip chip-${s.tone}"><span aria-hidden="true">${TONES[s.tone].icon}</span>${TONES[s.tone].label}</span> ${esc(tile.title)} · history</h2>${tile.sub?`<div class="muted small">${esc(tile.sub)}</div>`:''}</div><div class="hp-actions">${run}${details}${close}</div></div>
+    ${liveRows}
     <div class="hp-body${h.loading&&h.data?' refreshing':''}">${body}</div></div>`;
 }
 function topFailingHtml(rows,isBuild){
@@ -596,28 +726,46 @@ function navItem(view,id,label,count,dot,cls){
   const active=(state.view===view&&(view==='type'?state.typeId===id:view==='sit'?state.sitGroupId===id:true))||(view==='history'&&state.view==='run');
   return '<button class="nav-item '+(active?(cls||'active'):'')+'" data-view="'+view+'" data-id="'+esc(id||'')+'">'+(dot!=null?'<span class="nav-dot '+dot+'"></span>':'')+'<span class="nav-label">'+esc(label)+'</span>'+(count!=null?'<span class="nav-count">'+count+'</span>':'')+'</button>';
 }
-const toneDot=cases=>TONES[tileStats({cases}).tone].dot;
-// Collapsible left-nav sections. The long test-type lists start collapsed so the menu is short;
-// the user's open/closed choices are remembered. A section with the active view is forced open.
-const NAV_LS='te_nav_collapsed';
-let navCollapsed=null;
-function navCollapsedSet(){
-  if(navCollapsed)return navCollapsed;
-  try{const s=JSON.parse(localStorage.getItem(NAV_LS)||'null');navCollapsed=new Set(Array.isArray(s)?s:['qa','qc','sit','baseline']);}
-  catch(e){navCollapsed=new Set(['qa','qc','sit','baseline']);}
-  return navCollapsed;
+// Tone dot for sidebar/nav items. In lazy mode we don't hold the full case
+// list for a type, so the primary input is the rollup from /ui/overview-stats.
+// Legacy call sites that still pass a case array fall through to the old path.
+function toneDot(arg){
+  if(arg&&typeof arg==='object'&&!Array.isArray(arg)&&arg.rollup){
+    return TONES[tileStats({rollup:arg.rollup}).tone].dot;
+  }
+  return TONES[tileStats({cases:arg||[]}).tone].dot;
 }
+const toneDotForType=id=>{
+  const r=state.overviewStats&&state.overviewStats.by_type&&state.overviewStats.by_type[id];
+  if(r)return TONES[tileStats({rollup:r}).tone].dot;
+  // Rollup not loaded yet (user hasn't opened Overview). Fall back to the
+  // sparse cache so sidebar still shows a reasonable colour once some cases
+  // have been pulled; otherwise muted.
+  const cs=casesForType(id);
+  return cs.length?toneDot(cs):'';
+};
+// Collapsible left-nav sections — accordion. Only one section is open at a
+// time; a page refresh starts with every section collapsed and the user picks
+// one. The in-memory `navOpenId` holds the user's explicit choice for this
+// browser-tab session; the section containing the active view is forced open
+// only until the user clicks any other section (then that one wins, and the
+// view-based auto-open is only used again on the next full page load).
+let navOpenId=null;
+let navUserPicked=false;
 function toggleNavSection(id){
-  const s=navCollapsedSet();
-  if(s.has(id))s.delete(id);else s.add(id);
-  try{localStorage.setItem(NAV_LS,JSON.stringify([...s]));}catch(e){}
+  // Click an open section → collapse everything. Click a closed section →
+  // open just that one.
+  if(navOpenId===id){navOpenId=null;navUserPicked=true;}
+  else{navOpenId=id;navUserPicked=true;}
   renderSideNav();
 }
 function navSection(id,label,items,forceOpen){
-  // On the Home view every section is collapsed by default — the home board
-  // is the point of the landing, the sidebar is just a map of what's inside.
+  // On the Home view every section is collapsed; the home board is the point
+  // of the landing. Otherwise: the user's explicit pick wins; before any pick,
+  // the section containing the active view opens by default.
   const atHome=state.view==='home';
-  const col=atHome||(!forceOpen&&navCollapsedSet().has(id));
+  const open=!atHome&&(navOpenId===id||(!navUserPicked&&navOpenId===null&&forceOpen));
+  const col=!open;
   return '<button class="nav-sec'+(col?' collapsed':'')+'" data-sec="'+id+'" aria-expanded="'+(!col)+'"><span class="nav-caret">'+(col?'▸':'▾')+'</span><span class="nav-label">'+esc(label)+'</span></button>'
     +'<div class="nav-group"'+(col?' hidden':'')+'>'+items+'</div>';
 }
@@ -631,35 +779,48 @@ function renderSideNav(){
   const tl=typeList();
   const live=activeRuns().filter(e=>!isStalled(e)).length;
   const V=state.view;
-  // Tests: everything about test content (cases, suites, coverage).
+  // Tests: everything about test content (cases, suites).
   // "New test case" is now a + New button on the Test cases page.
+  // "Catalog coverage" and "In-container build" moved under Quality assurance.
   let h=navSection('tests','Tests',
     navItem('test-cases',null,'Test cases',totalCases()||null)+
     navItem('test-suites',null,'Test suites',state.suites.length||null)+
-    navItem('test-suite-form',null,'New test suite')+
-    navItem('catalog-coverage',null,'Catalog coverage',state.coverage?state.coverage.with_findings||null:null,state.coverage&&state.coverage.by_severity.high?'red':state.coverage&&state.coverage.by_severity.medium?'amber':null),
-    ['test-cases','test-case-form','test-suites','test-suite-form','catalog-coverage'].includes(V));
-  // Runs: everything about running cases (overview, history, schedules, builds).
+    navItem('test-suite-form',null,'New test suite'),
+    ['test-cases','test-case-form','test-suites','test-suite-form'].includes(V));
+  // Runs: everything about running cases (overview, history, schedules).
   h+=navSection('runs','Runs',
     navItem('overview',null,'Overview')+
-    navItem('history',null,live?`Test runs · ${live} live`:'Test runs',state.executions.length||null,live?'blue pulse-dot':null)+
-    navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null)+
-    navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot),
-    ['overview','history','run','schedules','builds'].includes(V));
+    navItem('runs-running',null,live?`Running now · ${live}`:'Running now',live||null,live?'blue pulse-dot':null)+
+    navItem('history',null,'Test runs',state.executions.length||null)+
+    navItem('runs-all',null,'All runs')+
+    navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null),
+    ['overview','runs-running','history','run','runs-all','schedules'].includes(V));
+  // Defects: fix proposals + the per-run defect log + the cross-app dashboard.
+  h+=navSection('defects','Defects',
+    navItem('fixes',null,'Fix log',Array.isArray(state.fixProposals)?state.fixProposals.filter(p=>p.status==='pending'||p.status==='claimed').length||null:null)+
+    '<a class="nav-item" href="/defect-log" style="text-decoration:none"><span class="nav-label">Defect log</span></a>'+
+    '<a class="nav-item" href="/defect-log#dashboard" style="text-decoration:none"><span class="nav-label">Defect dashboard</span></a>',
+    ['fixes'].includes(V));
   // Reports: reports, insights and the defect log (defects are the engine's "findings" report).
   h+=navSection('reports','Reports',
     navItem('reports',null,'Reports')+
-    navItem('insights',null,'Quality insights')+
-    '<a class="nav-item" href="/defect-log" style="text-decoration:none"><span class="nav-label">Defect log</span></a>'+
-    '<a class="nav-item" href="/defect-log#dashboard" style="text-decoration:none"><span class="nav-label">Defect dashboard</span></a>',
+    navItem('insights',null,'Quality insights'),
     ['reports','insights'].includes(V));
-  // Settings: retention, applications, environments, infrastructure.
+  // Settings: retention, applications, environments, infrastructure. The run-
+  // configuration items (retention / timeouts / per-type retention / circuit
+  // breaker / auto-fix / remote triggers) are separate submenu entries so each
+  // card has its own page and its own Save button.
   h+=navSection('settings','Settings',
     navItem('config-retention',null,'Run retention')+
+    navItem('config-timeouts',null,'Test case run timeout')+
+    navItem('config-per-type-retention',null,'Past runs retained per test type')+
+    navItem('config-circuit-breaker',null,'Failure circuit breaker')+
+    navItem('config-auto-fix',null,'Auto-fix & fixer agent')+
+    navItem('config-remote-triggers',null,'Remote execution triggers')+
     navItem('config-apps',null,'Applications',state.applications.length||null)+
     navItem('config-envs',null,'Environments',state.environments.length||null)+
     navItem('config-infra',null,'Infrastructure',null,infraNavDot()),
-    ['config-retention','config-apps','config-envs','config-infra'].includes(V));
+    ['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-remote-triggers','config-apps','config-envs','config-infra'].includes(V));
   // The engine's own self-test cases are a single body of QC — they verify
   // the engine itself. Collapse every one of them under Quality control
   // regardless of their test_type's declared category. Any other application
@@ -668,32 +829,48 @@ function renderSideNav(){
   // Sidebar counts come from the fast counts endpoint when it has arrived so
   // the number is right the moment the sidebar paints — toneDot still looks at
   // the full case list for its colour because that needs per-case status.
-  const typeItem=t=>{const cs=casesForType(t.id);return navItem('type',t.id,t.title,countForType(t.id),toneDot(cs));};
-  const qaItems=engineOnly?'':tl.filter(t=>t.category==='qa').map(typeItem).join('');
+  const typeItem=t=>navItem('type',t.id,t.title,countForType(t.id),toneDotForType(t.id));
+  const qaTypeItems=engineOnly?'':tl.filter(t=>t.category==='qa').map(typeItem).join('');
   const qcTypeItems=engineOnly?tl.map(typeItem).join(''):tl.filter(t=>t.category!=='qa').map(typeItem).join('');
-  if(qaItems)h+=navSection('qa',CAT.qa,qaItems);
+  // Quality assurance also hosts the two cross-cutting QA views: in-container builds
+  // (unit / commit-gate / release-gate tests the app repo reports to the engine) and
+  // the plain-language catalog coverage audit. They used to live under Runs / Tests;
+  // the user asked for them to be grouped with QA so there is one place to see
+  // everything that reports on test quality for the application.
+  const qaCrossCutting=
+    navItem('builds',null,'In-container build',state.build?state.build.total:null,TONES[tileStats({kind:'build'}).tone].dot)+
+    navItem('catalog-coverage',null,'Catalog coverage',state.coverage?state.coverage.with_findings||null:null,state.coverage&&state.coverage.by_severity.high?'red':state.coverage&&state.coverage.by_severity.medium?'amber':null);
+  const qaItems=qaCrossCutting+qaTypeItems;
+  h+=navSection('qa',CAT.qa,qaItems,['builds','catalog-coverage'].includes(V));
   // SIT console lives under Quality control. The entries are always shown — an empty list
   // when nothing is seeded is fine; the entry explains what is here.
-  const sitAllN=sitCases().length;
+  // Lazy mode: use the per-type rollup count for "All SIT cases"; per-SIT-group
+  // counts fall back to the local sparse cache (unknown until the user opens
+  // Overview or the SIT page, in which case the SIT group tiles have been
+  // populated by their respective fetches).
+  const sitAllN=countForType('sit');
   const sitItems=navItem('sit-all',null,'All SIT cases',sitAllN||null,sitAllN?'blue':null,'active-sit')+
     SIT_GROUPS.map(g=>{const cs=(state.idx&&state.idx.sitGroupCases.get(g.id))||[];return navItem('sit',g.id,g.title,cs.length||null,cs.length?toneDot(cs):null,'active-sit');}).join('');
   h+=navSection('qc',CAT.qc,qcTypeItems+sitItems,V==='sit'||V==='sit-all');
-  if(!tl.some(t=>t.id==='selenium-baseline')){const bl=casesForType('selenium-baseline');h+=navSection('baseline','Selenium Baseline',navItem('baseline',null,'Selenium Baseline',bl.length,toneDot(bl)),V==='baseline');}
+  if(!tl.some(t=>t.id==='selenium-baseline'))h+=navSection('baseline','Selenium Baseline',navItem('baseline',null,'Selenium Baseline',countForType('selenium-baseline')||null,toneDotForType('selenium-baseline')),V==='baseline');
   el('sideNav').innerHTML=h;
 }
 function overviewGroups(){
   const tl=typeList();
-  // Each tile carries both the array (used for per-case status breakdown once
-  // /ui/summary has arrived) and a fast total from the counts endpoint — the
-  // total shows up on first paint even before summary loads.
-  const typeTile=t=>({key:'type:'+t.id,title:t.title,sub:t.summary,cases:casesForType(t.id),total:countForType(t.id),href:'#/type/'+encodeURIComponent(t.id)});
+  // Lazy-loading contract: Overview tiles paint from the per-type rollup
+  // (/ui/overview-stats) + the counts endpoint. The sparse cache is still
+  // threaded through so the live-run chip can light tiles whose cases have
+  // been pulled by another view.
+  const rollupOf=id=>state.overviewStats&&state.overviewStats.by_type&&state.overviewStats.by_type[id];
+  const typeTile=t=>({key:'type:'+t.id,title:t.title,sub:t.summary,cases:casesForType(t.id),rollup:rollupOf(t.id),total:countForType(t.id),href:'#/type/'+encodeURIComponent(t.id)});
   const more=[];
-  if(!tl.some(t=>t.id==='selenium-baseline'))more.push({key:'baseline',title:'Selenium Baseline',sub:'Selenium GUI automation baseline checks.',cases:casesForType('selenium-baseline'),total:countForType('selenium-baseline'),href:'#/baseline'});
+  if(!tl.some(t=>t.id==='selenium-baseline'))more.push({key:'baseline',title:'Selenium Baseline',sub:'Selenium GUI automation baseline checks.',cases:casesForType('selenium-baseline'),rollup:rollupOf('selenium-baseline'),total:countForType('selenium-baseline'),href:'#/baseline'});
   more.push({key:'build',kind:'build',title:'In-container build',sub:'Reported by CI; not re-run by the engine.',href:'#/builds'});
   const otherCount=countForType('other');
-  if(otherCount>0)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:casesForType('other'),total:otherCount,href:'#/type/other'});
+  if(otherCount>0)more.push({key:'type:other',title:'Uncategorised',sub:'Cases with no type tag or typed suite.',cases:casesForType('other'),rollup:rollupOf('other'),total:otherCount,href:'#/type/other'});
   const groups=[];
-  if(sitCases().length)groups.push({title:'SIT console',sub:'Post-deploy packs by area',tiles:SIT_GROUPS.map(g=>({key:'sit:'+g.id,title:g.title,sub:g.summary,cases:(state.idx&&state.idx.sitGroupCases.get(g.id))||[],href:'#/sit/'+g.id,accent:'sit'}))});
+  const sitTotal=countForType('sit');
+  if(sitTotal>0)groups.push({title:'SIT console',sub:'Post-deploy packs by area',tiles:SIT_GROUPS.map(g=>({key:'sit:'+g.id,title:g.title,sub:g.summary,cases:(state.idx&&state.idx.sitGroupCases.get(g.id))||[],href:'#/sit/'+g.id,accent:'sit'}))});
   // Engine self-test cases all sit under QC on the Overview tile board, same as the sidebar.
   const engineOnly=state.appKey==='gavriq-test-engine';
   if(engineOnly){
@@ -744,7 +921,7 @@ function overviewTabsHtml(live){
 // current deploy→run→teardown stage, whichever tab they are on. Clicking a
 // stage opens its live log or per-case progress right under the bar.
 function overviewActionsAndStatusHtml({runAllCount}={}){
-  const all=runAllCount==null?tileStats({cases:state.cases}).total:runAllCount;
+  const all=runAllCount==null?totalCases():runAllCount;
   const live=activeRuns();
   const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
   const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null,ref=(managed&&env.infra.default_ref)||'main';
@@ -775,7 +952,7 @@ function overviewActionsAndStatusHtml({runAllCount}={}){
   const schedBtn=onTypes
     ? `<button class="btn" data-action="schedule" data-what="types"${state.selectedTypes&&state.selectedTypes.size?'':' disabled'}>Schedule…</button>`
     : `<button class="btn" data-action="schedule" data-what="all"${all?'':' disabled'}>Schedule…</button>`;
-  const head=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions">${runBtn}${schedBtn}${cancelBtn}<select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds"${cyc?' disabled':''}>${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_run_teardown_loop','Loop: deploy, run, tear down ×N','Deploy, run everything, tear down — then repeat the whole thing N times. Cancel any time.')}${opt('clean_cycle','Clean cycle: teardown + prune, then deploy–run–teardown ×N','Starts clean: tears down whatever is up, prunes Docker (stopped containers, dangling images, build cache), then runs the normal deploy–run–teardown ×N. Dependencies (Kafka, MQ, portals, …) come up as part of the compose deploy.')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select>${iterInput}<button class="btn" data-action="deploy-main"${state.envId&&!cyc?'':' disabled'} title="${esc(deployBtnTitle)}">${deployBtnLabel}</button>${tearBtn}</div></div>`;
+  const head=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions">${runBtn}${autoFixControlsHtml()}${schedBtn}${cancelBtn}<select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds"${cyc?' disabled':''}>${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_run_teardown_loop','Loop: deploy, run, tear down ×N','Deploy, run everything, tear down — then repeat the whole thing N times. Cancel any time.')}${opt('clean_cycle','Clean cycle: teardown + prune, then deploy–run–teardown ×N','Starts clean: tears down whatever is up, prunes Docker (stopped containers, dangling images, build cache), then runs the normal deploy–run–teardown ×N. Dependencies (Kafka, MQ, portals, …) come up as part of the compose deploy.')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select>${iterInput}<button class="btn" data-action="deploy-main"${state.envId&&!cyc?'':' disabled'} title="${esc(deployBtnTitle)}">${deployBtnLabel}</button>${tearBtn}</div></div>`;
   return head+cycleRunHtml()+deployStatusHtml();
 }
 function renderOverview(){
@@ -795,7 +972,14 @@ function renderOverview(){
   }else if(tab==='types'){
     h+=typeRunSelectorHtml();
   }else{
-    const all=tileStats({cases:state.cases});
+    // The repo-wide rollup is the sum of every per-type rollup — pulling it
+    // from overview-stats keeps the Overview tiles additive-consistent with
+    // the per-type numbers and avoids iterating the whole case cache.
+    const byType=(state.overviewStats&&state.overviewStats.by_type)||{};
+    const roll={total:0,passed:0,failed:0,other:0,never:0,lastAt:null};
+    for(const t of Object.values(byType)){roll.total+=Number(t.total||0);roll.passed+=Number(t.passed||0);roll.failed+=Number(t.failed||0);roll.other+=Number(t.other||0);roll.never+=Number(t.never||0);if(t.lastAt&&(!roll.lastAt||t.lastAt>roll.lastAt))roll.lastAt=t.lastAt;}
+    if(!roll.total)roll.total=totalCases();
+    const all=tileStats({rollup:roll});
     const hot=live.filter(e=>!isStalled(e)).length;
     const b=state.build;
     h+='<div class="kpi-grid">'+
@@ -806,7 +990,7 @@ function renderOverview(){
       kpi('Active runs',hot,`${state.stats.runs_7d||0} runs in the last 7 days`,hot?'amber':'')+
       kpi('Last build',b?esc(String(b.build_id).slice(0,14)):'—',b?`${b.passed} passed · ${b.failed} failed (in-container)`:'no CI results yet','sm'+(b&&b.failed?' red':''))+
     '</div>';
-    if(state.search)h+=caseSectionHtml({title:'Matching cases',cases:filterCases(state.cases),label:'search results'});
+    if(state.search)h+=overviewSearchHtml();
     h+=legendHtml();
     h+=summarySubTabsHtml();
   }
@@ -868,6 +1052,7 @@ async function loadTypeCasesPage(reset){
     p.total=Number(res.total||0);
     p.offset=p.rows.length;
     p.loaded=true;
+    hydrateCases(res.data||[]);
   }catch(e){if(reqId===p.reqSeq)p.error=e.message;}
   finally{if(reqId===p.reqSeq)p.loading=false;}
   if(state.view==='type'||state.view==='baseline')renderCurrentView();
@@ -1317,26 +1502,23 @@ function runsTableHtml(){
   return `${batchBar}<div class="table-wrap"><table><thead><tr><th><input type="checkbox" data-run-pickall="1"${allChecked?' checked':''} aria-label="Select all shown runs"></th><th>Run</th><th>Status</th><th>Progress</th><th>Results</th><th>Application</th><th>App version</th><th>Environment</th><th>Trigger</th><th>Created</th><th>Ended</th><th>Duration</th></tr></thead><tbody>${rows}</tbody></table></div>${more}`;
 }
 function renderHistory(){
-  el('viewTitle').textContent='Test runs';
-  const live=activeRuns();
-  const hot=live.filter(e=>!isStalled(e)).length;
-  // Default tab = Running now if there is anything in flight, else All runs.
-  if(!state.runsTab)state.runsTab=live.length?'live':'all';
-  const tab=state.runsTab;
-  const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="runs-tab" data-tab="${id}">${label}</button>`;
-  const tabs=`<div class="tabs" style="margin-bottom:16px">${t('live','Running now'+(hot?' ('+hot+')':''))}${t('history','History')}${t('all','All runs'+(state.runsList&&state.runsList.total?' ('+state.runsList.total+')':''))}</div>`;
+  const V=state.view;
+  const titles={'runs-running':'Running now','history':'Test runs','runs-all':'All runs'};
+  el('viewTitle').textContent=titles[V]||'Test runs';
   let body;
-  if(tab==='live'){
+  if(V==='runs-running'){
+    const live=activeRuns();
+    const hot=live.filter(e=>!isStalled(e)).length;
     const head=`<div class="group-head first"><h2>${live.length?liveHeading(live):'Running now'}</h2><div class="hp-actions"><span class="muted small">${hot?`${plural(hot,'run')} in progress · updates every ${POLL_ACTIVE/1000}s`:live.length?'No progress reported — cancel or restart the worker':'Nothing in progress'}</span>${live.length?'<button class="btn" data-action="cancel-all-runs">Cancel all</button>':''}</div></div>`;
     body=head+(live.length?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`:'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>');
-  }else if(tab==='history'){
+  }else if(V==='history'){
     body=state.loaded
-      ?`<div class="group-head first"><h2>History</h2><span class="muted small">every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',cases:state.cases},{fixed:true})
+      ?`<div class="group-head first"><h2>Test runs</h2><span class="muted small">pass/fail across every engine-executed case</span></div>`+historyPanelHtml({key:'all',title:'All tests',sub:'Pass/fail per run across the whole repository',all:true,total:totalCases()},{fixed:true})
       :'<div class="hp-loading"><div class="skel" style="height:220px"></div></div>';
   }else{
     body=`<div class="group-head first"><h2>All runs</h2><span class="muted small">select a run for per-case results</span></div><div class="card"><div class="card-head"><h2>Filters</h2></div>${runsFilterBarHtml()}${runsTableHtml()}</div>`;
   }
-  el('content').innerHTML=tabs+body;
+  el('content').innerHTML=body;
 }
 function renderRun(){
   const r=state.run;
@@ -1474,18 +1656,57 @@ function renderCaseView(){
   }
   el('content').innerHTML=`<div class="card">${head}${tabs}${body}</div>`;
 }
+// Method / tag / search views pull their case list from /ui/cases on demand —
+// no eager state.cases filter. state.viewCases caches each scope keyed by
+// (kind:value) so flipping back and forth doesn't re-hit the server.
+async function loadViewCases(key,params){
+  const prev=state.viewCases.get(key);
+  if(prev&&prev.loaded&&!prev.error)return prev;
+  if(prev&&prev.loading)return prev;
+  const entry={loading:true,loaded:false,rows:[],total:0,error:null};
+  state.viewCases.set(key,entry);
+  try{
+    const url='/api/v1/ui/cases'+appQuery()+envQuery()+'&limit=500'+params;
+    const res=await api(url);
+    entry.rows=res.data||[];entry.total=Number(res.total||0);entry.loaded=true;entry.loading=false;
+    hydrateCases(entry.rows);
+  }catch(e){entry.error=e.message;entry.loading=false;entry.loaded=true;}
+  state.viewCases.set(key,entry);
+  renderCurrentView();
+  return entry;
+}
 function renderMethodView(name){
   el('viewTitle').textContent='Method · '+name;
-  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
-  const cases=state.cases.filter(c=>String(c.execution_method||'').toLowerCase()===String(name).toLowerCase());
-  el('content').innerHTML=caseSectionHtml({title:name+' cases',cases,label:name});
+  const key='method:'+String(name).toLowerCase();
+  const entry=state.viewCases.get(key);
+  if(!entry){loadViewCases(key,'&execution_method='+encodeURIComponent(name));el('content').innerHTML=skeletonHtml();return;}
+  if(entry.loading&&!entry.rows.length){el('content').innerHTML=skeletonHtml();return;}
+  if(entry.error){el('content').innerHTML=`<div class="card empty">Could not load cases for method <b>${esc(name)}</b>: ${esc(entry.error)}</div>`;return;}
+  el('content').innerHTML=caseSectionHtml({title:name+' cases',cases:entry.rows,label:name});
 }
 function renderTagView(name){
   el('viewTitle').textContent='Tag · '+name;
-  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
-  const cases=state.cases.filter(c=>(c.tags||[]).includes(name));
-  el('content').innerHTML=caseSectionHtml({title:'#'+name,cases,label:name});
+  const key='tag:'+String(name).toLowerCase();
+  const entry=state.viewCases.get(key);
+  if(!entry){loadViewCases(key,'&tag='+encodeURIComponent(name));el('content').innerHTML=skeletonHtml();return;}
+  if(entry.loading&&!entry.rows.length){el('content').innerHTML=skeletonHtml();return;}
+  if(entry.error){el('content').innerHTML=`<div class="card empty">Could not load cases for tag <b>#${esc(name)}</b>: ${esc(entry.error)}</div>`;return;}
+  el('content').innerHTML=caseSectionHtml({title:'#'+name,cases:entry.rows,label:name});
 }
+// Overview search — fetches matching cases from the server rather than
+// filtering a client-side array. Debounced via overviewSearchDebounced.
+function overviewSearchHtml(){
+  const key='search:'+state.search.toLowerCase();
+  const entry=state.viewCases.get(key);
+  if(!entry){overviewSearchDebounced();return `<div class="card"><div class="card-head"><h2>Matching cases</h2><span class="muted small">Searching for “${esc(state.search)}”…</span></div><div class="hp-body"><div class="skel" style="height:120px"></div></div></div>`;}
+  if(entry.loading&&!entry.rows.length)return `<div class="card"><div class="card-head"><h2>Matching cases</h2><span class="muted small">Searching…</span></div><div class="hp-body"><div class="skel" style="height:120px"></div></div></div>`;
+  if(entry.error)return `<div class="card empty">Search failed: ${esc(entry.error)}</div>`;
+  return caseSectionHtml({title:'Matching cases',cases:entry.rows,label:'search results',sub:`${entry.total} match${entry.total===1?'':'es'} for “${esc(state.search)}”`});
+}
+const overviewSearchDebounced=debounce(()=>{
+  if(!state.search)return;
+  loadViewCases('search:'+state.search.toLowerCase(),'&q='+encodeURIComponent(state.search));
+},180);
 // Catalog coverage: an audit of every active case against the plain-language fields
 // (objective, preconditions, steps, expected result, test data) — so the operator can
 // see at a glance which cases need more detail.
@@ -1560,11 +1781,21 @@ function renderCoverageView(){
   const sum=`<div class="kpi-grid">${kpi('Cases audited',c.total,'active cases')}${kpi('Clean',c.clean,'all plain-language fields present',c.clean?'green':'')}${kpi('With findings',c.with_findings,'need review',c.with_findings?'amber':'')}${kpi('High severity',c.by_severity.high,'missing two or more of objective / steps / expected',c.by_severity.high?'red':'')}</div>`;
   el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Catalog coverage</h2><button class="btn" data-action="coverage-refresh">Refresh</button></div><div class="hp-body"><p class="muted small">Every active case is checked for the plain-language fields the Test cases screen expects: <b>Objective</b> (≥ ${esc(c.min_objective_chars)} characters), <b>Preconditions</b>, <b>Steps</b>, <b>Expected result</b>, and <b>Test data</b> (either <code>test_data</code> or <code>test_data_ref</code>). Script-driven cases skip the steps check — their steps live in the automation script. Click a case key to open it and fill in the gaps.</p>${sum}<div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Case</th><th>Name</th><th>Application · Type</th><th>Findings</th><th>Severity</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
 }
-function renderConfigView(){
-  el('viewTitle').textContent='Configuration · Run retention';
-  const s=state.settings;
-  if(!s){el('content').innerHTML=skeletonHtml();return;}
-  if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
+// Each settings sub-page returns its own card HTML with its own Save button.
+// The dispatcher at the bottom of this block picks one based on state.view.
+function renderConfigRetentionCard(s){
+  return `<div class="card"><div class="card-head"><h2>Run retention</h2></div>
+    <div class="hp-body">
+      <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted. Minimum 5 days.</p>
+      <div class="toolbar" style="border:none;padding:0">
+        <input type="number" id="retentionDays" min="5" max="365" value="${esc(s.run_retention_days)}" style="width:90px">
+        <button class="btn primary" data-action="save-retention">Save</button>
+        ${s.updated_at?`<span class="muted small">last changed ${esc(when(s.updated_at))}</span>`:''}
+      </div>
+      <div id="retentionError" class="field-error" hidden></div>
+    </div></div>`;
+}
+function renderConfigTimeoutsCard(s){
   const timeouts=s.test_type_timeout_seconds||{};
   const types=Object.keys(timeouts).sort();
   const typeRows=types.map(t=>{
@@ -1579,33 +1810,97 @@ function renderConfigView(){
     <label class="muted small">Change selected by <input type="number" id="bulkDeltaSecs" min="-604800" max="604800" step="5" value="10" style="width:84px"> seconds <button class="btn" data-action="timeouts-bulk-delta">Apply</button></label>
     <button class="btn" data-action="timeouts-reset-defaults" title="Reset selected rows to 30 seconds">Reset to 30 s</button>
   </div>`;
-  el('content').innerHTML=`<div class="card"><div class="card-head"><h2>Run retention</h2></div>
-    <div class="hp-body">
-      <p class="muted small">Test runs older than this many days are deleted automatically by a routine job, along with their evidence — including runs kept for compliance. Test cases themselves are never deleted. Minimum 5 days.</p>
-      <div class="toolbar" style="border:none;padding:0">
-        <input type="number" id="retentionDays" min="5" max="365" value="${esc(s.run_retention_days)}" style="width:90px">
-        <button class="btn primary" data-action="save-retention">Save</button>
-        ${s.updated_at?`<span class="muted small">last changed ${esc(when(s.updated_at))}</span>`:''}
-      </div>
-      <div id="retentionError" class="field-error" hidden></div>
-    </div></div>
-    <div class="card" style="margin-top:12px"><div class="card-head"><h2>Test case run timeout</h2></div>
+  return `<div class="card"><div class="card-head"><h2>Test case run timeout</h2></div>
       <div class="hp-body">
         <p class="muted small">A running test case is killed and recorded as "Timed out" once it runs longer than its test type's limit below. Every type defaults to 30 seconds. Select rows and apply a bulk change, or edit each row directly.</p>
         ${bulkBar}
-        <div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table></div>
-      </div></div>
-    ${renderPerTypeRetention(s)}
-    <div class="card" style="margin-top:12px"><div class="card-head"><h2>Failure circuit breaker</h2></div>
+        <div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Test type</th><th>Timeout</th></tr></thead><tbody>${typeRows}</tbody></table>
+        <div style="margin-top:10px"><button class="btn primary" data-action="save-timeouts">Save timeouts</button><div id="timeoutsError" class="field-error" hidden></div></div>
+      </div></div>`;
+}
+function renderConfigCircuitBreakerCard(s){
+  return `<div class="card"><div class="card-head"><h2>Failure circuit breaker</h2></div>
       <div class="hp-body">
         <p class="muted small">If this many test cases in a row fail — at the start of a run or partway through it — the rest of that run is stopped instead of continuing to burn through a broken build.</p>
         <div class="toolbar" style="border:none;padding:0">
           <input type="number" id="failureLimit" min="1" max="1000" value="${esc(s.consecutive_failure_limit)}" style="width:90px"> consecutive failures
         </div>
-      </div></div>
-    <div class="card" style="margin-top:12px"><div class="hp-body">
-      <button class="btn primary" data-action="save-timeouts">Save timeout &amp; circuit breaker settings</button>
-      <div id="timeoutsError" class="field-error" hidden></div>
+        <div style="margin-top:10px"><button class="btn primary" data-action="save-circuit-breaker">Save</button><div id="circuitBreakerError" class="field-error" hidden></div></div>
+      </div></div>`;
+}
+function renderConfigAutoFixCard(s){
+  return `<div class="card"><div class="card-head"><h2>Auto-fix &amp; fixer agent</h2></div>
+      <div class="hp-body">
+        <p class="muted small">The auto-fix loop reruns failing cases (transient failures) and asks the fixer agent to patch the test case source for real defects. Production (Sand Bench) is the baseline: when the agent decides a failure is a prod defect, it files a defect and parks the loop — never patches the app.</p>
+        <div class="toolbar" style="border:none;padding:0;gap:14px;flex-wrap:wrap">
+          <label class="muted small">Default max attempts <input type="number" id="setAutoFixMax" min="1" max="20" step="1" value="${esc(s.auto_fix_default_max_attempts??2)}" style="width:72px"></label>
+          <label class="muted small">Fixer mode
+            <select id="setFixerMode" style="margin-left:4px">
+              <option value="off"${s.fixer_agent_mode==='off'?' selected':''}>off — never open a proposal</option>
+              <option value="propose"${s.fixer_agent_mode==='propose'?' selected':''}>propose — open a proposal, wait for operator Apply</option>
+              <option value="auto"${(!s.fixer_agent_mode||s.fixer_agent_mode==='auto')?' selected':''}>auto — apply + reseed + rerun with no human step</option>
+            </select>
+          </label>
+          <label class="muted small">Max diff size <input type="number" id="setFixerDiffCap" min="10" max="100000" step="10" value="${esc(s.fixer_agent_diff_cap_lines??400)}" style="width:88px"> lines</label>
+        </div>
+        <div style="margin-top:10px"><button class="btn primary" data-action="save-fixer">Save</button><div id="fixerError" class="field-error" hidden></div></div>
+        <p class="muted small" style="margin-top:10px">The host-side fixer agent (<code>scripts/start-fixer-agent.ps1</code>) polls for proposals and calls the local <code>claude</code> CLI. Without a running agent, proposals stay in <em>pending</em> on the Fix log.</p>
+      </div></div>`;
+}
+function renderConfigView(){
+  const titles={
+    'config-retention':'Settings · Run retention',
+    'config-timeouts':'Settings · Test case run timeout',
+    'config-per-type-retention':'Settings · Past runs retained per test type',
+    'config-circuit-breaker':'Settings · Failure circuit breaker',
+    'config-auto-fix':'Settings · Auto-fix & fixer agent',
+    'config-remote-triggers':'Settings · Remote execution triggers',
+  };
+  el('viewTitle').textContent=titles[state.view]||'Settings';
+  // Remote triggers is file-backed (no settings row needed); the others all
+  // need /api/v1/settings loaded first.
+  if(state.view==='config-remote-triggers'){el('content').innerHTML=renderRemoteTriggers();return;}
+  const s=state.settings;
+  if(!s){el('content').innerHTML=skeletonHtml();return;}
+  if(s.error){el('content').innerHTML=`<div class="card empty">Could not load settings: ${esc(s.error)}</div>`;return;}
+  if(state.view==='config-retention')el('content').innerHTML=renderConfigRetentionCard(s);
+  else if(state.view==='config-timeouts')el('content').innerHTML=renderConfigTimeoutsCard(s);
+  else if(state.view==='config-per-type-retention')el('content').innerHTML=renderPerTypeRetention(s);
+  else if(state.view==='config-circuit-breaker')el('content').innerHTML=renderConfigCircuitBreakerCard(s);
+  else if(state.view==='config-auto-fix')el('content').innerHTML=renderConfigAutoFixCard(s);
+  else el('content').innerHTML=renderConfigRetentionCard(s);
+}
+
+/**
+ * Read-only panel listing the entries in config/remote-triggers.json. The file
+ * is the source of truth — this view is informational so an operator can see
+ * which repos are wired up, where to POST, and whether the shared secret env
+ * is set on the engine.
+ */
+function renderRemoteTriggers(){
+  const rt=state.remoteTriggers;
+  if(!rt)return `<div class="card" style="margin-top:12px"><div class="card-head"><h2>Remote execution triggers</h2></div><div class="hp-body"><p class="muted small">Loading…</p></div></div>`;
+  if(rt.error)return `<div class="card" style="margin-top:12px"><div class="card-head"><h2>Remote execution triggers</h2></div><div class="hp-body"><p class="muted small">Could not load: ${esc(rt.error)}</p></div></div>`;
+  const file=rt.file||'config/remote-triggers.json';
+  const header=`<p class="muted small">Source of truth is the file <code>${esc(file)}</code>. Edit it on disk — no restart needed; the engine reads it fresh on every webhook call. Secrets are referenced by env-var name and are never stored in the file.</p>`;
+  const list=Array.isArray(rt.triggers)?rt.triggers:[];
+  if(!list.length)return `<div class="card" style="margin-top:12px"><div class="card-head"><h2>Remote execution triggers</h2></div><div class="hp-body">${header}<p class="muted small">No entries configured.</p></div></div>`;
+  const rows=list.map(t=>{
+    const enabled=t.enabled!==false;
+    const secret=t.secret_configured?'<span class="pill ok">set</span>':'<span class="pill bad">unset</span>';
+    const scope=t.scope&&Object.keys(t.scope).length?`<div class="muted small">Scope: ${esc(JSON.stringify(t.scope))}</div>`:'<div class="muted small">Scope: all cases</div>';
+    return `<tr>
+      <td><strong>${esc(t.project_key)}</strong>${enabled?'':' <span class="pill bad">disabled</span>'}</td>
+      <td>${esc(t.application)} → ${esc(t.environment)}</td>
+      <td>${esc(t.remote_name||'origin')}/${esc(t.branch)}<div class="muted small">${esc(t.repo_url||t.local_mirror)}</div></td>
+      <td>${esc(t.secret_env||'—')} ${secret}</td>
+      <td><code style="word-break:break-all">${esc(t.webhook_url)}</code>${scope}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="card" style="margin-top:12px"><div class="card-head"><h2>Remote execution triggers</h2><span class="muted small">${plural(list.length,'project')}</span></div>
+    <div class="hp-body">${header}
+      <div class="table-wrap"><table><thead><tr><th>Project</th><th>App → Env</th><th>Branch</th><th>Secret env</th><th>Webhook URL</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="muted small" style="margin-top:8px">On a commit, the engine queues a deploy → run-all → teardown cycle on the mapped environment. The host-side deploy script fetches origin, resolves the commit, and builds. GitHub signs with <code>X-Hub-Signature-256</code>; a plain curl can send the secret in <code>X-Webhook-Secret</code>.</p>
     </div></div>`;
 }
 // ---------------------------------------------------------------------------
@@ -1778,7 +2073,23 @@ async function saveEnvironment(btn){
 // Scope picker — "which test cases" — shared by Schedule runs and Reports.
 // A scope is a saved selection, not a suite: nothing is created or left behind.
 // ---------------------------------------------------------------------------
-function findCaseByText(t){const v=String(t||'').trim().toLowerCase();if(!v)return null;return state.cases.find(c=>String(c.key).toLowerCase()===v)||state.cases.find(c=>String(c.name).toLowerCase()===v)||null;}
+// Scope-picker case lookup: looks against whatever has been hydrated into the
+// sparse cache (any case the user has pulled by browsing). If the text matches
+// nothing in cache, we trigger a server lookup and the picker re-renders when
+// it lands. Returns null until the lookup resolves.
+function findCaseByText(t){
+  const v=String(t||'').trim().toLowerCase();if(!v)return null;
+  const hit=state.cases.find(c=>String(c.key).toLowerCase()===v)||state.cases.find(c=>String(c.name).toLowerCase()===v);
+  if(hit)return hit;
+  // Not in cache — fire a tiny lookup (debounced) and let the next render pick it up.
+  scopeCaseLookup(v);
+  return null;
+}
+const scopeCaseLookup=debounce(async(text)=>{
+  const key='search:'+text;
+  if(state.viewCases.has(key))return;
+  await loadViewCases(key,'&q='+encodeURIComponent(text)+'&limit=20');
+},200);
 function scopeCases(f){
   if(f.kind==='types')return [...new Map(f.types.flatMap(t=>casesForType(t)).map(c=>[c.id,c])).values()];
   if(f.kind==='suite')return casesInSuite(f.suiteId);
@@ -1798,9 +2109,20 @@ function scopePickerHtml(prefix,f){
   if(f.caseKeys&&f.caseKeys.length)kinds.push(['selected',plural(f.caseKeys.length,'selected case')]);
   const radios=kinds.map(([k,l])=>`<label class="type-check"><input type="radio" name="${prefix}Kind" value="${k}"${f.kind===k?' checked':''}> ${esc(l)}</label>`).join('');
   let detail='';
-  if(f.kind==='types')detail=`<div class="type-check-grid">${typeList().map(t=>{const n=casesForType(t.id).length;return `<label class="type-check"><input type="checkbox" data-scopetype="${prefix}" value="${esc(t.id)}"${f.types.includes(t.id)?' checked':''}${n?'':' disabled'}> ${esc(t.title)} <span class="muted small">(${n})</span></label>`;}).join('')}</div>`;
-  else if(f.kind==='suite')detail=state.suites.length?`<select id="${prefix}Suite">${state.suites.map(s=>`<option value="${esc(s.id)}"${f.suiteId===s.id?' selected':''}>${esc(s.name||s.key)} (${casesInSuite(s.id).length})</option>`).join('')}</select>`:'<span class="muted small">No suites yet — select cases in any list and use “Save selected as suite”.</span>';
-  else if(f.kind==='case')detail=`<input type="search" id="${prefix}CaseSearch" list="${prefix}CaseList" placeholder="Type a test case name or key…" value="${esc(f.caseText||'')}" style="width:min(520px,100%)"><datalist id="${prefix}CaseList">${state.cases.map(c=>`<option value="${esc(c.key)}">${esc(c.name)}</option>`).join('')}</datalist>${f.caseText&&!findCaseByText(f.caseText)?'<div class="field-error">No test case with that name or key.</div>':''}`;
+  if(f.kind==='types')detail=`<div class="type-check-grid">${typeList().map(t=>{const n=countForType(t.id);return `<label class="type-check"><input type="checkbox" data-scopetype="${prefix}" value="${esc(t.id)}"${f.types.includes(t.id)?' checked':''}${n?'':' disabled'}> ${esc(t.title)} <span class="muted small">(${n})</span></label>`;}).join('')}</div>`;
+  else if(f.kind==='suite')detail=state.suites.length?`<select id="${prefix}Suite">${state.suites.map(s=>`<option value="${esc(s.id)}"${f.suiteId===s.id?' selected':''}>${esc(s.name||s.key)} (${countForSuite(s.id)})</option>`).join('')}</select>`:'<span class="muted small">No suites yet — select cases in any list and use “Save selected as suite”.</span>';
+  else if(f.kind==='case'){
+    // Lazy typeahead: datalist is populated from a server search response (up
+    // to 20 suggestions) that fires as the user types. The scope-cases cache
+    // keyed by the current text persists across re-renders so a repeat edit of
+    // the same name doesn't re-hit the server.
+    const text=String(f.caseText||'');
+    const sKey='search:'+text.trim().toLowerCase();
+    const entry=text?state.viewCases.get(sKey):null;
+    const suggestions=entry&&entry.rows?entry.rows:[];
+    const err=text&&entry&&entry.loaded&&!entry.loading&&!findCaseByText(text)?'<div class="field-error">No test case with that name or key.</div>':'';
+    detail=`<input type="search" id="${prefix}CaseSearch" list="${prefix}CaseList" placeholder="Type a test case name or key…" value="${esc(text)}" style="width:min(520px,100%)" autocomplete="off"><datalist id="${prefix}CaseList">${suggestions.map(c=>`<option value="${esc(c.key)}">${esc(c.name)}</option>`).join('')}</datalist>${err}`;
+  }
   return `<div class="form-row"><span class="form-label">Test cases</span><div><div class="radio-row">${radios}</div>${detail?`<div style="margin-top:8px">${detail}</div>`:''}</div></div>`;
 }
 function readScopeForm(prefix,f){
@@ -1832,27 +2154,122 @@ function scheduleWhat(s){
   if(s.test_case_ids&&s.test_case_ids.length)return plural(s.test_case_ids.length,'test case');
   return s.test_suite_id?'A test suite':'—';
 }
+const DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function prettyCron(e,tz){
+  const parts=String(e||'').trim().split(/\s+/);if(parts.length!==5)return e+' ('+tz+')';
+  const [m,h,dom,mon,dow]=parts;const pad=n=>String(n).padStart(2,'0');
+  const hmm=/^\d+$/.test(m)&&/^\d+$/.test(h)?pad(h)+':'+pad(m):'';
+  if(mon==='*'&&dom==='*'&&dow==='*'&&hmm)return 'daily at '+hmm+' '+tz;
+  if(mon==='*'&&dom==='*'&&hmm&&/^[0-6](,[0-6])*$/.test(dow))return dow.split(',').map(d=>DAY_NAMES[Number(d)]).join('/')+' at '+hmm+' '+tz;
+  if(mon==='*'&&dow==='*'&&hmm&&/^\d+$/.test(dom))return 'day '+dom+' at '+hmm+' '+tz;
+  if(/^\*\/\d+$/.test(h)&&m==='0'&&mon==='*'&&dom==='*'&&dow==='*')return 'every '+h.slice(2)+' h';
+  return e+' ('+tz+')';
+}
 function scheduleWhen(s){
   const e=String(s.cron_expression||'');
-  if(/^at:/i.test(e))return 'Once · '+new Date(e.slice(3)).toLocaleString();
-  if(/^every:/i.test(e))return 'Every '+e.slice(6)+' min';
-  if(e)return 'Repeats · '+e+' ('+(s.time_zone||'UTC')+')';
-  return s.event_trigger?'On event · '+s.event_trigger:'—';
+  const sc=s.scope||{};
+  const af=sc.auto_fix&&sc.auto_fix.enabled?' · auto-fix x'+(sc.auto_fix.max_attempts||2):'';
+  if(/^at:/i.test(e))return 'Once · '+new Date(e.slice(3)).toLocaleString()+af;
+  if(/^every:/i.test(e)){const n=Number(e.slice(6));const base=n&&n%60===0?'Every '+(n/60)+' h':'Every '+e.slice(6)+' min';return base+af;}
+  if(e){const cap=sc.max_fires?' · stops after '+sc.max_fires:'';return 'Repeats · '+prettyCron(e,s.time_zone||'UTC')+cap+af;}
+  return s.event_trigger?'On event · '+s.event_trigger+af:'—';
 }
 function openScheduleForm(preset){
-  state.schedForm={name:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],envId:state.envId||'',when:'once',at:'',cron:'0 2 * * *',runType:'run_only',applicationVersion:(state.appVersion||'main'),...(preset||{})};
+  state.schedForm={
+    name:'',nameTouched:false,
+    kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],
+    envId:state.envId||'',
+    when:'once',at:'',
+    repeatMode:'everyMin',
+    everyMin:30,everyHour:1,
+    dailyTime:'02:00',
+    weeklyDays:[1,2,3,4,5],weeklyTime:'09:00',
+    monthlyDay:1,monthlyTime:'02:00',
+    cron:'0 2 * * *',
+    maxFires:'',
+    runType:'run_only',
+    autoFix:false,autoFixMax:2,
+    applicationVersion:(state.appVersion||'main'),
+    ...(preset||{})
+  };
   state.schedFormOpen=true;
   if(state.view==='schedules')renderCurrentView();else location.hash='#/schedules';
 }
 function readSchedForm(){
   const f=state.schedForm;if(!el('schedName'))return;
-  f.name=el('schedName').value;f.envId=el('schedEnv').value;
+  const typed=el('schedName').value;
+  if(!typed.length)f.nameTouched=false;
+  else if(typed!==f.name)f.nameTouched=true;
+  f.name=typed;
+  f.envId=el('schedEnv').value;
   const w=document.querySelector('input[name="schedWhen"]:checked');if(w)f.when=w.value;
   if(el('schedAt'))f.at=el('schedAt').value;
+  if(el('schedRepeatMode'))f.repeatMode=el('schedRepeatMode').value;
+  if(el('schedEveryMin'))f.everyMin=Number(el('schedEveryMin').value)||f.everyMin;
+  if(el('schedEveryHour'))f.everyHour=Number(el('schedEveryHour').value)||f.everyHour;
+  if(el('schedDailyTime'))f.dailyTime=el('schedDailyTime').value||f.dailyTime;
+  if(el('schedWeeklyTime'))f.weeklyTime=el('schedWeeklyTime').value||f.weeklyTime;
+  const days=[...document.querySelectorAll('[data-schedday]')];
+  if(days.length)f.weeklyDays=days.filter(d=>d.checked).map(d=>Number(d.dataset.schedday));
+  if(el('schedMonthlyDay'))f.monthlyDay=Math.max(1,Math.min(28,Number(el('schedMonthlyDay').value)||f.monthlyDay));
+  if(el('schedMonthlyTime'))f.monthlyTime=el('schedMonthlyTime').value||f.monthlyTime;
   if(el('schedCron'))f.cron=el('schedCron').value;
+  if(el('schedMaxFires')){const n=el('schedMaxFires').value.trim();f.maxFires=n?Math.max(1,Math.min(100000,Number(n)||0))||'':'';}
   if(el('schedRunType'))f.runType=el('schedRunType').value;
+  if(el('schedAutoFix'))f.autoFix=!!el('schedAutoFix').checked;
+  if(el('schedAutoFixMax')){const n=Number(el('schedAutoFixMax').value);if(Number.isFinite(n)&&n>=1&&n<=20)f.autoFixMax=Math.round(n);}
   if(el('schedVersion'))f.applicationVersion=el('schedVersion').value.trim()||'main';
   readScopeForm('sched',f);
+}
+function buildCron(f){
+  const hhmm=s=>{const [h,m]=String(s||'').split(':').map(n=>parseInt(n,10));return [Number.isFinite(m)?m:0,Number.isFinite(h)?h:0];};
+  if(f.repeatMode==='everyMin'){const n=Math.max(1,Math.min(1440,Number(f.everyMin)||30));return 'every:'+n;}
+  if(f.repeatMode==='everyHour'){const n=Math.max(1,Math.min(23,Number(f.everyHour)||1));return n===1?'0 * * * *':'0 */'+n+' * * *';}
+  if(f.repeatMode==='daily'){const [m,h]=hhmm(f.dailyTime);return m+' '+h+' * * *';}
+  if(f.repeatMode==='weekly'){const [m,h]=hhmm(f.weeklyTime);const days=(f.weeklyDays&&f.weeklyDays.length?[...f.weeklyDays]:[1]).map(Number).sort((a,b)=>a-b).join(',');return m+' '+h+' * * '+days;}
+  if(f.repeatMode==='monthly'){const [m,h]=hhmm(f.monthlyTime);const d=Math.max(1,Math.min(28,Number(f.monthlyDay)||1));return m+' '+h+' '+d+' * *';}
+  return String(f.cron||'0 2 * * *').trim();
+}
+function summariseRepeat(f){
+  if(f.when==='once'){if(f.at){try{return 'at '+new Date(f.at).toLocaleString();}catch{}}return 'once';}
+  if(f.repeatMode==='everyMin')return 'every '+(f.everyMin||30)+' min';
+  if(f.repeatMode==='everyHour'){const n=Number(f.everyHour)||1;return n===1?'hourly':'every '+n+' h';}
+  if(f.repeatMode==='daily')return 'daily '+(f.dailyTime||'02:00');
+  if(f.repeatMode==='weekly'){const days=(f.weeklyDays||[]).slice().sort((a,b)=>a-b).map(d=>DAY_NAMES[d]).join('/');return (days||'wk')+' '+(f.weeklyTime||'09:00');}
+  if(f.repeatMode==='monthly')return 'monthly d'+(f.monthlyDay||1)+' '+(f.monthlyTime||'02:00');
+  return 'cron';
+}
+function autoScheduleName(f){
+  const parts=[];
+  if(f.kind==='all')parts.push('All '+(state.appKey||''));
+  else if(f.kind==='types')parts.push(f.types.length?f.types.map(typeTitle).join('+'):'types');
+  else if(f.kind==='suite'){const s=state.idx&&state.idx.suiteById.get(f.suiteId);parts.push('Suite '+(s?(s.name||s.key):'—'));}
+  else if(f.kind==='case'){const c=findCaseByText(f.caseText);parts.push(c?c.name:(f.caseText||'case'));}
+  else if(f.kind==='selected')parts.push(plural((f.caseKeys||[]).length,'case'));
+  const env=(state.environments||[]).find(e=>e.id===f.envId);if(env)parts.push(env.key||env.name);
+  parts.push(summariseRepeat(f));
+  const rt={run_only:'',deploy_run_teardown:'deploy+teardown',deploy_and_run:'deploy+keep',deploy_only:'deploy only',deploy_run_teardown_loop:'loop',clean_cycle:'clean cycle'}[f.runType||'run_only'];
+  if(rt)parts.push(rt);
+  if(f.applicationVersion&&f.applicationVersion!=='main')parts.push(f.applicationVersion);
+  if(f.when==='repeat'&&f.maxFires)parts.push('x'+f.maxFires);
+  let name=parts.filter(Boolean).join(' · ');
+  if(Array.isArray(state.schedules)){
+    const used=new Set(state.schedules.map(s=>s.name));
+    if(used.has(name)){let i=2;while(used.has(name+' #'+i))i++;name=name+' #'+i;}
+  }
+  return name;
+}
+function repeatModeInputs(f,tz){
+  if(f.repeatMode==='everyMin')return `<input type="number" id="schedEveryMin" min="1" max="1440" step="1" value="${esc(f.everyMin||30)}" style="width:100px"> <span class="muted small">minutes</span>`;
+  if(f.repeatMode==='everyHour')return `<input type="number" id="schedEveryHour" min="1" max="23" step="1" value="${esc(f.everyHour||1)}" style="width:100px"> <span class="muted small">hours</span>`;
+  if(f.repeatMode==='daily')return `<span class="muted small">at</span> <input type="time" id="schedDailyTime" value="${esc(f.dailyTime||'02:00')}"> <span class="muted small">${esc(tz)}</span>`;
+  if(f.repeatMode==='weekly'){
+    const picked=new Set((f.weeklyDays||[]).map(Number));
+    const checks=DAY_NAMES.map((lbl,idx)=>`<label class="type-check" style="margin-right:8px"><input type="checkbox" data-schedday="${idx}"${picked.has(idx)?' checked':''}> ${lbl}</label>`).join('');
+    return `<div>${checks}</div><div style="margin-top:6px"><span class="muted small">at</span> <input type="time" id="schedWeeklyTime" value="${esc(f.weeklyTime||'09:00')}"> <span class="muted small">${esc(tz)}</span></div>`;
+  }
+  if(f.repeatMode==='monthly')return `<span class="muted small">on day</span> <input type="number" id="schedMonthlyDay" min="1" max="28" step="1" value="${esc(f.monthlyDay||1)}" style="width:80px"> <span class="muted small">at</span> <input type="time" id="schedMonthlyTime" value="${esc(f.monthlyTime||'02:00')}"> <span class="muted small">${esc(tz)}</span>`;
+  return `<input type="text" id="schedCron" value="${esc(f.cron||'0 2 * * *')}" style="width:220px"><div class="muted small" style="margin-top:6px">Five cron fields (minute hour day month weekday) in ${esc(tz)}, or every:N for every N minutes.</div>`;
 }
 // Run types shared with the Overview deploy bar — plus "run_only" which just
 // queues the run without touching the stack.
@@ -1866,20 +2283,36 @@ const SCHED_RUN_TYPES=[
 ];
 function scheduleFormHtml(){
   const f=state.schedForm;
+  if(!f.nameTouched)f.name=autoScheduleName(f);
   const n=scopeCases(f).length;
   const tz=(Array.isArray(state.schedules)&&state.schedules[0]&&state.schedules[0].time_zone)||'UTC';
-  const presets=[['0 * * * *','Every hour'],['0 2 * * *','Nightly at 02:00'],['0 9 * * 1','Mondays at 09:00'],['every:30','Every 30 minutes']];
+  const facetVersions=(state.runsList&&state.runsList.facets&&state.runsList.facets.versions)||[];
+  const versions=['main',...facetVersions].filter((v,i,a)=>v&&a.indexOf(v)===i);
+  const versionDataList=versions.map(v=>`<option value="${esc(v)}">`).join('');
+  const repeatPreview=f.when==='repeat'?`<div class="muted small" style="margin-top:6px">Saves as <code>${esc(buildCron(f))}</code>${f.maxFires?' · stops after '+esc(f.maxFires)+' runs':''}</div>`:'';
   const whenDetail=f.when==='once'
     ?`<input type="datetime-local" id="schedAt" value="${esc(f.at)}"> <span class="muted small">your local time — runs once, then the schedule is done</span>`
-    :`<input type="text" id="schedCron" value="${esc(f.cron)}" style="width:180px"> ${presets.map(([c,l])=>`<button class="btn small-btn" style="margin-top:0" data-action="sched-preset" data-cron="${esc(c)}">${esc(l)}</button>`).join(' ')}<div class="muted small" style="margin-top:6px">Five cron fields (minute hour day month weekday) in ${esc(tz)}, or every:N for every N minutes.</div>`;
-  const facetVersions=(state.runsList&&state.runsList.facets&&state.runsList.facets.versions)||[];
-  const versionOptions=['main',...facetVersions].filter((v,i,a)=>v&&a.indexOf(v)===i).map(v=>`<option value="${esc(v)}">`).join('');
+    :`<div class="form-row" style="margin:0"><span class="form-label">Repeat</span><div>
+        <select id="schedRepeatMode">
+          <option value="everyMin"${f.repeatMode==='everyMin'?' selected':''}>Every N minutes</option>
+          <option value="everyHour"${f.repeatMode==='everyHour'?' selected':''}>Every N hours</option>
+          <option value="daily"${f.repeatMode==='daily'?' selected':''}>Every day at a time</option>
+          <option value="weekly"${f.repeatMode==='weekly'?' selected':''}>Specific days of the week</option>
+          <option value="monthly"${f.repeatMode==='monthly'?' selected':''}>Monthly on a day</option>
+          <option value="advanced"${f.repeatMode==='advanced'?' selected':''}>Advanced (cron)</option>
+        </select>
+        <div style="margin-top:8px">${repeatModeInputs(f,tz)}</div>
+        ${repeatPreview}
+        <div class="form-row" style="margin-top:10px"><span class="form-label">Stop after</span><div><input type="number" min="1" step="1" id="schedMaxFires" value="${esc(f.maxFires||'')}" placeholder="unlimited" style="width:120px"> <span class="muted small">runs (leave empty for no limit)</span></div></div>
+      </div></div>`;
+  const nameHint=f.nameTouched?'You named this schedule — clear the box to let it auto-name from your choices again.':'Auto-named from the options below. Type here to override.';
   return `<div class="card" data-form="sched"><div class="card-head"><h2>Schedule a run</h2><span class="muted small">${esc(state.appKey||'')} · ${plural(n,'test case')} in this selection</span></div>
-    <div class="form-row"><span class="form-label">Name</span><input type="text" id="schedName" value="${esc(f.name)}" placeholder="e.g. Nightly smoke on staging" style="width:min(520px,100%)"></div>
+    <div class="form-row"><span class="form-label">Name</span><div><input type="text" id="schedName" value="${esc(f.name)}" placeholder="auto-named from your choices" style="width:min(520px,100%)"><div class="muted small" style="margin-top:4px">${esc(nameHint)}</div></div></div>
     ${scopePickerHtml('sched',f)}
     <div class="form-row"><span class="form-label">Environment</span><div><select id="schedEnv">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===f.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select></div></div>
+    <div class="form-row"><span class="form-label">Branch / version</span><div><input type="text" id="schedVersion" list="schedVersionList" value="${esc(f.applicationVersion||'main')}" placeholder="main" style="width:220px" autocomplete="off"><datalist id="schedVersionList">${versionDataList}</datalist><div class="muted small" style="margin-top:4px">Which branch, tag, or version of the app to run against. Stamped on every run this schedule queues.</div></div></div>
     <div class="form-row"><span class="form-label">Run type</span><div><select id="schedRunType">${SCHED_RUN_TYPES.map(([v,l])=>`<option value="${esc(v)}"${f.runType===v?' selected':''}>${esc(l)}</option>`).join('')}</select><div class="muted small" style="margin-top:4px">What the scheduler does when the time comes. "Just run" queues an execution; the others shape the deploy around it (same options as the Overview page).</div></div></div>
-    <div class="form-row"><span class="form-label">App version</span><div><input type="text" id="schedVersion" list="schedVersionList" value="${esc(f.applicationVersion||'main')}" placeholder="main" style="width:220px"><datalist id="schedVersionList">${versionOptions}</datalist><div class="muted small" style="margin-top:4px">Branch, tag or version string. Stamped on every run this schedule queues (shown in the App version column).</div></div></div>
+    <div class="form-row"><span class="form-label">On failure</span><div><label class="type-check"><input type="checkbox" id="schedAutoFix"${f.autoFix?' checked':''}> Auto-fix loop</label> <span class="muted small">retry up to</span> <input type="number" id="schedAutoFixMax" min="1" max="20" step="1" value="${esc(f.autoFixMax||2)}" style="width:72px"${f.autoFix?'':' disabled'}> <span class="muted small">attempts</span><div class="muted small" style="margin-top:4px">Transient failures retry without redeploying. Real failures redeploy the app (production is the baseline) and rerun the failing cases only. Hitting the cap files a defect and parks the loop.</div></div></div>
     <div class="form-row"><span class="form-label">When</span><div><div class="radio-row"><label class="type-check"><input type="radio" name="schedWhen" value="once"${f.when==='once'?' checked':''}> Once, at a date and time</label><label class="type-check"><input type="radio" name="schedWhen" value="repeat"${f.when==='repeat'?' checked':''}> Repeating</label></div><div style="margin-top:8px">${whenDetail}</div></div></div>
     <div class="form-row"><span></span><div><button class="btn primary" data-action="sched-save">Save schedule</button> <button class="btn" data-action="sched-new">Cancel</button><div id="schedError" class="field-error" hidden></div></div></div>
   </div>`;
@@ -1900,8 +2333,9 @@ async function saveSchedule(btn){
     if(d.getTime()<=Date.now())return err('Choose a time in the future.');
     cron='at:'+d.toISOString();
   }else{
-    cron=f.cron.trim();
-    if(!cron)return err('Enter a cron expression or pick a preset.');
+    if(f.repeatMode==='weekly'&&(!f.weeklyDays||!f.weeklyDays.length))return err('Pick at least one day of the week.');
+    cron=buildCron(f);
+    if(!cron)return err('Pick a repeat pattern.');
   }
   let scope={};
   if(f.kind==='suite'){const s=state.idx.suiteById.get(f.suiteId);scope={suites:[s.key],label:scopeLabel(f)};}
@@ -1912,10 +2346,12 @@ async function saveSchedule(btn){
   // version column + filter on Test runs).
   if(f.runType)scope.run_type=f.runType;
   if(f.applicationVersion&&f.applicationVersion.trim())scope.application_version=f.applicationVersion.trim();
+  if(f.when==='repeat'&&f.maxFires)scope.max_fires=Number(f.maxFires);
+  if(f.autoFix)scope.auto_fix={enabled:true,max_attempts:Math.max(1,Math.min(20,Number(f.autoFixMax)||2))};
   btn.disabled=true;
   try{
     await postJson('/api/v1/schedules',{name:f.name.trim(),application:state.appKey,environment:f.envId,scope,cron_expression:cron});
-    toast('Scheduled “'+f.name.trim()+'”');
+    toast('Scheduled "'+f.name.trim()+'"');
     state.schedFormOpen=false;
     await loadSchedules();
   }catch(e){err('Could not save: '+e.message);btn.disabled=false;}
@@ -1946,6 +2382,45 @@ function renderSchedulesView(){
     return `<tr><td>${esc(s.name)}</td><td>${esc(scheduleWhat(s))}</td><td class="muted small">${esc(env?(env.name||env.key):(s.environment_key||'—'))}</td><td class="small">${esc(scheduleWhen(s))}</td><td class="muted small">${s.next_run_at?esc(new Date(s.next_run_at).toLocaleString()):'—'}</td><td class="muted small">${s.last_run_at?esc(new Date(s.last_run_at).toLocaleString()):'Never'}</td><td>${st}</td><td class="nowrap">${done?'':`<button class="btn small-btn" style="margin-top:0" data-action="sched-toggle" data-id="${esc(s.id)}" data-enabled="${s.enabled?'true':'false'}">${s.enabled?'Pause':'Resume'}</button> `}<button class="btn small-btn" style="margin-top:0" data-action="sched-run" data-id="${esc(s.id)}">Run now</button> <button class="btn small-btn" style="margin-top:0" data-action="sched-delete" data-id="${esc(s.id)}" data-name="${esc(s.name)}">Delete</button></td></tr>`;
   }).join('');
   h+=`<div class="card"><div class="card-head"><h2>Schedules</h2><span class="muted small">${plural(list.length,'schedule')} · ${list.filter(s=>s.enabled&&!(/^at:/i.test(String(s.cron_expression||''))&&s.last_run_at)).length} active</span></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>What runs</th><th>Environment</th><th>When</th><th>Next run</th><th>Last run</th><th>State</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="empty">Nothing is scheduled. Use “Schedule a run”, or the Schedule button next to any Run button.</td></tr>'}</tbody></table></div></div>`;
+  el('content').innerHTML=h;
+}
+
+// ---------------------------------------------------------------------------
+// Fix log — audit of what the AI fixer agent proposed and whether each landed.
+// Backed by GET /api/v1/fix-proposals (see apps/api/src/routes/fix-proposals.ts).
+// ---------------------------------------------------------------------------
+async function loadFixProposals(){
+  try{state.fixProposals=(await api('/api/v1/fix-proposals?limit=200')).data||[];}catch(e){state.fixProposals={error:e.message};}
+  renderSideNav();
+  if(state.view==='fixes')renderCurrentView();
+}
+async function fixAction(kind,node){
+  const id=node.dataset.id;
+  try{
+    if(kind==='reject'){const reason=prompt('Why reject this proposal?','');if(reason===null)return;await postJson('/api/v1/fix-proposals/'+encodeURIComponent(id)+'/reject',{reason});toast('Proposal rejected');}
+  }catch(e){toast('Failed: '+e.message);}
+  await loadFixProposals();
+}
+function fixStatusBadge(s){
+  const map={pending:'never',claimed:'running',applied:'passed',rejected:'failed',failed:'failed',regressed:'failed'};
+  return `<span class="badge ${map[s]||'never'}">${esc(s)}</span>`;
+}
+function renderFixesView(){
+  el('viewTitle').textContent='Fix log';
+  const all=state.fixProposals;
+  if(!state.loaded||all===null||all===undefined){el('content').innerHTML=skeletonHtml();return;}
+  let h=`<div class="group-head first"><h2>Test-case fix proposals</h2><div class="hp-actions"><button class="btn" data-action="fixes-reload">Refresh</button></div></div>`;
+  if(all&&all.error){el('content').innerHTML=h+`<div class="card empty">Could not load fix proposals: ${esc(all.error)}</div>`;return;}
+  const list=Array.isArray(all)?all:[];
+  if(!list.length){el('content').innerHTML=h+`<div class="card empty">No fix proposals yet. Enable Auto-fix on a run and let a failure open one.</div>`;return;}
+  const rows=list.map(p=>{
+    const diff=p.diff?`<details><summary class="muted small">diff (${esc(String(p.diff).split('\\n').length)} lines)</summary><pre class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto">${esc(p.diff)}</pre></details>`:'<span class="muted small">—</span>';
+    const rationale=p.rationale?`<details><summary class="muted small">rationale</summary><div class="small" style="white-space:pre-wrap;max-height:200px;overflow:auto">${esc(p.rationale)}</div></details>`:'';
+    const canReject=p.status==='pending'||p.status==='claimed'||p.status==='applied';
+    const actions=canReject?`<button class="btn small-btn" style="margin-top:0" data-action="fix-reject" data-id="${esc(p.id)}">Reject</button>`:'';
+    return `<tr><td><a href="#/run/${esc(p.run_id)}">${esc(p.run_id.slice(0,8))}</a></td><td>${esc(p.case_key)}</td><td class="small">${esc(p.source_file||'')}</td><td>${fixStatusBadge(p.status)}</td><td class="muted small">${esc(p.classification||'—')}</td><td>${rationale}</td><td>${diff}</td><td class="muted small">${esc(new Date(p.created_at).toLocaleString())}</td><td class="nowrap">${actions}</td></tr>`;
+  }).join('');
+  h+=`<div class="card"><div class="card-head"><h2>Proposals</h2><span class="muted small">${plural(list.length,'proposal')} · ${list.filter(p=>p.status==='applied').length} applied · ${list.filter(p=>p.status==='rejected'||p.status==='failed'||p.status==='regressed').length} rejected</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Case</th><th>Source file</th><th>Status</th><th>Classification</th><th>Rationale</th><th>Diff</th><th>Created</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   el('content').innerHTML=h;
 }
 
@@ -2058,21 +2533,23 @@ function renderCurrentView(){
   syncEnvAndVersionChips();
   const v=state.view;
   if(v==='home')renderHomeView();
-  else if(v==='history')renderHistory();
+  else if(v==='history'||v==='runs-running'||v==='runs-all')renderHistory();
   else if(v==='run')renderRun();
   else if(v==='builds')renderBuilds();
   else if(v==='case')renderCaseView();
   else if(v==='method')renderMethodView(state.methodName);
   else if(v==='tag')renderTagView(state.tagName);
-  else if(v==='config-retention')renderConfigView();
+  else if(v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-remote-triggers')renderConfigView();
   else if(v==='config-apps')renderConfigAppsView();
   else if(v==='config-envs')renderConfigEnvsView();
   else if(v==='config-infra')renderInfraView();
   else if(v==='catalog-coverage')renderCoverageView();
   else if(v==='test-cases'||v==='test-case-form'||v==='test-suites'||v==='test-suite-form')TB.render(v);   // testbench.js
   else if(v==='schedules')renderSchedulesView();
+  else if(v==='fixes')renderFixesView();
   else if(v==='reports')renderReportsView();
-  else if(v==='insights')renderInsightsView();   // insights.js
+  else if(v==='insights'){if(typeof renderInsightsView==='function')renderInsightsView();else{el('content').innerHTML=skeletonHtml();loadInsightsBundle();}}
+
   else if(v==='type')renderTypeView(state.typeId);
   else if(v==='baseline')renderTypeView('selenium-baseline');
   else if(v==='record-new')renderRecordNewView();
@@ -2083,7 +2560,7 @@ function renderCurrentView(){
 }
 function renderWorkerPill(){const live=state.workers.filter(workerFresh).length;el('workerPill').textContent='workers '+live+' live / '+state.workers.length;el('workerPill').title='Heartbeat within the last '+(WORKER_FRESH_MS/1000)+'s / registered';el('workerPill').className=live?'pill ok':'pill';el('livePill').innerHTML=`<span class="pulse${activeRuns().some(e=>!isStalled(e))?'':' idle'}"></span>updated <span data-ago="${esc(state.lastPoll)}">${ago(state.lastPoll)}</span>`;}
 function renderBanner(){
-  if(state.loaded&&!state.cases.length)return banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');
+  if(state.loaded&&totalCases()===0)return banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');
   if(state.liveLoaded&&!state.workers.some(workerFresh))return banner('No live worker (no heartbeat in the last 90s) — queued runs will wait until one connects.');
   const dl=state.deployLoop;
   if(dl){
@@ -2197,7 +2674,8 @@ async function queueExecution(body,label){
   // The App-version column on Test runs reads this; the facets dropdown
   // auto-fills with any value that has been used before.
   const version=currentAppVersion();
-  const meta={...(state.headed?{headless:false}:{}),...(version?{application_version:version}:{})};
+  const af=autoFixPayload();
+  const meta={...(state.headed?{headless:false}:{}),...(version?{application_version:version}:{}),...(af?{auto_fix:af}:{})};
   const payload={...body,environment_id:environmentId,trigger_source:'manual'};
   if(Object.keys(meta).length)payload.metadata=meta;
   if(version)payload.application_version=version;
@@ -2264,6 +2742,7 @@ function handleAction(action,node){
   else if(action==='scroll-details'){const d=el('details');if(d)d.scrollIntoView({behavior:'smooth',block:'start'});}
   else if(action==='run-tile'){const t=state.tiles.get(key);if(!t)return;const ids=(t.cases||[]).map(c=>c.id);if(t.suiteId)runSuite(t.suiteId,ids,t.title);else runCases(ids,t.title);}
   else if(action==='retry-history'){state.history.delete(key);renderCurrentView();}
+  else if(action==='retry-insights'){_bundles.delete('/catalog/insights.js');el('content').innerHTML=skeletonHtml();loadInsightsBundle();}
   else if(action==='more'){state.rowLimit+=ROWS;renderCurrentView();}
   else if(action==='clear-suite'){state.suiteId=null;state.tile=null;renderCurrentView();}
   else if(action==='run-selected')runCases([...state.selected],plural(state.selected.size,'case'));
@@ -2276,6 +2755,8 @@ function handleAction(action,node){
   else if(action==='run-case'){const envSel=el('runCaseEnv');runCases([node.dataset.id],node.dataset.label,envSel&&envSel.value||null);}
   else if(action==='save-retention')saveRetention(node);
   else if(action==='save-timeouts')saveTimeouts(node);
+  else if(action==='save-fixer')saveFixerSettings(node);
+  else if(action==='save-circuit-breaker')saveCircuitBreaker(node);
   else if(action==='timeouts-bulk-set')timeoutsBulkSet();
   else if(action==='timeouts-bulk-delta')timeoutsBulkDelta();
   else if(action==='timeouts-reset-defaults')timeoutsResetDefaults();
@@ -2299,7 +2780,8 @@ function handleAction(action,node){
   else if(action==='type-more')loadTypeCasesPage(false);
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
   else if(action==='sched-save')saveSchedule(node);
-  else if(action==='sched-preset'){const c=el('schedCron');if(c){c.value=node.dataset.cron;state.schedForm.cron=node.dataset.cron;}}
+  else if(action==='fixes-reload')loadFixProposals();
+  else if(action==='fix-reject')fixAction('reject',node);
   else if(action==='sched-toggle')scheduleAction('toggle',node);
   else if(action==='sched-run')scheduleAction('run',node);
   else if(action==='sched-delete')scheduleAction('delete',node);
@@ -2426,6 +2908,21 @@ function showRetentionError(msg){
   if(!msg){err.hidden=true;err.textContent='';return;}
   err.hidden=false;err.textContent=msg;
 }
+async function saveFixerSettings(btn){
+  const err=m=>formError('fixerError',m);err('');
+  const max=Number(el('setAutoFixMax').value);
+  const mode=el('setFixerMode').value;
+  const cap=Number(el('setFixerDiffCap').value);
+  if(!Number.isInteger(max)||max<1||max>20)return err('Max attempts must be a whole number between 1 and 20.');
+  if(!['off','propose','auto'].includes(mode))return err('Pick a fixer mode.');
+  if(!Number.isInteger(cap)||cap<10||cap>100000)return err('Diff cap must be a whole number between 10 and 100000 lines.');
+  btn.disabled=true;
+  try{
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({auto_fix_default_max_attempts:max,fixer_agent_mode:mode,fixer_agent_diff_cap_lines:cap})})).data;
+    toast('Auto-fix settings saved');
+    renderCurrentView();
+  }catch(e){err('Save failed: '+e.message);btn.disabled=false;}
+}
 async function saveRetention(btn){
   showRetentionError(null);
   const raw=el('retentionDays').value;
@@ -2513,17 +3010,23 @@ async function saveTimeouts(btn){
     if(!Number.isInteger(secs)||secs<5||secs>604800){showTimeoutsError('Enter whole seconds between 5 and 604800 for every test type.');return;}
     test_type_timeout_seconds[inp.dataset.type]=secs;
   }
-  const limit=Number(el('failureLimit').value);
-  if(!Number.isInteger(limit)||limit<1||limit>1000){
-    showTimeoutsError('Enter a whole number of consecutive failures, 1-1000.');
-    return;
-  }
   btn.disabled=true;
   try{
-    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_timeout_seconds,consecutive_failure_limit:limit})})).data;
-    toast('Timeout and circuit breaker settings saved');
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({test_type_timeout_seconds})})).data;
+    toast('Timeout settings saved');
     renderCurrentView();
   }catch(e){showTimeoutsError('Save failed: '+e.message);btn.disabled=false;}
+}
+async function saveCircuitBreaker(btn){
+  const err=m=>formError('circuitBreakerError',m);err('');
+  const limit=Number(el('failureLimit').value);
+  if(!Number.isInteger(limit)||limit<1||limit>1000)return err('Enter a whole number of consecutive failures, 1-1000.');
+  btn.disabled=true;
+  try{
+    state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({consecutive_failure_limit:limit})})).data;
+    toast('Circuit breaker saved');
+    renderCurrentView();
+  }catch(e){err('Save failed: '+e.message);btn.disabled=false;}
 }
 function pickedTimeoutInputs(){
   const picks=[...document.querySelectorAll('.timeoutPick')];
@@ -2556,7 +3059,8 @@ async function runEverything(btn){
   if(btn)btn.disabled=true;
   try{
     const v=currentAppVersion();
-    const res=await postJson('/api/v1/executions/run-all',{application_key:state.appKey,environment_id:state.envId,...(v?{application_version:v}:{})});
+    const af=autoFixPayload();
+    const res=await postJson('/api/v1/executions/run-all',{application_key:state.appKey,environment_id:state.envId,...(v?{application_version:v}:{}),...(af?{metadata:{auto_fix:af}}:{})});
     const d=res.data||{};
     if(d.deployment){
       // The stack was down: the engine deploys it first, the run follows, and it comes down again afterwards.
@@ -2964,32 +3468,76 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='home'||v==='history'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='reports'||v==='insights'||v==='catalog-coverage'||v==='record-new')state.view=v;
+  else if(v==='home'||v==='history'||v==='runs-running'||v==='runs-all'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-remote-triggers'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='fixes'||v==='reports'||v==='insights'||v==='catalog-coverage'||v==='record-new')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
   parseHash();renderSideNav();
   if(state.view!=='record-new'&&!(state.view==='type'&&state.typeId==='recordAndPlay'))stopRecordAgentPoll();
   const runId=state.runId,caseId=state.caseId;
-  if(state.view==='builds'&&state.buildRows===null)loadBuildRows();
-  if(state.view==='config-retention'&&state.settings===null)loadSettings();
-  if(state.view==='schedules')loadSchedules();
-  if(state.view==='config-infra')loadInfra();
-  if(state.view==='history'&&!state.runsList.loaded){if(!state.runsFilter.environment_id)state.runsFilter.environment_id=state.envId||'';loadRunsList(true);}
+  // Lazy-loading contract: each view declares exactly what it needs. Views
+  // that do not run cases or watch workers don't trigger live polls, overview
+  // stats or any other background fetch. The idle poller keeps running for
+  // views that do need live state.
+  const V=state.view;
+  // Overview needs the per-type rollup for its tiles (and the build/stats KPIs).
+  if(V==='overview')loadOverviewStats();
+  // Sidebar tone dots prefer the rollup — fetch it the first time we show the
+  // sidebar for an application, then let it refresh on Overview visits.
+  else if(!state.overviewStats||state.overviewStats._loadedForApp!==state.appKey)loadOverviewStats();
+  if(V==='builds'&&state.buildRows===null)loadBuildRows();
+  if(SETTINGS_VIEWS.has(V)&&state.settings===null)loadSettings();
+  if(V==='config-remote-triggers'&&state.remoteTriggers===null)loadRemoteTriggers();
+  if(V==='schedules')loadSchedules();
+  if(V==='fixes')loadFixProposals();
+  if(V==='config-infra')loadInfra();
+  // All three run sub-pages need the runs list in state (runs-all uses it
+  // directly; running/history show it on a sibling tab via navigation).
+  if(V==='history'||V==='runs-running'||V==='runs-all'){
+    if(!state.runsFilter.environment_id)state.runsFilter.environment_id=state.envId||'';
+    if(!state.runsList.loaded)loadRunsList(true);
+  }
+  // The method / tag / search views each hit /ui/cases on open; triggering the
+  // fetch here means the skeleton is on screen while the request is in flight
+  // instead of after it lands.
+  if(V==='method'&&state.methodName){const key='method:'+String(state.methodName).toLowerCase();if(!state.viewCases.has(key))loadViewCases(key,'&execution_method='+encodeURIComponent(state.methodName));}
+  if(V==='tag'&&state.tagName){const key='tag:'+String(state.tagName).toLowerCase();if(!state.viewCases.has(key))loadViewCases(key,'&tag='+encodeURIComponent(state.tagName));}
   renderCurrentView();
   window.scrollTo(0,0);
-  if(state.view==='test-cases'||state.view==='test-case-form'||state.view==='test-suites'||state.view==='test-suite-form'){TB.route(state.view,state.tbMode,state.tbArg);return;}
+  if(V==='test-cases'||V==='test-case-form'||V==='test-suites'||V==='test-suite-form'){TB.route(V,state.tbMode,state.tbArg);return;}
   if(runId){await loadRun(runId);if(state.runId===runId)renderCurrentView();}
   if(caseId&&(!state.caseDetail||state.caseDetail.id!==caseId)){await loadCaseDetail(caseId);if(state.caseId===caseId)renderCurrentView();}
 }
 async function refreshAll(){
-  try{await Promise.all([loadCatalogCounts(),loadSummary(),pollLive(),loadHealth()]);banner(null);renderBanner();renderSideNav();renderCurrentView();}
+  try{
+    // Refresh everything the current view actually depends on. Counts +
+    // summary are cheap; overview-stats reloads only when Overview is the
+    // active view so the user can refresh its tiles without paying for the
+    // rollup on every other page.
+    const jobs=[loadCatalogCounts(),loadSummary(),pollLive(),loadHealth()];
+    if(state.view==='overview')jobs.push(loadOverviewStats(true));
+    await Promise.all(jobs);
+    banner(null);renderBanner();renderSideNav();renderCurrentView();
+  }
   catch(e){banner('Failed to load: '+e.message);}
 }
 el('menuToggle').onclick=()=>el('sidebar').classList.toggle('open');
 el('refreshBtn').onclick=()=>refreshAll();
 el('envSelect').onchange=()=>switchEnvironment(el('envSelect').value);
 el('headedCheck').onchange=()=>{state.headed=el('headedCheck').checked;try{localStorage.setItem('te.headed',state.headed?'1':'');}catch{}};
+// Overview auto-fix opt-in: hydrated from localStorage so the preference
+// survives reloads. Each run kicked off from the Overview bar reads these,
+// matching the testbench autoFix pair.
+(function initAutoFix(){
+  try{state.autoFix=localStorage.getItem('te.autoFix')==='1';}catch{}
+  try{const n=parseInt(localStorage.getItem('te.autoFixMax')||'',10);if(Number.isFinite(n)&&n>=1&&n<=20)state.autoFixMax=n;}catch{}
+})();
+function persistAutoFix(){try{localStorage.setItem('te.autoFix',state.autoFix?'1':'0');localStorage.setItem('te.autoFixMax',String(state.autoFixMax||2));}catch{}}
+function autoFixPayload(){return state.autoFix?{enabled:true,max_attempts:state.autoFixMax||2}:null;}
+function autoFixControlsHtml(){
+  return `<label class="type-check" style="margin-left:6px;white-space:nowrap" title="On a failing case, open a fix proposal and let the fixer-agent patch the test; otherwise redeploy + rerun up to the cap."><input type="checkbox" id="ovAutoFix"${state.autoFix?' checked':''}> Auto-fix on failure</label> <input type="number" id="ovAutoFixMax" min="1" max="20" step="1" value="${state.autoFixMax||2}" style="width:60px"${state.autoFix?'':' disabled'}> <span class="muted small">attempts</span>`;
+}
+
 // Application version: top-bar input. Hydrates from localStorage (default "main"),
 // persists on change, feeds every run / schedule call via currentAppVersion().
 (function initAppVersion(){
@@ -3006,7 +3554,25 @@ function updateAppVersionDatalist(){
   dl.innerHTML=['main',...versions].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<option value="${esc(v)}">`).join('');
 }
 el('appSelect').onchange=()=>switchApplication(el('appSelect').value);
-el('globalSearch').oninput=debounce(e=>{state.search=e.target.value;state.rowLimit=ROWS;renderCurrentView();},120);
+el('globalSearch').oninput=debounce(e=>{
+  state.search=e.target.value;state.rowLimit=ROWS;
+  // Overview search is server-driven in lazy mode — kick a /ui/cases?q=
+  // fetch so matching cases show up without iterating state.cases on the client.
+  if(state.search&&state.view==='overview')overviewSearchDebounced();
+  renderCurrentView();
+},120);
+
+// Scope-picker typeahead: re-wire the search input so each keystroke updates
+// state.schedForm.caseText (or reportForm.caseText) and triggers the lookup.
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(!t||!t.id)return;
+  if(t.id.endsWith('CaseSearch')){
+    const prefix=t.id.slice(0,-'CaseSearch'.length);
+    const form=prefix==='sched'?state.schedForm:prefix==='report'?state.reportForm:null;
+    if(form){form.caseText=t.value;scopeCaseLookup(String(t.value||'').trim().toLowerCase());}
+  }
+});
 el('sideNav').addEventListener('click',e=>{
   const sec=e.target.closest('.nav-sec');
   if(sec){toggleNavSection(sec.dataset.sec);return;}
@@ -3037,6 +3603,8 @@ content.addEventListener('input',e=>{
 });
 content.addEventListener('change',e=>{
   if(e.target.id==='deployMode'){state.deployMode=e.target.value;renderCurrentView();return;}
+  if(e.target.id==='ovAutoFix'){state.autoFix=!!e.target.checked;persistAutoFix();renderCurrentView();return;}
+  if(e.target.id==='ovAutoFixMax'){const n=Number(e.target.value);if(Number.isFinite(n)&&n>=1&&n<=20){state.autoFixMax=Math.round(n);persistAutoFix();}return;}
   if(e.target.id==='cycleIterations'){const n=Math.max(1,Math.min(100,Number(e.target.value)||3));state.cycleIterations=n;e.target.value=String(n);return;}
   if(e.target.closest('#infraPolicy')){readInfraPolicyForm();return;}
   const form=e.target.closest('[data-form]');
@@ -3109,14 +3677,20 @@ setInterval(()=>{
   el('headedCheck').checked=state.headed;
   parseHash();renderSideNav();renderCurrentView();       // skeleton paints before any data arrives
   loadHealth();setInterval(loadHealth,60000);
+  // Boot path is lean: applications → catalog-counts (sidebar numbers) → lean
+  // summary (envs + application metadata + suites). onRoute then fires the
+  // per-view fetches the current route actually needs. Overview-stats and the
+  // live poll kick off in the background without blocking the first paint.
   try{
     await loadApplications();
-    // Counts arrive first (small payload) so the sidebar and Overview tiles
-    // render with real numbers while the heavier summary + poll fetch the
-    // per-case rows in the background.
     await loadCatalogCounts();renderSideNav();renderCurrentView();
-    await Promise.all([loadSummary(),pollLive()]);
+    await loadSummary();
+    renderSideNav();renderCurrentView();
   }catch(e){banner('Failed to load: '+e.message);return;}
   renderBanner();onRoute();
+  // Background: live poll + active deployment. These are needed by many views
+  // (Overview, History, Run) but not by the first-paint chrome, so they run
+  // after render() has already shown the UI.
+  pollLive();
   loadActiveDeployment();
 })();

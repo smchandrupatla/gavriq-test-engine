@@ -121,10 +121,16 @@ export async function testCaseRoutes(app: FastifyInstance) {
 
     if (q.application_id) { clauses.push(`tc.application_id = $${i++}`); params.push(q.application_id); }
     if (q.application_key) { clauses.push(`tc.application_id = (SELECT id FROM applications WHERE key = $${i++})`); params.push(q.application_key); }
+    const hasLifecycleFilter = !!q.lifecycle || !!q.status || q.include_archived === '1';
     if (q.lifecycle) { clauses.push(`tc.lifecycle = $${i++}`); params.push(q.lifecycle); }
     if (q.status === 'draft') clauses.push(`tc.lifecycle IN ('draft','ready_for_review')`);
     else if (q.status === 'active') clauses.push(`tc.lifecycle IN ('approved','active','maintenance')`);
     else if (q.status === 'archived') clauses.push(`tc.lifecycle IN ('archived','deprecated')`);
+    // Default-hide archived + deprecated so this list, /ui/catalog-counts, and
+    // /test-cases/summary all agree on "how many test cases do I have". A
+    // caller that wants everything passes include_archived=1 or an explicit
+    // status/lifecycle filter.
+    if (!hasLifecycleFilter) clauses.push(`tc.lifecycle NOT IN ('archived','deprecated')`);
     if (q.test_type) { clauses.push(`tc.test_type = $${i++}`); params.push(q.test_type); }
     if (q.tag) { clauses.push(`$${i++} = ANY(tc.tags)`); params.push(q.tag); }
     if (q.component) { clauses.push(`tc.component = $${i++}`); params.push(q.component); }
@@ -143,10 +149,11 @@ export async function testCaseRoutes(app: FastifyInstance) {
     const envParam = i++;
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    // Caps raised to 5000 — the console no longer hits this endpoint for its
-    // type page (that uses /api/v1/ui/cases, which pages at 50 by default), but
-    // external callers may legitimately pull a few thousand in one go.
-    const limit = Math.min(Number(q.limit) || 50, 5000);
+    // Caps raised to 50000 — the Test cases console view loads the entire
+    // catalog in one go (the LATERAL joins per row are the slow part, not the
+    // row count), so a 12k-case repo needs ample headroom here or the page
+    // count silently diverges from the sidebar total.
+    const limit = Math.min(Number(q.limit) || 50, 50000);
     const offset = Number(q.offset) || 0;
     // The screen lists ~800 cases: it gets the card columns; full=1 adds steps, scripts and rules.
     const columns = q.full === '1' ? 'tc.*' : `tc.id, tc.key, tc.name, tc.objective, tc.application_id, tc.test_type, tc.execution_method, tc.automation_status,

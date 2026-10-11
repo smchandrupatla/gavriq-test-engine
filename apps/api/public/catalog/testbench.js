@@ -48,7 +48,27 @@ const S={
   shown:PAGE_SIZE,
   typeSel:null,
 };
+// Auto-fix loop: per-run toggle persisted in localStorage so the operator does
+// not have to re-opt-in on every reload. Max attempts defaults to 2; a bump
+// lives until the operator changes it again. See apps/api/src/run-fix-loop.ts.
+S.autoFix=false;S.autoFixAttempts=2;
 try{S.viewMode=localStorage.getItem('tb_view')||'compact';S.savedViews=JSON.parse(localStorage.getItem('tb_saved_views')||'[]');}catch{}
+try{
+  S.autoFix=localStorage.getItem('tb_auto_fix')==='1';
+  const n=parseInt(localStorage.getItem('tb_auto_fix_attempts')||'',10);
+  if(Number.isFinite(n)&&n>=1&&n<=20)S.autoFixAttempts=n;
+}catch{}
+function persistAutoFix(){try{localStorage.setItem('tb_auto_fix',S.autoFix?'1':'0');localStorage.setItem('tb_auto_fix_attempts',String(S.autoFixAttempts));}catch{}}
+function autoFixControls(pos){
+  const prefix='tb-af-'+(pos||'main');
+  const title='When a case fails, keep fixing + redeploying + rerunning until it passes or the cap is reached. Transient failures retry without a redeploy; real defects go to the defect log after the cap.';
+  return `<label class="tb-autofix" title="${esc(title)}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);white-space:nowrap">
+    <input type="checkbox" id="${prefix}-on"${S.autoFix?' checked':''} data-tb-autofix="toggle"> <span class="small">Auto-fix on failure</span>
+    <span class="small muted" style="margin-left:6px">max</span>
+    <input type="number" id="${prefix}-max" min="1" max="20" value="${S.autoFixAttempts}" data-tb-autofix="attempts" style="width:52px;background:var(--panel);border:1px solid var(--line);color:var(--text);padding:2px 4px;border-radius:4px"${S.autoFix?'':' disabled'}>
+  </label>`;
+}
+function autoFixPayload(){return S.autoFix?{enabled:true,max_attempts:S.autoFixAttempts}:null;}
 
 const CSS=`
 .tb-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
@@ -176,7 +196,7 @@ async function loadCases(force){
   S.loading=true;S.error=null;S.appKey=state.appKey;S.envId=state.envId;
   try{
     const [list,summary]=await Promise.all([
-      api('/api/v1/test-cases?'+appQ()+'&limit=1000'),
+      api('/api/v1/test-cases?'+appQ()+'&limit=50000'),
       api('/api/v1/test-cases/summary?'+appQ()).catch(()=>({})),
     ]);
     S.cases=list.data||[];S.summary=summary||{};S.loaded=true;
@@ -360,6 +380,7 @@ function listHtml(){
   return `<section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.selected.size).padStart(2,'0')} SELECTED</span><span class="muted small">${shownNow} of ${plural(total,'case')} shown</span><span class="spacer" style="flex:1"></span>
       <button class="btn" data-tb="clear-sel">Clear selection</button>
       <select id="tb-run-env" title="Environment to run the selected cases against">${envOptions()}</select>
+      ${autoFixControls('main')}
       <button class="btn" data-tb="save-suite"${S.selected.size?'':' disabled'}>Save selected as suite</button>
       <button class="btn primary" data-tb="run-selected"${S.selected.size?'':' disabled'}>Run selected${S.selected.size?' ('+S.selected.size+')':''}</button></div>${body}</section>`;
 }
@@ -443,7 +464,7 @@ function detailHtml(){
   return `<aside class="tb-detail" id="tb-detail" aria-label="Test case details">
     <div class="tb-dhead">
       <div class="row"><div class="title"><div class="n">${esc(c.name||c.key)}</div><div class="m">${esc(c.key)}</div></div><div style="display:flex;gap:4px"><a class="btn" href="#/case/${esc(c.id)}" title="Open as a full page">Open ↗</a><button class="btn" data-tb="close-detail" aria-label="Close details" title="Close (Esc)">✕</button></div></div>
-      <div class="row"><select id="tb-detail-env" aria-label="Environment for run" style="min-width:140px">${envOptions()}</select><button class="btn primary" data-tb="run-one" data-id="${esc(c.id)}"${c.execution_method==='manual'?' disabled title="A manual case is run by hand: record the outcome as a note"':''}>Run now</button><a class="btn" href="#/test-case-form/clone/${esc(c.id)}" title="Create a new test case pre-filled from this one">New from this case</a><a class="btn" href="#/test-case-form/edit/${esc(c.id)}">Edit</a></div>
+      <div class="row" style="flex-wrap:wrap"><select id="tb-detail-env" aria-label="Environment for run" style="min-width:140px">${envOptions()}</select><button class="btn primary" data-tb="run-one" data-id="${esc(c.id)}"${c.execution_method==='manual'?' disabled title="A manual case is run by hand: record the outcome as a note"':''}>Run now</button>${autoFixControls('detail')}<a class="btn" href="#/test-case-form/clone/${esc(c.id)}" title="Create a new test case pre-filled from this one">New from this case</a><a class="btn" href="#/test-case-form/edit/${esc(c.id)}">Edit</a></div>
       <div class="row">${statusPill(c)}${priPill(c.priority_label)}<span class="muted small">v${esc(c.version||1)} · ${esc(c.status||c.lifecycle||'')}</span></div>
     </div>
     ${c.partial?'<div class="skel" style="height:120px;margin:12px"></div>':detailBodyHtml(c,{runs:S.detailRuns})}
@@ -653,7 +674,7 @@ function casePickHtml(members,filter,prefix){
 function suiteDetailHtml(){
   const s=S.suiteCurrent;if(!s)return '';
   return `<aside class="tb-detail" id="tb-suite-detail"><div class="tb-dhead"><div class="row"><div class="title"><input type="text" id="tb-suite-name" value="${esc(S.suiteName)}" placeholder="Suite name" style="font-size:15px;font-weight:700;width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 8px;border-radius:6px"><div class="m">${esc(s.key)} · ${esc(s.suite_type||'custom')}</div></div></div>
-    <div class="row"><select id="tb-suite-env" style="min-width:140px">${envOptions()}</select><button class="btn primary" data-tb="suite-run" data-id="${esc(s.id)}" title="Run all cases in this suite">Run suite</button><button class="btn" data-tb="suite-save" data-id="${esc(s.id)}">Save</button><button class="btn" data-tb="suite-delete" data-id="${esc(s.id)}" style="border-color:var(--red);color:var(--red)">Delete</button><button class="btn" data-tb="suite-close" aria-label="Close">✕</button></div></div>
+    <div class="row" style="flex-wrap:wrap"><select id="tb-suite-env" style="min-width:140px">${envOptions()}</select><button class="btn primary" data-tb="suite-run" data-id="${esc(s.id)}" title="Run all cases in this suite">Run suite</button>${autoFixControls('suite')}<button class="btn" data-tb="suite-save" data-id="${esc(s.id)}">Save</button><button class="btn" data-tb="suite-delete" data-id="${esc(s.id)}" style="border-color:var(--red);color:var(--red)">Delete</button><button class="btn" data-tb="suite-close" aria-label="Close">✕</button></div></div>
     <div class="tb-section"><h3>Member cases <span class="hint">(${S.members.size} selected)</span></h3><input type="text" id="tb-member-filter" value="${esc(S.memberFilter)}" placeholder="Filter test cases…" style="width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px">${casePickHtml(S.members,S.memberFilter,'detail')}</div>
     <div class="tb-section"><h3>Description</h3><div class="muted small">${esc(s.description||'—')}</div></div></aside>`;
 }
@@ -666,7 +687,7 @@ function renderTestSuites(){
   const table=rows.length?`<div class="table-wrap"><table><thead><tr><th><input type="checkbox" data-tb-suiteall="1"${all?' checked':''}></th><th>Suite</th><th>Cases</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>${rows.map(s=>`<tr class="tb-row${S.suiteCurrent&&S.suiteCurrent.id===s.id?' active':''}" data-tb="open-suite" data-id="${esc(s.id)}"><td><input type="checkbox" data-tb-suitepick="${esc(s.id)}"${S.suiteSel.has(s.id)?' checked':''}></td><td><div>${esc(s.name||'(untitled)')}</div><div class="key small">${esc(s.key)}</div></td><td>${plural((s.case_ids||[]).length,'case')}</td><td><span class="badge ${s.status==='active'?'passed':'never'}">${esc(s.status||'active')}</span></td><td class="muted small">${esc(when(s.created_at))}</td><td><div class="tb-actions"><button class="btn" data-tb="open-suite" data-id="${esc(s.id)}">Edit</button><a class="btn" href="#/type/${esc(s.suite_type||'other')}/suite/${esc(s.id)}" title="Open this suite's cases and run history">History</a></div></td></tr>`).join('')}</tbody></table></div>`:`<div class="tb-empty">${S.suites.length?'No suites match the search.':'No test suites yet. Group existing test cases into a suite to run them together.'}<br><a class="btn" href="#/test-suite-form" style="margin-top:8px;display:inline-block">New test suite</a></div>`;
   el('content').innerHTML=`<div class="group-head first"><h2>Test suites</h2><span class="muted small">Groups of test cases run together. Open a suite to edit membership or run it.</span></div>${suiteStatsHtml()}<p class="tb-status" id="tb-status" role="status"></p>
     <div class="tb-toolbar"><input type="search" id="tb-suite-search" value="${esc(S.suiteSearch)}" placeholder="Search suite name…" style="width:260px"><span class="spacer"></span><a class="btn" href="#/test-suite-form">New test suite</a></div>
-    <div class="tb-layout${S.suiteCurrent?(S.detail?' suite-three':' suite-two'):''}"><section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.suiteSel.size).padStart(2,'0')} SELECTED</span><span class="spacer" style="flex:1"></span><button class="btn" data-tb="suite-clear-sel">Clear selection</button><button class="btn" data-tb="suite-run-selected"${S.suiteSel.size?'':' disabled'}>Run selected</button><button class="btn" data-tb="suite-compose"${S.suiteSel.size>1?'':' disabled'} title="Combine the selected suites' cases into one new suite">Compose from selected</button><button class="btn" data-tb="suite-delete-selected"${S.suiteSel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected</button></div>${table}</section>${suiteDetailHtml()}${S.detail?detailHtml():''}</div>`;
+    <div class="tb-layout${S.suiteCurrent?(S.detail?' suite-three':' suite-two'):''}"><section class="card" style="margin:0"><div class="tb-main-head"><span class="tb-sel">${String(S.suiteSel.size).padStart(2,'0')} SELECTED</span><span class="spacer" style="flex:1"></span><button class="btn" data-tb="suite-clear-sel">Clear selection</button>${autoFixControls('suitelist')}<button class="btn" data-tb="suite-run-selected"${S.suiteSel.size?'':' disabled'}>Run selected</button><button class="btn" data-tb="suite-compose"${S.suiteSel.size>1?'':' disabled'} title="Combine the selected suites' cases into one new suite">Compose from selected</button><button class="btn" data-tb="suite-delete-selected"${S.suiteSel.size?'':' disabled'} style="border-color:var(--red);color:var(--red)">Delete selected</button></div>${table}</section>${suiteDetailHtml()}${S.detail?detailHtml():''}</div>`;
 }
 function openSuite(id){const s=S.suites.find(x=>x.id===id||x.key===id);if(!s)return;S.suiteCurrent=s;S.suiteName=s.name||'';S.members=new Set(s.case_ids||[]);S.memberFilter='';S.detail=null;S.currentId=null;S.detailRuns=null;S.detailAudit=null;render('test-suites');}
 function renderTestSuiteForm(){
@@ -698,7 +719,8 @@ function remarksHtml(r){
 // actions
 // ---------------------------------------------------------------------------
 async function runOne(id,envId){
-  try{const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(id)+'/run',{environment:envId||state.envId,headless:state.headed?false:undefined,...(v?{application_version:v}:{})});toast('Run queued — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}
+  const af=autoFixPayload();
+  try{const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const r=await postJson('/api/v1/test-cases/'+encodeURIComponent(id)+'/run',{environment:envId||state.envId,headless:state.headed?false:undefined,...(v?{application_version:v}:{}),...(af?{auto_fix:af}:{})});toast('Run queued — '+(r.run.name||r.run.key)+(af?' · auto-fix on (up to '+af.max_attempts+')':''),'#/run/'+r.run.id);pollLive();}
   catch(e){toast('Could not queue run: '+e.message);}
 }
 async function saveTriage(id){
@@ -752,7 +774,7 @@ async function handle(action,node){
     case 'save-view':{const name=(prompt('Name this view:')||'').trim();if(!name)return;S.savedViews.push({name,search:S.search,filters:{status:[...S.filters.status],priority:[...S.filters.priority],owner:[...S.filters.owner],environment:[...S.filters.environment],tag:[...S.filters.tag],flakyOnly:S.filters.flakyOnly},sortKey:S.sortKey,sortDir:S.sortDir});try{localStorage.setItem('tb_saved_views',JSON.stringify(S.savedViews));}catch{}render('test-cases');setStatus('View saved: '+name);break;}
     case 'export-csv':exportCsv();break;
     case 'clear-sel':S.selected=new Set();render('test-cases');break;
-    case 'run-selected':{const ids=[...S.selected];if(!ids.length)return;const env=formVal('tb-run-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-cases/run-batch',{ids,environment:env,...(v?{application_version:v}:{})});toast('Queued '+plural(ids.length,'case'),r.runs&&r.runs[0]?'#/run/'+r.runs[0].id:undefined);pollLive();}catch(e){toast('Batch run failed: '+e.message);}break;}
+    case 'run-selected':{const ids=[...S.selected];if(!ids.length)return;const env=formVal('tb-run-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const af=autoFixPayload();try{const r=await postJson('/api/v1/test-cases/run-batch',{ids,environment:env,...(v?{application_version:v}:{}),...(af?{auto_fix:af}:{})});toast('Queued '+plural(ids.length,'case')+(af?' · auto-fix on (up to '+af.max_attempts+')':''),r.runs&&r.runs[0]?'#/run/'+r.runs[0].id:undefined);pollLive();}catch(e){toast('Batch run failed: '+e.message);}break;}
     case 'save-suite':saveSelectedAsSuite();break;
     case 'run-one':{const env=formVal('tb-detail-env')||formVal('tb-run-env')||state.envId;runOne(id,env);break;}
     case 'open-case':location.hash='#/test-cases/'+encodeURIComponent(id);break;
@@ -802,8 +824,8 @@ async function handle(action,node){
     case 'suite-clear-sel':S.suiteSel=new Set();render('test-suites');break;
     case 'suite-save':{const name=formVal('tb-suite-name').trim();if(!name){setStatus('Suite name is required.',true);return;}setStatus('Saving…');try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({name,caseIds:[...S.members]})});setStatus('Saved.');await loadSuites(true);openSuite(id);await loadSummary();renderSideNav();}catch(e){setStatus('Save failed: '+e.message,true);}break;}
     case 'suite-delete':{if(!confirm('Delete this test suite? This cannot be undone.'))return;try{await api('/api/v1/test-suites/'+encodeURIComponent(id),{method:'DELETE'});toast('Suite deleted');S.suiteCurrent=null;await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');}catch(e){setStatus('Delete failed: '+e.message,true);}break;}
-    case 'suite-run':{const env=formVal('tb-suite-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-suites/'+encodeURIComponent(id)+'/run',{environment:env,...(v?{application_version:v}:{})});toast('Queued '+plural(r.outcome.ranCases,'case')+' — '+(r.run.name||r.run.key),'#/run/'+r.run.id);pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
-    case 'suite-run-selected':{const ids=[...S.suiteSel];if(!ids.length)return;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;try{const r=await postJson('/api/v1/test-suites/run-batch',{ids,environment:state.envId,...(v?{application_version:v}:{})});toast('Queued '+plural(r.runs.length,'suite run'));pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
+    case 'suite-run':{const env=formVal('tb-suite-env')||state.envId;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const af=autoFixPayload();try{const r=await postJson('/api/v1/test-suites/'+encodeURIComponent(id)+'/run',{environment:env,...(v?{application_version:v}:{}),...(af?{auto_fix:af}:{})});toast('Queued '+plural(r.outcome.ranCases,'case')+' — '+(r.run.name||r.run.key)+(af?' · auto-fix on (up to '+af.max_attempts+')':''),'#/run/'+r.run.id);pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
+    case 'suite-run-selected':{const ids=[...S.suiteSel];if(!ids.length)return;const v=(typeof currentAppVersion==='function')?currentAppVersion():null;const af=autoFixPayload();try{const r=await postJson('/api/v1/test-suites/run-batch',{ids,environment:state.envId,...(v?{application_version:v}:{}),...(af?{auto_fix:af}:{})});toast('Queued '+plural(r.runs.length,'suite run')+(af?' · auto-fix on (up to '+af.max_attempts+')':''));pollLive();}catch(e){setStatus('Run failed: '+e.message,true);}break;}
     case 'suite-compose':{if(S.suiteSel.size<2){setStatus('Select at least two test suites to compose.',true);return;}const name=(prompt('Name for the combined suite:','Combined suite')||'').trim();if(!name)return;try{const r=await postJson('/api/v1/test-suites/from-suites',{name,suiteIds:[...S.suiteSel]});setStatus('Composed “'+name+'” with '+plural((r.case_ids||[]).length,'case'));S.suiteSel=new Set();await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');}catch(e){setStatus('Compose failed: '+e.message,true);}break;}
     case 'suite-delete-selected':{const ids=[...S.suiteSel];if(!ids.length)return;if(!confirm('Delete '+ids.length+' selected test suite(s)? This cannot be undone.'))return;for(const sid of ids){await api('/api/v1/test-suites/'+encodeURIComponent(sid),{method:'DELETE'}).catch(()=>null);}S.suiteSel=new Set();if(S.suiteCurrent&&ids.includes(S.suiteCurrent.id))S.suiteCurrent=null;await loadSuites(true);await loadSummary();renderSideNav();render('test-suites');setStatus('Deleted '+plural(ids.length,'suite'));break;}
     case 'suite-create':{const name=formVal('tb-sf-name').trim();if(!name){setStatus('Suite name is required.',true);q('#tb-sf-name').focus();return;}setStatus('Creating…');try{const r=await postJson('/api/v1/test-suites',{name,caseIds:[...S.suiteForm.members],application_key:state.appKey});S.suiteForm={name:'',members:new Set(),filter:''};S.suitesLoaded=false;await loadSummary();renderSideNav();location.hash='#/test-suites/'+encodeURIComponent(r.id||(r.data&&r.data.id));}catch(e){setStatus('Create failed: '+e.message,true);}break;}
@@ -825,6 +847,20 @@ function wire(){
     const t=e.target;
     if(t.id==='tb-sort'){S.sortKey=t.value;S.shown=PAGE_SIZE;render('test-cases');return;}
     if(t.id==='tb-saved'){const v=S.savedViews[Number(t.value)];if(!v)return;S.search=v.search||'';S.filters={status:new Set(v.filters.status),priority:new Set(v.filters.priority),owner:new Set(v.filters.owner),environment:new Set(v.filters.environment),tag:new Set(v.filters.tag),flakyOnly:!!v.filters.flakyOnly};S.sortKey=v.sortKey||'lastRun';S.sortDir=v.sortDir||'desc';S.shown=PAGE_SIZE;render('test-cases');return;}
+    if(t.dataset.tbAutofix==='toggle'){
+      S.autoFix=!!t.checked;persistAutoFix();
+      // Enable/disable every "max" input on the page without a full re-render.
+      content.querySelectorAll('[data-tb-autofix="attempts"]').forEach(n=>{n.disabled=!S.autoFix;});
+      // Keep every other toggle in sync (there is one per toolbar).
+      content.querySelectorAll('[data-tb-autofix="toggle"]').forEach(n=>{if(n!==t)n.checked=S.autoFix;});
+      return;
+    }
+    if(t.dataset.tbAutofix==='attempts'){
+      const n=Math.max(1,Math.min(20,parseInt(t.value,10)||2));
+      S.autoFixAttempts=n;persistAutoFix();
+      content.querySelectorAll('[data-tb-autofix="attempts"]').forEach(x=>{if(x!==t)x.value=String(n);});
+      return;
+    }
     if(t.dataset.tbPick){if(t.checked)S.selected.add(t.dataset.tbPick);else S.selected.delete(t.dataset.tbPick);render('test-cases');return;}
     if(t.dataset.tbPickall){visibleRows().forEach(c=>{if(t.checked)S.selected.add(c.id);else S.selected.delete(c.id);});render('test-cases');return;}
     if(t.dataset.tbSuitepick){if(t.checked)S.suiteSel.add(t.dataset.tbSuitepick);else S.suiteSel.delete(t.dataset.tbSuitepick);render('test-suites');return;}
