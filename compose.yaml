@@ -51,6 +51,11 @@ services:
       SIT_ON_START: "false"
       SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
       SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:80}
+      # Remote-execution webhook secrets, referenced by name from
+      # config/remote-triggers.json (secret values live only here).
+      SAND_BENCH_WEBHOOK_SECRET: ${SAND_BENCH_WEBHOOK_SECRET:-}
+      # Public URL the engine prints as the webhook endpoint (for display).
+      ENGINE_PUBLIC_URL: ${ENGINE_PUBLIC_URL:-http://127.0.0.1:8797}
     ports:
       - "127.0.0.1:${TEST_ENGINE_HOST_PORT:-8787}:8787"
     volumes:
@@ -63,6 +68,11 @@ services:
         read_only: true
         bind:
           create_host_path: true
+      # Remote-execution trigger config: file-edit, no restart needed.
+      - type: bind
+        source: ./config
+        target: /app/config
+        read_only: true
     healthcheck:
       test:
         [

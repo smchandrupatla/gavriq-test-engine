@@ -45,6 +45,7 @@ import { cycleRunRoutes } from './routes/cycle-runs.js';
 import { defectLogRoutes } from './routes/defect-log.js';
 import { feedbackLoopTick } from './feedback-loop.js';
 import { deployLoopTick } from './deploy-loop.js';
+import { webhookRoutes } from './routes/webhook.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -252,6 +253,7 @@ async function main() {
   await app.register(deployLoopRoutes);
   await app.register(cycleRunRoutes);
   await app.register(recordRoutes);
+  await app.register(webhookRoutes);
 
   await app.listen({ port, host });
 
