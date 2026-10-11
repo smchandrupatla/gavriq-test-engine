@@ -455,9 +455,13 @@ function responsiveCase(
   path: string,
   humanName: string,
   viewport: { width: number; height: number; label: string },
-  options: { signedIn?: boolean; assertText?: string; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; vpTag?: string; browserTag?: string; browserNote?: string } = {}
+  options: { signedIn?: boolean; assertText?: string; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; browserLabel?: string; vpTag?: string; browserTag?: string; browserNote?: string } = {}
 ): CaseDef {
   const browser = options.browser || 'chromium';
+  // Browser is in the name as well as the key: three browser siblings at the
+  // same viewport only differ by their validationRules.browser, and the Test
+  // cases list would otherwise show three identical rows (fix on 2026-10-11).
+  const browserLabel = options.browserLabel || browser;
   const vpTag = options.vpTag || 'vp:custom';
   const browserTag = options.browserTag || `browser:${browser}`;
   const browserNote = options.browserNote ? ` ${options.browserNote}` : '';
@@ -479,23 +483,23 @@ function responsiveCase(
       ];
   return {
     key,
-    name: `${humanName} renders at ${viewport.width}x${viewport.height} (${viewport.label})`,
+    name: `${humanName} renders at ${viewport.width}x${viewport.height} (${viewport.label}) in ${browserLabel}`,
     objective:
-      `Open ${humanName} in ${browser} at ${viewport.width}x${viewport.height} — a ${viewport.label} window — and confirm the page is usable: the verified content is visible and no horizontal scrolling is needed.`,
+      `Open ${humanName} in ${browserLabel} at ${viewport.width}x${viewport.height} — a ${viewport.label} window — and confirm the page is usable: the verified content is visible and no horizontal scrolling is needed.`,
     description:
-      `Launch ${browser} with a viewport of ${viewport.width} wide by ${viewport.height} tall and navigate to {{web}}${path}. The ${viewport.label} class should keep the page usable — the verified content fragment${options.assertText ? ` "${options.assertText}"` : ''} must be visible and the page must have no horizontal overflow.`,
+      `Launch ${browserLabel} with a viewport of ${viewport.width} wide by ${viewport.height} tall and navigate to {{web}}${path}. The ${viewport.label} class should keep the page usable — the verified content fragment${options.assertText ? ` "${options.assertText}"` : ''} must be visible and the page must have no horizontal overflow.`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
     severity: 'low',
     priority: 'p3',
-    preconditions: `Sand Bench web container up${options.signedIn ? '; demo operator identity enabled' : ''}; the worker has ${browser} available.${browserNote}`,
+    preconditions: `Sand Bench web container up${options.signedIn ? '; demo operator identity enabled' : ''}; the worker has ${browserLabel} available.${browserNote}`,
     steps,
     timeoutSeconds: options.signedIn ? 60 : 30,
     validationRules: { browser, viewport: { width: viewport.width, height: viewport.height } },
     tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:responsive', vpTag, browserTag, options.signedIn ? 'signed-in' : 'public'],
     dataProfile: options.signedIn ? SIGNIN_DATA : PUBLIC_READ,
-    expected: `${humanName} renders at ${viewport.width}x${viewport.height} without horizontal overflow.`,
+    expected: `${humanName} renders at ${viewport.width}x${viewport.height} without horizontal overflow in ${browserLabel}.`,
   };
 }
 
@@ -3088,6 +3092,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
             assertText: p.assertText,
             vpTag: v.tag,
             browser: b.name,
+            browserLabel: b.label,
             browserTag: b.tag,
             browserNote: b.channelNote,
           }

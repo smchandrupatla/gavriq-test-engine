@@ -39,12 +39,12 @@ const ROOT = path.resolve(process.env.INFRA_REPO_ROOT || path.join(path.dirname(
 const AGENT_ID = process.env.INFRA_AGENT_ID || `infra-${os.hostname().toLowerCase()}`;
 const DOCKER = process.env.DOCKER_BIN || 'docker';
 const SCRIPT_PATTERN = /^deploy\/[\w.-]+\/deploy\.mjs$/;
-const TIMEOUTS_MS = { deploy: 40 * 60_000, teardown: 10 * 60_000, prune: 15 * 60_000 } as const;
+const TIMEOUTS_MS = { deploy: 40 * 60_000, teardown: 10 * 60_000, prune: 15 * 60_000, scale_workers: 10 * 60_000 } as const;
 const LOG_KEEP = 48 * 1024;
 
 type Job = {
   id: string;
-  kind: 'deploy' | 'teardown' | 'prune';
+  kind: 'deploy' | 'teardown' | 'prune' | 'scale_workers';
   params: Record<string, any>;
   environment?: { id: string; key: string; name: string } | null;
   reason?: string;
@@ -137,6 +137,46 @@ function parseResult(output: string): Record<string, unknown> {
 // Job handlers
 // ---------------------------------------------------------------------------
 type Progress = (text: string) => void;
+
+/**
+ * Scale the worker service up to meet the SLA planner's target. The engine's
+ * run-planner enqueues this when a new run arrives wanting more workers than
+ * are online. We run `docker compose --profile <p> up -d --scale <svc>=<n>`,
+ * which is a no-op when the current replica count already matches.
+ *
+ * Safety:
+ *   - `cap` is enforced on BOTH sides (the engine clamps to WORKER_SCALE_MAX
+ *     before queueing; we clamp again here against the agent's SCALE_MAX
+ *     fallback) so a buggy planner cannot runaway-scale the host.
+ *   - We only touch the service name the engine passed in — a job that names
+ *     anything else is refused.
+ */
+async function scaleWorkers(job: Job, progress: Progress) {
+  const AGENT_SCALE_MAX = Math.max(1, Number(process.env.WORKER_SCALE_MAX || 20));
+  const service = typeof job.params.service === 'string' ? job.params.service : 'test-engine-worker';
+  const profile = typeof job.params.profile === 'string' ? job.params.profile : 'workers';
+  const project = typeof job.params.compose_project === 'string' ? job.params.compose_project : 'gavriq-test-engine';
+  const cap = Math.min(AGENT_SCALE_MAX, Math.max(1, Number(job.params.cap) || AGENT_SCALE_MAX));
+  const target = Math.min(cap, Math.max(1, Math.round(Number(job.params.target) || 1)));
+
+  // Only accept the known worker service name. A rogue params.service pointing
+  // at test-engine itself would be refused here, defense-in-depth over the
+  // engine-side cap.
+  const allow = /^[a-z0-9][a-z0-9._-]*$/i;
+  if (!allow.test(service)) throw new Error(`refused: invalid service name "${service}"`);
+
+  const args = ['compose', '-p', project, '--profile', profile, 'up', '-d', '--no-deps', '--scale', `${service}=${target}`, service];
+  progress(`$ ${DOCKER} ${args.join(' ')}\n`);
+  const res = await run(DOCKER, args, { cwd: ROOT, timeoutMs: 10 * 60_000, onOutput: progress });
+  if (res.code !== 0) throw new Error(`scale ${service}=${target} exited ${res.code}\n${tail(res.output)}`);
+  // Report back what compose actually ended with.
+  let running = 0;
+  try {
+    const ids = await dockerLines(['ps', '-q', '--filter', `label=com.docker.compose.project=${project}`, '--filter', `label=com.docker.compose.service=${service}`]);
+    running = ids.length;
+  } catch {}
+  return { service, target, running, cap };
+}
 
 async function deploy(job: Job, progress: Progress) {
   const file = scriptPath(job.params);
@@ -346,7 +386,11 @@ async function handle(job: Job) {
   log(`job ${job.id} ${job.kind}${job.environment ? ` ${job.environment.key}` : ''} (${job.reason || 'requested'}) started`);
   let outcome: { status: 'succeeded' | 'failed'; result?: unknown; error?: string };
   try {
-    const result = job.kind === 'deploy' ? await deploy(job, progress) : job.kind === 'teardown' ? await teardown(job, progress) : await prune(job, progress);
+    const result =
+      job.kind === 'deploy' ? await deploy(job, progress)
+      : job.kind === 'teardown' ? await teardown(job, progress)
+      : job.kind === 'scale_workers' ? await scaleWorkers(job, progress)
+      : await prune(job, progress);
     outcome = { status: 'succeeded', result };
   } catch (err) {
     outcome = { status: 'failed', error: (err as Error).message.slice(0, 2_000) };

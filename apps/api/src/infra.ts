@@ -318,7 +318,7 @@ export async function agentOnline(): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // Jobs
 // ---------------------------------------------------------------------------
-export type JobKind = 'deploy' | 'teardown' | 'prune';
+export type JobKind = 'deploy' | 'teardown' | 'prune' | 'scale_workers';
 
 export interface QueueJobInput {
   kind: JobKind;
@@ -391,6 +391,36 @@ export async function queuePrune(reason: string, opts: { requested_by?: string |
       build_cache_hours: policy.prune_build_cache_hours,
       remove_stopped_managed: true,
       dry_run: opts.dry_run === true,
+    },
+    requested_by: opts.requested_by ?? null,
+  });
+}
+
+/**
+ * Queue a scale-workers job the infra-agent will act on by running the compose
+ * project's `--scale test-engine-worker=<count>` command. Returns null if a
+ * scale job is already pending (one at a time), or if the target equals the
+ * current `available_workers` reported in `params` — nothing to do.
+ *
+ * SLA target_workers goes into params so the agent knows how many to end at;
+ * the hard safety cap (WORKER_SCALE_MAX, default 20) is enforced on BOTH sides
+ * so a bad planner call cannot runaway-scale the host.
+ */
+export async function queueWorkerScale(target: number, reason: string, opts: { requested_by?: string | null; current?: number } = {}) {
+  const cap = Math.max(1, Number(process.env.WORKER_SCALE_MAX || 20));
+  const want = Math.max(1, Math.min(cap, Math.round(target)));
+  const current = Number(opts.current ?? 0);
+  if (want <= current) return null;
+  return queueInfraJob({
+    kind: 'scale_workers',
+    reason,
+    params: {
+      service: process.env.WORKER_SERVICE_NAME || 'test-engine-worker',
+      profile: process.env.WORKER_SERVICE_PROFILE || 'workers',
+      compose_project: process.env.WORKER_COMPOSE_PROJECT || 'gavriq-test-engine',
+      target: want,
+      current,
+      cap,
     },
     requested_by: opts.requested_by ?? null,
   });

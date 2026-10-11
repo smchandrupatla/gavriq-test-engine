@@ -40,6 +40,16 @@ import { audit } from '../middleware/rbac.js';
 import { humanDateTime } from '../lib/naming.js';
 import { evidenceUrl } from '../evidence-store.js';
 import { LABEL_PRIORITY, PRIORITY_LABEL, TRIAGE_STATUSES } from '../catalog/types.js';
+import { clampAttempts, fixLoopDefaultMaxAttempts, startFixLoop } from '../run-fix-loop.js';
+
+/** Normalize the auto_fix request body into { enabled, max_attempts? } or null. */
+function readAutoFix(raw: unknown): { enabled: boolean; max_attempts?: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (r.enabled !== true && r.enabled !== 'true') return null;
+  const m = Number(r.max_attempts);
+  return { enabled: true, ...(Number.isFinite(m) && m > 0 ? { max_attempts: Math.round(m) } : {}) };
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CASE_KEY = /^[A-Za-z0-9][A-Za-z0-9_.-]{2,119}$/;
@@ -121,7 +131,16 @@ function suiteView(s: any) {
 /** Queues one execution for the given cases (and optional suite), named the way the console names runs. */
 export async function queueCaseRun(
   req: FastifyRequest,
-  input: { caseIds: string[]; suiteId?: string | null; environment?: unknown; triggerSource?: string; requestedBy?: string | null; metadata?: Record<string, unknown>; applicationVersion?: string | null }
+  input: {
+    caseIds: string[];
+    suiteId?: string | null;
+    environment?: unknown;
+    triggerSource?: string;
+    requestedBy?: string | null;
+    metadata?: Record<string, unknown>;
+    applicationVersion?: string | null;
+    autoFix?: { enabled: boolean; max_attempts?: number } | null;
+  }
 ) {
   const envId = await resolveEnvironmentId(input.environment);
   const { rows: cases } = await query(
@@ -156,7 +175,37 @@ export async function queueCaseRun(
   );
   const execution = rows[0]!;
   await audit(req, 'execution.queue', 'execution', execution.id, { key, case_count: cases.length, environment_id: envId, trigger_source: input.triggerSource || 'manual', suite_id: suite?.id ?? null });
-  return { ...execution, application_key: first.app_key, suite_id: suite?.id ?? null, case_count: cases.length };
+
+  // Auto-fix loop opt-in: track this single-execution run and rerun its failing
+  // cases up to a cap. The execution key doubles as the loop's run_id — loadRun
+  // in trigger.ts resolves either a run_group or an execution id/key.
+  let autoFixInfo: { enabled: true; max_attempts: number } | null = null;
+  if (input.autoFix && input.autoFix.enabled && envRow.rows[0]?.key) {
+    const defaultMax = await fixLoopDefaultMaxAttempts();
+    const maxAttempts = clampAttempts(input.autoFix.max_attempts ?? defaultMax);
+    const caseKeys = cases.map((c: any) => String(c.key)).filter(Boolean);
+    try {
+      await startFixLoop({
+        run_id: execution.key,
+        application_key: first.app_key,
+        environment_key: envRow.rows[0].key,
+        case_keys: caseKeys,
+        max_attempts: maxAttempts,
+        requested_by: input.requestedBy ?? req.actor?.id ?? null,
+      });
+      autoFixInfo = { enabled: true, max_attempts: maxAttempts };
+    } catch (err) {
+      console.warn(`[auto-fix] failed to start loop for ${execution.key}: ${(err as Error).message}`);
+    }
+  }
+
+  return {
+    ...execution,
+    application_key: first.app_key,
+    suite_id: suite?.id ?? null,
+    case_count: cases.length,
+    ...(autoFixInfo ? { auto_fix: autoFixInfo } : {}),
+  };
 }
 
 function remarksOf(row: any): string[] {
@@ -483,6 +532,7 @@ export async function testBenchRoutes(app: FastifyInstance) {
       triggerSource: typeof b.trigger_source === 'string' ? b.trigger_source : 'manual',
       metadata: b.headless === false ? { headless: false } : undefined,
       applicationVersion: typeof b.application_version === 'string' ? b.application_version : null,
+      autoFix: readAutoFix(b.auto_fix),
     });
     if (!run) return reply.status(404).send({ error: 'Test case not found' });
     return reply.status(202).send({ accepted: true, run });
@@ -495,7 +545,13 @@ export async function testBenchRoutes(app: FastifyInstance) {
     const { rows } = await query('SELECT id FROM test_cases WHERE id::text = ANY($1::text[]) OR key = ANY($1::text[])', [refs]);
     const ids = rows.map((r) => r.id as string);
     if (!ids.length) return reply.status(404).send({ error: 'No matching test cases' });
-    const run = await queueCaseRun(req, { caseIds: ids, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
+    const run = await queueCaseRun(req, {
+      caseIds: ids,
+      environment: b.environment ?? b.environment_id,
+      triggerSource: 'manual',
+      applicationVersion: typeof b.application_version === 'string' ? b.application_version : null,
+      autoFix: readAutoFix(b.auto_fix),
+    });
     return reply.status(202).send({ accepted: true, selected: ids.length, runs: run ? [run] : [] });
   });
 
@@ -597,7 +653,14 @@ export async function testBenchRoutes(app: FastifyInstance) {
     const ids: string[] = s.case_ids || [];
     if (!ids.length) return reply.status(400).send({ error: 'This suite has no member cases to run' });
     const b = req.body || {};
-    const run = await queueCaseRun(req, { caseIds: ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
+    const run = await queueCaseRun(req, {
+      caseIds: ids,
+      suiteId: s.id,
+      environment: b.environment ?? b.environment_id,
+      triggerSource: 'manual',
+      applicationVersion: typeof b.application_version === 'string' ? b.application_version : null,
+      autoFix: readAutoFix(b.auto_fix),
+    });
     return reply.status(202).send({ accepted: true, run, outcome: { suiteId: s.id, ranCases: ids.length, queued: ids.length } });
   });
 
@@ -648,7 +711,14 @@ export async function testBenchRoutes(app: FastifyInstance) {
     for (const ref of ids) {
       const s = await findSuite(ref);
       if (!s || !(s.case_ids || []).length) continue;
-      const run = await queueCaseRun(req, { caseIds: s.case_ids, suiteId: s.id, environment: b.environment ?? b.environment_id, triggerSource: 'manual', applicationVersion: typeof b.application_version === 'string' ? b.application_version : null });
+      const run = await queueCaseRun(req, {
+        caseIds: s.case_ids,
+        suiteId: s.id,
+        environment: b.environment ?? b.environment_id,
+        triggerSource: 'manual',
+        applicationVersion: typeof b.application_version === 'string' ? b.application_version : null,
+        autoFix: readAutoFix(b.auto_fix),
+      });
       if (run) runs.push(run);
     }
     return reply.status(202).send({ accepted: true, selected: ids.length, runs });

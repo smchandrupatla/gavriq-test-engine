@@ -45,6 +45,10 @@ import { cycleRunRoutes } from './routes/cycle-runs.js';
 import { defectLogRoutes } from './routes/defect-log.js';
 import { feedbackLoopTick } from './feedback-loop.js';
 import { deployLoopTick } from './deploy-loop.js';
+import { fixLoopTick } from './run-fix-loop.js';
+import { fixLoopRoutes } from './routes/run-fix-loop.js';
+import { fixProposalRoutes } from './routes/fix-proposals.js';
+import { catalogSourceRoutes } from './routes/catalog-source.js';
 import { webhookRoutes } from './routes/webhook.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
@@ -253,6 +257,9 @@ async function main() {
   await app.register(deployLoopRoutes);
   await app.register(cycleRunRoutes);
   await app.register(recordRoutes);
+  await app.register(fixLoopRoutes);
+  await app.register(fixProposalRoutes);
+  await app.register(catalogSourceRoutes);
   await app.register(webhookRoutes);
 
   await app.listen({ port, host });
@@ -309,6 +316,23 @@ async function main() {
     };
     const every = Math.max(5_000, Number(process.env.FEEDBACK_LOOP_TICK_MS) || 20_000);
     setInterval(loopTickSafe, every).unref();
+  }
+
+  // Per-run auto-fix loop (run-fix-loop.ts): drives a run that was opted into "auto-fix on
+  // failure", classifying each failing case (transient vs. real), redeploying when needed,
+  // and rerunning the still-failing subset up to a cap. FIX_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.FIX_LOOP_TICK_MS !== '0') {
+    let fixBusy = false;
+    const fixTickSafe = () => {
+      if (fixBusy) return;
+      fixBusy = true;
+      fixLoopTick()
+        .catch((err) => app.log.warn({ err }, 'fix loop tick failed'))
+        .finally(() => { fixBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.FIX_LOOP_TICK_MS) || 15_000);
+    setTimeout(fixTickSafe, 15_000).unref();
+    setInterval(fixTickSafe, every).unref();
   }
 
   // Deploy-failure loop (deploy-loop.ts): when a managed stack's deploy fails, the engine

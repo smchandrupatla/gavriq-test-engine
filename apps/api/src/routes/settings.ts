@@ -14,6 +14,8 @@ const MAX_FAILURE_LIMIT = 1000;
 export const DEFAULT_PER_TYPE_RETENTION = 2;
 const MIN_PER_TYPE_RETENTION = 1;
 const MAX_PER_TYPE_RETENTION = 1000;
+const MIN_AUTO_FIX_ATTEMPTS = 1;
+const MAX_AUTO_FIX_ATTEMPTS = 20;
 
 async function testTypes(): Promise<string[]> {
   const { rows } = await query(
@@ -47,6 +49,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       query(
         `SELECT run_retention_days, test_type_timeout_minutes, test_type_retention, consecutive_failure_limit,
                 rolling_fail_cancel_enabled, rolling_fail_cancel_window, rolling_fail_cancel_threshold_pct,
+                auto_fix_default_max_attempts, fixer_agent_mode, fixer_agent_diff_cap_lines,
                 updated_at FROM settings WHERE id = true`
       ),
       testTypes(),
@@ -61,6 +64,9 @@ export async function settingsRoutes(app: FastifyInstance) {
         rolling_fail_cancel_enabled: row.rolling_fail_cancel_enabled ?? true,
         rolling_fail_cancel_window: row.rolling_fail_cancel_window ?? 20,
         rolling_fail_cancel_threshold_pct: row.rolling_fail_cancel_threshold_pct ?? 50,
+        auto_fix_default_max_attempts: row.auto_fix_default_max_attempts ?? 2,
+        fixer_agent_mode: row.fixer_agent_mode ?? 'auto',
+        fixer_agent_diff_cap_lines: row.fixer_agent_diff_cap_lines ?? 400,
         updated_at: row.updated_at ?? null,
       },
     });
@@ -75,6 +81,9 @@ export async function settingsRoutes(app: FastifyInstance) {
       rolling_fail_cancel_enabled?: unknown;
       rolling_fail_cancel_window?: unknown;
       rolling_fail_cancel_threshold_pct?: unknown;
+      auto_fix_default_max_attempts?: unknown;
+      fixer_agent_mode?: unknown;
+      fixer_agent_diff_cap_lines?: unknown;
     };
   }>('/api/v1/settings', async (req, reply) => {
     const b = req.body || {};
@@ -160,6 +169,35 @@ export async function settingsRoutes(app: FastifyInstance) {
       rollingThreshold = n;
     }
 
+    let autoFixAttempts: number | null = null;
+    if (b.auto_fix_default_max_attempts !== undefined) {
+      const n = Number(b.auto_fix_default_max_attempts);
+      if (!Number.isInteger(n) || n < MIN_AUTO_FIX_ATTEMPTS || n > MAX_AUTO_FIX_ATTEMPTS) {
+        return reply.status(400).send({
+          error: `auto_fix_default_max_attempts must be a whole number between ${MIN_AUTO_FIX_ATTEMPTS} and ${MAX_AUTO_FIX_ATTEMPTS}`,
+        });
+      }
+      autoFixAttempts = n;
+    }
+
+    let fixerMode: string | null = null;
+    if (b.fixer_agent_mode !== undefined) {
+      const m = String(b.fixer_agent_mode).toLowerCase();
+      if (m !== 'off' && m !== 'propose' && m !== 'auto') {
+        return reply.status(400).send({ error: 'fixer_agent_mode must be off | propose | auto' });
+      }
+      fixerMode = m;
+    }
+
+    let diffCap: number | null = null;
+    if (b.fixer_agent_diff_cap_lines !== undefined) {
+      const n = Number(b.fixer_agent_diff_cap_lines);
+      if (!Number.isInteger(n) || n < 10 || n > 100000) {
+        return reply.status(400).send({ error: 'fixer_agent_diff_cap_lines must be a whole number between 10 and 100000' });
+      }
+      diffCap = n;
+    }
+
     const { rows } = await query(
       `UPDATE settings SET
          run_retention_days = COALESCE($1, run_retention_days),
@@ -169,15 +207,20 @@ export async function settingsRoutes(app: FastifyInstance) {
          rolling_fail_cancel_window = COALESCE($6, rolling_fail_cancel_window),
          rolling_fail_cancel_threshold_pct = COALESCE($7, rolling_fail_cancel_threshold_pct),
          test_type_retention = COALESCE($8::jsonb, test_type_retention),
+         auto_fix_default_max_attempts = COALESCE($9, auto_fix_default_max_attempts),
+         fixer_agent_mode = COALESCE($10, fixer_agent_mode),
+         fixer_agent_diff_cap_lines = COALESCE($11, fixer_agent_diff_cap_lines),
          updated_at = now(), updated_by = $4
        WHERE id = true
        RETURNING run_retention_days, test_type_timeout_minutes, test_type_retention,
                  consecutive_failure_limit,
                  rolling_fail_cancel_enabled, rolling_fail_cancel_window, rolling_fail_cancel_threshold_pct,
+                 auto_fix_default_max_attempts, fixer_agent_mode, fixer_agent_diff_cap_lines,
                  updated_at`,
       [days, timeouts ? JSON.stringify(timeouts) : null, failureLimit, req.actor?.id ?? null,
        rollingEnabled, rollingWindow, rollingThreshold,
-       retention ? JSON.stringify(retention) : null]
+       retention ? JSON.stringify(retention) : null,
+       autoFixAttempts, fixerMode, diffCap]
     );
     const { test_type_timeout_minutes: storedMinutes, test_type_retention: storedRetention, ...rest } = rows[0] || ({} as any);
     return reply.send({

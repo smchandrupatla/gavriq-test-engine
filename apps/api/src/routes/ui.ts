@@ -10,15 +10,24 @@ import { currentCycle } from '../cycle-run.js';
  * evidence). These endpoints return only what the tiles, nav and tables draw;
  * details (case body, run evidence, history) are fetched lazily on demand.
  *
- *   GET  /api/v1/ui/summary          one call: cases (compact + last status), suites, envs, build summary
+ *   GET  /api/v1/ui/summary          envs, application, suites — NO per-case rows
+ *   GET  /api/v1/ui/overview-stats   build summary + per-type status rollup (opening Overview)
+ *   GET  /api/v1/ui/catalog-counts   per-type and per-suite counts (sidebar numbers)
+ *   GET  /api/v1/ui/cases            paged, filterable case list (type/suite/method/tag/search)
  *   GET  /api/v1/ui/live?since=      poll: executions with progress, workers, case statuses changed since
  *   GET  /api/v1/ui/runs             full, paginated, filterable run history (environment/status/date range)
  *   GET  /api/v1/ui/executions/:id   run screen: per-case results without evidence bodies
  *   POST /api/v1/ui/history          tile graph: per-run pass/fail for a set of cases
  *   GET  /api/v1/ui/build-history    tile graph: per-build pass/fail for in-container results
  *
- * summary, live and history take environment_id (id or key): case statuses
- * and run history are then those recorded on that environment only.
+ * summary, live, overview-stats and history take environment_id (id or key): case
+ * statuses and run history are then those recorded on that environment only.
+ *
+ * Lazy-loading contract: the console no longer preloads the whole case catalog
+ * on boot. The sidebar paints from /catalog-counts (a few KB), the Overview
+ * paints its tiles from /overview-stats (per-type rollup), and every per-type
+ * / per-suite / per-method / per-tag / search view fetches its page from
+ * /ui/cases on demand.
  */
 
 const ACTIVE = `('queued','preparing','running')`;
@@ -83,6 +92,7 @@ async function buildClassifyCache(appKey: string): Promise<ClassifyCache> {
        FROM test_cases tc
        LEFT JOIN test_case_suites s ON s.test_case_id = tc.id
        WHERE tc.application_id = (SELECT id FROM applications WHERE key = $1)
+         AND tc.lifecycle NOT IN ('archived','deprecated')
        GROUP BY tc.id, tc.tags`,
       [appKey]
     ),
@@ -178,19 +188,27 @@ export async function uiRoutes(app: FastifyInstance) {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
     const c = await getClassifyCache(appKey);
+    reply.header('Cache-Control', 'private, max-age=10');
     return reply.send({ data: { total: c.total, by_type: c.byType, by_suite: c.bySuite } });
   });
 
-  // Paged, filterable list of cases for one view (type page, suite page, search).
+  // Paged, filterable list of cases for one view (type page, suite page, search,
+  // method filter, tag filter, scope-picker typeahead).
+  //
   // The server classifies by the same typeOfCase rules the counts endpoint uses,
   // so a request for type_id=apiPortalIntegration returns the portal cases
   // whose generic DB test_type is "integration" but whose suite_type is the
   // specific portal one.
+  //
+  // Any combination of (type_id, suite_id, execution_method, tag, q) narrows
+  // the result; omitting them all returns every case for the app (paged).
   app.get('/api/v1/ui/cases', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
     const typeId = (q.type_id || '').trim();
     const suiteId = (q.suite_id || '').trim();
+    const method = (q.execution_method || '').trim().toLowerCase();
+    const tag = (q.tag || '').trim().toLowerCase();
     const search = (q.q || '').trim();
     const envId = await resolveEnvironmentId(q.environment_id);
     const limit = Math.max(1, Math.min(500, Number(q.limit) || 50));
@@ -200,8 +218,10 @@ export async function uiRoutes(app: FastifyInstance) {
     // subsequent call reads instantly.
     const classify = await getClassifyCache(appKey);
 
-    // Candidate case ids after filtering by type_id / suite_id — we only hit
-    // Postgres for the compact card data of the final page, not for everything.
+    // Candidate case ids after filtering by type_id / suite_id / tag — we only
+    // hit Postgres for the compact card data of the final page, not for
+    // everything. Method is applied in the final SQL (it is a column on
+    // test_cases) so the candidate set does not need the method as a filter.
     const candidateIds: string[] = [];
     for (const [id, type] of classify.typeByCaseId) {
       if (typeId && type !== typeId) continue;
@@ -209,18 +229,27 @@ export async function uiRoutes(app: FastifyInstance) {
         const sids = classify.suiteIdsByCaseId.get(id) || [];
         if (!sids.includes(suiteId)) continue;
       }
+      if (tag) {
+        const tags = classify.tagsByCaseId.get(id) || [];
+        if (!tags.some((t) => t.toLowerCase() === tag)) continue;
+      }
       candidateIds.push(id);
     }
 
     // Server-side search works against name+key via a parameterised ILIKE so
     // Postgres can use its indexes; the server fetches names only for the
-    // narrowed candidate set.
+    // narrowed candidate set. The method filter is pushed into the same hit
+    // query so we only pay for one scan instead of a two-step narrowing.
     const needle = search ? `%${search.replace(/[%_\\]/g, (m) => '\\' + m)}%` : null;
     let ids = candidateIds;
-    if (needle) {
+    if (needle || method) {
+      const where: string[] = ['id = ANY($1::uuid[])'];
+      const args: unknown[] = [candidateIds];
+      if (needle) { where.push(`(name ILIKE $${args.length + 1} OR key ILIKE $${args.length + 1})`); args.push(needle); }
+      if (method) { where.push(`lower(execution_method) = $${args.length + 1}`); args.push(method); }
       const { rows: hits } = await query(
-        `SELECT id FROM test_cases WHERE id = ANY($1::uuid[]) AND (name ILIKE $2 OR key ILIKE $2)`,
-        [candidateIds, needle]
+        `SELECT id FROM test_cases WHERE ${where.join(' AND ')}`,
+        args
       );
       const hitSet = new Set((hits as any[]).map((r) => r.id));
       ids = candidateIds.filter((id) => hitSet.has(id));
@@ -250,35 +279,17 @@ export async function uiRoutes(app: FastifyInstance) {
     return reply.send({ data: rows, total });
   });
 
+  // Lean summary: environments, application metadata, suite names — the few
+  // things every view needs to render chrome (sidebar sections, env selector,
+  // scope pickers). The ~12 k-case lateral-join that used to live here has
+  // moved to /ui/overview-stats and /ui/cases, which only run when the user
+  // opens a view that needs their data.
   app.get('/api/v1/ui/summary', async (req, reply) => {
     const q = req.query as Record<string, string>;
     const appKey = q.application_key || 'sand-bench';
     const envId = await resolveEnvironmentId(q.environment_id);
 
-    const [cases, suites, envs, application, build, stats] = await Promise.all([
-      query(
-        `SELECT tc.id, tc.key, tc.name, tc.tags, tc.test_type, tc.execution_method,
-                COALESCE(m.suite_ids, '{}') AS suite_ids,
-                lr.status AS last_status,
-                COALESCE(lr.finished_at, lr.created_at) AS last_at,
-                lr.duration_ms AS last_duration_ms
-         FROM test_cases tc
-         LEFT JOIN LATERAL (
-           SELECT array_agg(s.test_suite_id ORDER BY s.sort_order) AS suite_ids
-           FROM test_case_suites s WHERE s.test_case_id = tc.id
-         ) m ON true
-         LEFT JOIN LATERAL (
-           SELECT er.status, er.finished_at, er.created_at, er.duration_ms
-           FROM execution_results er
-           JOIN executions ex ON ex.id = er.execution_id
-           WHERE er.test_case_id = tc.id
-             AND ($2::uuid IS NULL OR ex.environment_id = $2::uuid)
-           ORDER BY er.created_at DESC LIMIT 1
-         ) lr ON true
-         WHERE tc.application_id = (SELECT id FROM applications WHERE key = $1)
-         ORDER BY tc.key`,
-        [appKey, envId]
-      ),
+    const [suites, envs, application, nowRow] = await Promise.all([
       query(
         `SELECT id, key, name, suite_type FROM test_suites
          WHERE application_id = (SELECT id FROM applications WHERE key = $1)
@@ -286,8 +297,6 @@ export async function uiRoutes(app: FastifyInstance) {
         [appKey]
       ),
       query(
-        // config.applications lists the applications deployed there; an
-        // environment without the list is offered to every application.
         `SELECT id, key, name, env_type, base_url, config->'deployment' AS deployment,
                 CASE WHEN config->'infra'->>'driver' = 'compose' THEN config->'infra' END AS infra
          FROM environments
@@ -301,6 +310,58 @@ export async function uiRoutes(app: FastifyInstance) {
          FROM applications WHERE key = $1`,
         [appKey]
       ),
+      query(`SELECT now() AS now`),
+    ]);
+
+    reply.header('Cache-Control', 'private, max-age=5');
+    return reply.send({
+      data: {
+        now: nowRow.rows[0]?.now,
+        application: application.rows[0] || null,
+        environment_id: envId,
+        suites: suites.rows,
+        environments: envs.rows,
+      },
+    });
+  });
+
+  /**
+   * Overview-stats: the per-type pass/fail/other/never rollup the Overview
+   * tiles draw, plus the latest build summary and the 7-day run stats.
+   * Fetched only when the user opens Overview — a single pre-aggregated query
+   * instead of streaming every case row to the client.
+   */
+  app.get('/api/v1/ui/overview-stats', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const envId = await resolveEnvironmentId(q.environment_id);
+
+    const classify = await getClassifyCache(appKey);
+    const caseIds = [...classify.typeByCaseId.keys()];
+    const typeByCaseId = classify.typeByCaseId;
+
+    // Server-side rollup: one lateral join per case to find its last status,
+    // then group by the classified type. Returning per-type aggregates (not
+    // 12k rows) keeps the payload at a few hundred bytes however big the
+    // catalog gets.
+    const [statusRows, build, stats] = await Promise.all([
+      caseIds.length
+        ? query(
+            `SELECT tc.id AS case_id, lr.status AS last_status,
+                    COALESCE(lr.finished_at, lr.created_at) AS last_at
+             FROM test_cases tc
+             LEFT JOIN LATERAL (
+               SELECT er.status, er.finished_at, er.created_at
+               FROM execution_results er
+               JOIN executions ex ON ex.id = er.execution_id
+               WHERE er.test_case_id = tc.id
+                 AND ($2::uuid IS NULL OR ex.environment_id = $2::uuid)
+               ORDER BY er.created_at DESC LIMIT 1
+             ) lr ON true
+             WHERE tc.id = ANY($1::uuid[])`,
+            [caseIds, envId]
+          )
+        : Promise.resolve({ rows: [] as any[] }),
       query(
         `WITH latest AS (
            SELECT build_id FROM build_test_results WHERE application_key = $1
@@ -318,24 +379,53 @@ export async function uiRoutes(app: FastifyInstance) {
         [appKey]
       ),
       query(
-        `SELECT now() AS now,
-                (SELECT count(*)::int FROM execution_results
+        `SELECT (SELECT count(*)::int FROM execution_results
                  WHERE status IN ${FAILED} AND created_at > now() - interval '7 days') AS failed_7d,
                 (SELECT count(*)::int FROM executions
                  WHERE created_at > now() - interval '7 days') AS runs_7d`
       ),
     ]);
 
+    type TypeRollup = {
+      total: number;
+      passed: number;
+      failed: number;
+      other: number;
+      never: number;
+      lastAt: string | null;
+    };
+    const byType: Record<string, TypeRollup> = {};
+    const bump = (t: string): TypeRollup => {
+      let r = byType[t];
+      if (!r) { r = { total: 0, passed: 0, failed: 0, other: 0, never: 0, lastAt: null }; byType[t] = r; }
+      return r;
+    };
+    // Seed every known type with zeros so a type that only has unrun cases
+    // still shows up with a correct `never` count.
+    for (const t of classify.typeByCaseId.values()) bump(t);
+    const FAILED_SET = new Set(['failed', 'error', 'timed_out']);
+    const statusByCase = new Map<string, { status: string | null; last_at: string | null }>();
+    for (const r of statusRows.rows as any[]) statusByCase.set(r.case_id, { status: r.last_status, last_at: r.last_at });
+    for (const [caseId, t] of typeByCaseId) {
+      const r = bump(t);
+      r.total += 1;
+      const s = statusByCase.get(caseId);
+      const status = s?.status;
+      const lastAt = s?.last_at ?? null;
+      if (!status) r.never += 1;
+      else if (status === 'passed') r.passed += 1;
+      else if (FAILED_SET.has(String(status))) r.failed += 1;
+      else r.other += 1;
+      if (lastAt && (!r.lastAt || lastAt > r.lastAt)) r.lastAt = lastAt;
+    }
+
+    reply.header('Cache-Control', 'private, max-age=5');
     return reply.send({
       data: {
-        now: stats.rows[0]?.now,
-        application: application.rows[0] || null,
-        environment_id: envId,
-        cases: cases.rows,
-        suites: suites.rows,
-        environments: envs.rows,
+        now: new Date().toISOString(),
         build: build.rows[0] || null,
         stats: { failed_7d: stats.rows[0]?.failed_7d ?? 0, runs_7d: stats.rows[0]?.runs_7d ?? 0 },
+        by_type: byType,
       },
     });
   });
@@ -473,12 +563,23 @@ export async function uiRoutes(app: FastifyInstance) {
     return reply.send({ data: { ...exec, results: results.rows, cases: cases.rows } });
   });
 
-  app.post<{ Body: { case_ids?: unknown; limit?: unknown; environment_id?: unknown } }>('/api/v1/ui/history', async (req, reply) => {
+  app.post<{ Body: { case_ids?: unknown; limit?: unknown; environment_id?: unknown; application_key?: unknown; all?: unknown } }>('/api/v1/ui/history', async (req, reply) => {
     const raw = Array.isArray(req.body?.case_ids) ? req.body.case_ids : [];
     const ids = [...new Set(raw.map(String).filter((id) => UUID.test(id)))];
     const limit = clampInt(req.body?.limit, 20, 100);
-    if (!ids.length) return reply.send({ data: { runs: [], top_failing: [], totals: { cases_run: 0, results: 0 } } });
+    // "all" mode scopes the aggregate to every case in an application, so the
+    // Overview's "All tests" tile doesn't need to ship the whole case id list
+    // (12 k UUIDs on a large catalog is dozens of KB per poll).
+    const useAll = !!req.body?.all;
+    const appKey = typeof req.body?.application_key === 'string' ? req.body.application_key : null;
+    if (!ids.length && !useAll) return reply.send({ data: { runs: [], top_failing: [], totals: { cases_run: 0, results: 0 } } });
     const envId = await resolveEnvironmentId(req.body?.environment_id);
+
+    // When "all" is set we match on application_key via the executions.metadata
+    // JSONB — the same key /ui/live uses to scope the live board.
+    const scope = useAll
+      ? { clause: `e.metadata->>'application_key' = $1`, args: [appKey || 'sand-bench'] as unknown[] }
+      : { clause: `er.test_case_id = ANY($1::uuid[])`, args: [ids] as unknown[] };
 
     const [runs, top, totals] = await Promise.all([
       query(
@@ -490,12 +591,12 @@ export async function uiRoutes(app: FastifyInstance) {
                 COALESCE(sum(er.duration_ms), 0)::bigint AS duration_ms
          FROM execution_results er
          JOIN executions e ON e.id = er.execution_id
-         WHERE er.test_case_id = ANY($1::uuid[])
-           AND ($3::uuid IS NULL OR e.environment_id = $3::uuid)
+         WHERE ${scope.clause}
+           AND ($${scope.args.length + 2}::uuid IS NULL OR e.environment_id = $${scope.args.length + 2}::uuid)
          GROUP BY e.id
          ORDER BY e.created_at DESC
-         LIMIT $2`,
-        [ids, limit, envId]
+         LIMIT $${scope.args.length + 1}`,
+        [...scope.args, limit, envId]
       ),
       query(
         `SELECT er.test_case_id, tc.key, tc.name,
@@ -505,21 +606,21 @@ export async function uiRoutes(app: FastifyInstance) {
          FROM execution_results er
          JOIN executions e ON e.id = er.execution_id
          JOIN test_cases tc ON tc.id = er.test_case_id
-         WHERE er.test_case_id = ANY($1::uuid[])
-           AND ($2::uuid IS NULL OR e.environment_id = $2::uuid)
+         WHERE ${scope.clause}
+           AND ($${scope.args.length + 1}::uuid IS NULL OR e.environment_id = $${scope.args.length + 1}::uuid)
          GROUP BY er.test_case_id, tc.key, tc.name
          HAVING count(*) FILTER (WHERE er.status IN ${FAILED}) > 0
          ORDER BY failures DESC, last_failed_at DESC
          LIMIT 5`,
-        [ids, envId]
+        [...scope.args, envId]
       ),
       query(
         `SELECT count(DISTINCT er.test_case_id)::int AS cases_run, count(*)::int AS results, min(er.created_at) AS first_at
          FROM execution_results er
          JOIN executions e ON e.id = er.execution_id
-         WHERE er.test_case_id = ANY($1::uuid[])
-           AND ($2::uuid IS NULL OR e.environment_id = $2::uuid)`,
-        [ids, envId]
+         WHERE ${scope.clause}
+           AND ($${scope.args.length + 1}::uuid IS NULL OR e.environment_id = $${scope.args.length + 1}::uuid)`,
+        [...scope.args, envId]
       ),
     ]);
 

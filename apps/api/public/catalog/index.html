@@ -387,9 +387,14 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
   </div>
 </div>
 <div class="toast-wrap" id="toastWrap"></div>
-<script src="/catalog/charts.js"></script>
-<script src="/catalog/insights.js"></script>
-<script src="/catalog/testbench.js"></script>
-<script src="/catalog/app.js"></script>
+<!--
+  Script order is preserved by `defer` while browsers fetch them in parallel.
+  insights.js is injected on first navigation to #/insights (see loadInsightsBundle
+  in app.js) to keep its 33 KB off the boot path for users who never open the
+  Quality Insights view.
+-->
+<script src="/catalog/charts.js" defer></script>
+<script src="/catalog/testbench.js" defer></script>
+<script src="/catalog/app.js" defer></script>
 </body>
 </html>
