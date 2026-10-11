@@ -82,6 +82,13 @@ function ensureSecrets() {
 
 function exportSource(ref) {
   if (!existsSync(path.join(repo, '.git'))) throw new Error(`Sand Bench checkout not found at ${repo} (set SANDBENCH_REPO)`);
+  // Pull the latest refs from origin so a remote-trigger deploy (webhook) sees the commit
+  // the push just made. Silent if the remote is unreachable — fall through to local resolution.
+  try {
+    run('git', ['-C', repo, 'fetch', '--quiet', '--prune', 'origin']);
+  } catch (err) {
+    console.log(`[staging] git fetch origin failed, continuing with local refs: ${(err.message || '').slice(0, 200)}`);
+  }
   const commit = run('git', ['-C', repo, 'rev-parse', '--verify', `${ref}^{commit}`]);
   const tag = commit.slice(0, 12);
   const sources = path.join(home, 'src');
