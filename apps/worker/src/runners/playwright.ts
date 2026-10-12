@@ -422,7 +422,20 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               // the same identity, load the cached state into a FRESH context
               // so the gate is already past before the case even starts.
               const username = typeof step.value === 'string' ? substitute(step.value, vars) : (vars.username || '');
-              const password = typeof step.expected === 'string' ? substitute(step.expected, vars) : (vars.password || '');
+              // The password lives in step.expected, but the sandbench catalog decoratively
+              // wraps the placeholder as `Expected: {{pool_pass_N}}.` — substituting that
+              // literally gives "Expected: password." which never signs in. Pull just the
+              // first {{VAR}} out and use its resolved value. Fall back to the whole
+              // substituted string for cases that pass the password raw.
+              const password = (() => {
+                if (typeof step.password === 'string') return substitute(step.password, vars);
+                if (typeof step.expected === 'string') {
+                  const m = step.expected.match(/\{\{\s*([\w.-]+)\s*\}\}/);
+                  if (m) return vars[m[1]] ?? substitute(`{{${m[1]}}}`, vars);
+                  return substitute(step.expected, vars);
+                }
+                return vars.password || '';
+              })();
               const sessionKey = `${base}::${username}`;
               const cached = sessionCache.get(sessionKey);
               if (cached) {
