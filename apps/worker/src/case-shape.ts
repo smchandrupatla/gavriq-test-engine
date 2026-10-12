@@ -32,7 +32,12 @@ export function validateCaseShape(tc: any, vars: Record<string, string>): string
     }
   }
 
-  const KNOWN_VARS = new Set(Object.keys(vars));
+  // The http runner (apps/worker/src/runners/http.ts) injects `base`, `ts` and
+  // `rand` into every case's vars at execution time — a case that references
+  // {{ts}} or {{rand}} resolves correctly at runtime but failed this shape
+  // check which only inspects the operator-authored env config vars. Treat
+  // them as always-known so the shape gate stays in sync with the runtime.
+  const KNOWN_VARS = new Set([...Object.keys(vars), 'base', 'ts', 'rand']);
   const savedByMain = new Set<string>();
 
   const collectRefs = (node: unknown, out: Set<string>): void => {
