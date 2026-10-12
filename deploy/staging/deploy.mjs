@@ -180,7 +180,7 @@ async function probe(name, url, check) {
   }
 }
 
-async function verify() {
+async function verify(sourceDir) {
   const host = 'http://127.0.0.1';
   const checks = [
     await probe('api', `${host}:${ports.api}/health`, (res, text) => {
@@ -205,6 +205,26 @@ async function verify() {
     checks.push({ name: 'demo sign-in', url: '', ok: false, detail: err.cause?.code || err.message });
   }
   for (const c of checks) console.log(`[staging] ${c.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(13)} ${c.detail}  ${c.url}`);
+  // Login-page check: fetch the deployed index.html, parse the composed
+  // ops-console-preview.js, and confirm it defines window.OpsConsolePortal.
+  // The matching commit-gate test (tests/login-page-assets.test.ts) only sees
+  // source; this one bites when the deployed blob is unusable (truncated,
+  // regenerated-from-inconsistent-parts, dangling <script src>, etc.).
+  // Prefer the exported snapshot's script (matches the deployed commit); fall back to the
+  // shared checkout's copy. If neither has it, the check is quietly skipped.
+  const loginCheck = sourceDir && existsSync(path.join(sourceDir, 'scripts/deploy/check-login-page.sh'))
+    ? path.join(sourceDir, 'scripts/deploy/check-login-page.sh')
+    : path.join(repo, 'scripts/deploy/check-login-page.sh');
+  if (existsSync(loginCheck)) {
+    try {
+      run('bash', [loginCheck, '--tries', '30', `${host}:${ports.web}`]);
+      checks.push({ name: 'login page', url: `${host}:${ports.web}/`, ok: true, detail: 'ops-console-preview.js parses, Portal defined, every <script src> resolves' });
+      console.log(`[staging] ok   ${'login page'.padEnd(13)} ops-console-preview.js parses, Portal defined, every <script src> resolves  ${host}:${ports.web}/`);
+    } catch (err) {
+      checks.push({ name: 'login page', url: `${host}:${ports.web}/`, ok: false, detail: err.message });
+      console.log(`[staging] FAIL ${'login page'.padEnd(13)} ${err.message}  ${host}:${ports.web}/`);
+    }
+  }
   return checks.every((c) => c.ok);
 }
 
@@ -408,7 +428,7 @@ async function main() {
     console.log(`[staging] deploying ${src.tag} "${src.subject}"`);
     compose(src, ['build', ...SERVICES]);
     compose(src, ['up', '-d', '--wait', '--wait-timeout', '300', ...SERVICES]);
-    const healthy = await verify();
+    const healthy = await verify(src.dir);
     const state = { ref: src.ref, commit: src.commit, tag: src.tag, version: `${src.version}-staging`, subject: src.subject, source: src.dir, deployed_at: new Date().toISOString(), healthy };
     writeFileSync(stateFile, JSON.stringify(state, null, 2));
     pruneSources(src.tag);
