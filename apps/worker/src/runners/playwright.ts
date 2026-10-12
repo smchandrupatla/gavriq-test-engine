@@ -436,9 +436,10 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
                 context = await browser!.newContext({ viewport: vp, storageState: cached });
                 page = await context.newPage();
                 page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
-                await page.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: step.timeout_ms || 15000 });
+                const cachedGateTimeout = Math.max(30000, step.timeout_ms || 30000);
+                await page.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: cachedGateTimeout });
                 try {
-                  await page.locator('#gate').waitFor({ state: 'hidden', timeout: 5000 });
+                  await page.locator('#gate').waitFor({ state: 'hidden', timeout: cachedGateTimeout });
                 } catch {
                   // Cached state didn't actually sign us in (expired, invalidated).
                   // Fall through to a fresh sign-in and overwrite the cache.
@@ -446,12 +447,18 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
                 }
               }
               if (!sessionCache.has(sessionKey)) {
-                await page!.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: step.timeout_ms || 15000 });
-                await page!.locator('#gate #login').waitFor({ timeout: 15000 });
+                // Webkit on a resource-constrained host takes longer to hide the gate
+                // after a successful sign-in — observed up to ~30s. Give the gate a
+                // 60s window on all engines; chrome/firefox normally finish in <2s so
+                // the longer ceiling only matters when webkit is slow or the host is
+                // contended. Same reasoning for the goto and the login-button wait.
+                const gateTimeout = Math.max(60000, step.timeout_ms || 60000);
+                await page!.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: gateTimeout });
+                await page!.locator('#gate #login').waitFor({ timeout: gateTimeout });
                 await page!.locator('#gate #username').fill(username);
                 await page!.locator('#gate #password').fill(password);
                 await page!.locator('#gate #login').click();
-                await page!.locator('#gate').waitFor({ state: 'hidden', timeout: 20000 });
+                await page!.locator('#gate').waitFor({ state: 'hidden', timeout: gateTimeout });
                 try {
                   const state = await context!.storageState();
                   sessionCache.set(sessionKey, state);

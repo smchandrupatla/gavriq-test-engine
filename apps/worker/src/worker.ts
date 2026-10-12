@@ -111,6 +111,12 @@ async function fetchEnvironment(id: string | null | undefined) {
 }
 
 type EngineSettings = {
+  // The /api/v1/settings endpoint publishes per-type timeouts as whole seconds
+  // under this key (see apps/api/src/routes/settings.ts). The DB column is in
+  // minutes, but what the worker SEES is seconds.
+  test_type_timeout_seconds?: Record<string, number>;
+  // Historical: an older worker build read minutes. Kept here so a stale
+  // settings row still resolves on a rolling redeploy.
   test_type_timeout_minutes?: Record<string, number>;
   consecutive_failure_limit?: number;
 };
@@ -132,8 +138,12 @@ async function fetchSettings(): Promise<EngineSettings> {
 
 /** The configured per-test-type timeout, in ms — 24h for any type without an override. */
 function caseTimeoutMs(settings: EngineSettings, testType: string | undefined): number {
-  const minutes = settings.test_type_timeout_minutes?.[String(testType || 'other')];
-  return Number.isFinite(minutes) && (minutes as number) > 0 ? (minutes as number) * 60_000 : DEFAULT_CASE_TIMEOUT_MS;
+  const key = String(testType || 'other');
+  const seconds = settings.test_type_timeout_seconds?.[key];
+  if (Number.isFinite(seconds) && (seconds as number) > 0) return (seconds as number) * 1000;
+  const minutes = settings.test_type_timeout_minutes?.[key];
+  if (Number.isFinite(minutes) && (minutes as number) > 0) return (minutes as number) * 60_000;
+  return DEFAULT_CASE_TIMEOUT_MS;
 }
 
 function failureLimitOf(settings: EngineSettings): number {
@@ -159,7 +169,31 @@ type RunnerResult = {
  * Variables shared with runners: environment config.vars verbatim, plus any
  * config.secret_env entries resolved from this worker's process environment
  * (the DB stores which env var holds a secret, never the secret itself).
+ *
+ * Per-worker user pool: when the environment carries the pool credentials
+ * (`pool_user_<slot>` / `pool_pass_<slot>` on cfg.vars or cfg.secret_env),
+ * each worker is pinned deterministically to one slot (hash of WORKER_ID
+ * modulo POOL_SIZE). The pin surfaces as four vars every case can reference:
+ *   worker_slot       the 0..POOL_SIZE-1 slot index for this worker
+ *   worker_user       the username at that slot
+ *   worker_pass       the password at that slot
+ *   worker_token_var  the token key where a login step should save its token
+ *                     (so later steps can send `{{ {{worker_token_var}} }}`
+ *                     — or more usually, the catalog uses a login helper
+ *                     that reads this and writes to vars[token_var] after).
+ * Scaling `--scale test-engine-worker=N` with N <= POOL_SIZE therefore gives
+ * N distinct identities, so Sand Bench's one-session-per-user rule does not
+ * invalidate another worker's login mid-run.
  */
+const POOL_SIZE = 8;
+const ADMIN_POOL_SIZE = 2;
+function workerPoolSlot(workerId: string, mod: number): number {
+  // Same hashSlot as apps/api/src/catalog/user-pool.ts — kept in sync here
+  // so the catalog's pickUserForWorker and the runner's buildVars agree.
+  let h = 0;
+  for (let i = 0; i < workerId.length; i++) h = ((h << 5) - h + workerId.charCodeAt(i)) | 0;
+  return Math.abs(h) % mod;
+}
 function buildVars(env: any): Record<string, string> {
   const vars: Record<string, string> = {};
   const cfg = env?.config || {};
@@ -168,6 +202,24 @@ function buildVars(env: any): Record<string, string> {
     const resolved = process.env[String(envName)];
     if (resolved !== undefined) vars[k] = resolved;
   }
+  // Pin this worker to a pool slot and expose it to cases. If the matching
+  // pool_user_<slot> / pool_pass_<slot> vars are present on this env, mirror
+  // them under the generic worker_user / worker_pass keys.
+  const uSlot = workerPoolSlot(WORKER_ID, POOL_SIZE);
+  const aSlot = workerPoolSlot(`${WORKER_ID}:admin`, ADMIN_POOL_SIZE);
+  vars.worker_id = WORKER_ID;
+  vars.worker_slot = String(uSlot);
+  vars.worker_admin_slot = String(aSlot);
+  vars.worker_token_var = `token_u${uSlot}`;
+  vars.worker_admin_token_var = `token_a${aSlot}`;
+  const uu = vars[`pool_user_${uSlot}`];
+  const up = vars[`pool_pass_${uSlot}`];
+  if (uu !== undefined) vars.worker_user = uu;
+  if (up !== undefined) vars.worker_pass = up;
+  const au = vars[`pool_admin_${aSlot}`];
+  const ap = vars[`pool_adminpass_${aSlot}`];
+  if (au !== undefined) vars.worker_admin = au;
+  if (ap !== undefined) vars.worker_adminpass = ap;
   return vars;
 }
 
@@ -375,6 +427,17 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
         requests: rules.requests || 20,
         durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
         timeoutSeconds: tc?.timeout_seconds || 15,
+        // Catalog may pass explicit headers (e.g. content-type) + a JSON body
+        // for POST benchmarks (session/login, events/emit, ...). Both pass
+        // through to runPerformance verbatim; the runner templates {{var}}s
+        // in the url already — body + headers are value-objects so callers
+        // can set them literally.
+        headers: rules.headers || undefined,
+        body: rules.body !== undefined ? rules.body : undefined,
+        // Status that counts as "the responder answered correctly" — perf
+        // engineer's hook for benchmarking the 401/404 responders where
+        // a non-2xx is the expected shape.
+        expectStatus: rules.expect_status,
         sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
         signal,
       });
