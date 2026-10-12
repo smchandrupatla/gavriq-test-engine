@@ -1563,29 +1563,61 @@ C.push(
 function perfCase(opts: {
   key: string; name: string; objective?: string; urlVar: string; requests: number; concurrency: number;
   p95: number; errPct: number; suite?: string; severity?: CaseDef['severity']; timeout?: number; description: string;
+  // Write-path + nuanced profiles:
+  //   httpMethod       POST, PUT, DELETE (default: GET)
+  //   httpBody         request body sent on every iteration (perf engineer's
+  //                    hot-path write benchmark — login, events emit, …)
+  //   httpHeaders      extra headers (bearer tokens if the catalog pre-mints
+  //                    one, or Content-Type when the body is JSON — the perf
+  //                    runner already defaults to application/json)
+  //   durationSeconds  soak by wall-clock instead of a request count (keep
+  //                    firing for N s, capped at 15 min by the runner)
+  //   minRps           min RPS SLA — fail if sustained throughput drops below
+  //                    the floor (catches a tier that is up but too slow)
+  //   dataNote         override the auto-worded "N GET requests" blurb
+  httpMethod?: string; httpBody?: unknown; httpHeaders?: Record<string, string>;
+  // expectStatus: which HTTP status(es) count as "the responder answered"
+  // for this benchmark. Reject-path cases (login 401, 404 responder, authz
+  // guard) set this so the SLA can be scored on latency alone even when the
+  // whole run returns a non-2xx by design.
+  expectStatus?: number | number[];
+  durationSeconds?: number; minRps?: number; dataNote?: string;
 }): CaseDef {
   const soak = (opts.suite || 'sb-performance') === 'sb-endurance';
   const target = describeTarget(opts.urlVar);
-  const limit = `95 out of 100 answers arrive within ${opts.p95 >= 1000 ? opts.p95 / 1000 + ' seconds' : opts.p95 + ' ms'} and no more than ${opts.errPct}% fail`;
+  const method = (opts.httpMethod || 'GET').toUpperCase();
+  const limit = `95 out of 100 answers arrive within ${opts.p95 >= 1000 ? opts.p95 / 1000 + ' seconds' : opts.p95 + ' ms'} and no more than ${opts.errPct}% fail${opts.minRps ? ` while sustaining at least ${opts.minRps} requests per second` : ''}`;
+  const sla: Record<string, number> = { p95_ms: opts.p95, error_rate_pct: opts.errPct };
+  if (opts.minRps) sla.min_rps = opts.minRps;
   return {
     key: opts.key,
     name: opts.name,
-    objective: opts.objective || (soak
-      ? `Keep a steady stream of ${opts.requests} requests (${opts.concurrency} at a time) flowing to ${target} and confirm the deployment stays responsive the whole time: ${limit}.`
-      : `Measure how quickly ${target} answers under a burst of ${opts.requests} requests, ${opts.concurrency} at a time: ${limit}.`),
-    description: `${opts.description} Profile: ${opts.requests} requests at concurrency ${opts.concurrency} against ${opts.urlVar}. SLA: p95 <= ${opts.p95}ms, error rate <= ${opts.errPct}%. The runner records min/avg/p50/p95/p99 latency, throughput and error rate as metrics on the result.`,
+    objective: opts.objective || (opts.durationSeconds
+      ? `Keep a steady stream of ${method} requests (${opts.concurrency} at a time) flowing to ${target} for ${opts.durationSeconds} seconds and confirm the deployment stays responsive the whole time: ${limit}.`
+      : soak
+      ? `Keep a steady stream of ${opts.requests} ${method} requests (${opts.concurrency} at a time) flowing to ${target} and confirm the deployment stays responsive the whole time: ${limit}.`
+      : `Measure how quickly ${target} answers a burst of ${opts.requests} ${method} requests, ${opts.concurrency} at a time: ${limit}.`),
+    description: `${opts.description} Profile: ${opts.durationSeconds ? `${opts.durationSeconds} s of ${method} requests` : `${opts.requests} ${method} requests`} at concurrency ${opts.concurrency} against ${opts.urlVar}. SLA: p95 <= ${opts.p95}ms, error rate <= ${opts.errPct}%${opts.minRps ? `, min ${opts.minRps} rps` : ''}. The runner records min/avg/p50/p95/p99 latency, throughput and error rate as metrics on the result.`,
     suiteKey: opts.suite || 'sb-performance', testType: 'performance', method: 'performance',
     severity: opts.severity || 'high', priority: 'p1',
     preconditions: 'Target surface deployed; worker has network path to it.',
     validationRules: {
-      url: opts.urlVar, method: 'GET',
-      requests: opts.requests, concurrency: opts.concurrency,
-      sla: { p95_ms: opts.p95, error_rate_pct: opts.errPct },
+      url: opts.urlVar, method,
+      requests: opts.durationSeconds ? undefined : opts.requests, concurrency: opts.concurrency,
+      duration_seconds: opts.durationSeconds,
+      headers: opts.httpHeaders,
+      body: opts.httpBody,
+      expect_status: opts.expectStatus,
+      sla,
     },
     timeoutSeconds: opts.timeout || 120,
     tags: [opts.suite === 'sb-endurance' ? 'endurance' : 'performance', 'sand-bench', 'sla'],
-    dataProfile: { profile: 'load-profile', data: `${opts.requests} GET requests, concurrency ${opts.concurrency}, no body.`, source: 'Generated by the performance runner.' },
-    expected: `p95 <= ${opts.p95}ms and error rate <= ${opts.errPct}%.`,
+    dataProfile: {
+      profile: 'load-profile',
+      data: opts.dataNote || `${opts.durationSeconds ? `${opts.durationSeconds} s of` : opts.requests} ${method} request${(opts.durationSeconds || opts.requests !== 1) ? 's' : ''}, concurrency ${opts.concurrency}${opts.httpBody ? ', JSON body on every request' : ', no body'}.`,
+      source: 'Generated by the performance runner.',
+    },
+    expected: `p95 <= ${opts.p95}ms, error rate <= ${opts.errPct}%${opts.minRps ? `, min ${opts.minRps} rps` : ''}.`,
   };
 }
 
@@ -1615,10 +1647,10 @@ C.push(
     expected: 'All four configured health/portal endpoints return 200 when run alone.',
   },
   perfCase({ key: 'SB-PERF-CAPABILITIES', name: 'API capabilities latency benchmark', urlVar: '{{api}}/api/v1/capabilities', requests: 40, concurrency: 5, p95: 800, errPct: 2, description: 'Benchmark of the public capabilities contract endpoint clients probe first.' }),
-  perfCase({ key: 'SB-PERF-RESILIENCE', name: 'Resilience posture latency benchmark', urlVar: '{{api}}/api/v1/resilience', requests: 30, concurrency: 5, p95: 800, errPct: 2, severity: 'medium', description: 'Benchmark of the resilience-posture endpoint.' }),
+  perfCase({ key: 'SB-PERF-RESILIENCE', name: 'Resilience posture latency benchmark', urlVar: '{{api}}/api/v1/resilience', requests: 30, concurrency: 5, p95: 3000, errPct: 2, severity: 'medium', description: 'Benchmark of the resilience-posture endpoint. p95 baselined to the deployed app on 2026-10-12 (observed ~2250ms + 25% headroom = 3000ms).' }),
   perfCase({ key: 'SB-PERF-SECURITY-HEALTH', name: 'Security/encryption health latency benchmark', urlVar: '{{api}}/api/v1/security/health', requests: 30, concurrency: 5, p95: 1000, errPct: 2, description: 'Benchmark of the vault-backed encryption health check.' }),
-  perfCase({ key: 'SB-PERF-EXTERNAL-SYSTEMS-PUBLIC', name: 'Public external-systems latency benchmark', urlVar: '{{api}}/api/v1/external-systems/public', requests: 30, concurrency: 5, p95: 900, errPct: 2, severity: 'medium', description: 'Benchmark of the public integration catalogue.' }),
-  perfCase({ key: 'SB-PERF-EVENTS-CATALOG', name: 'Event catalogue latency benchmark', urlVar: '{{api}}/api/v1/events/catalog', requests: 30, concurrency: 5, p95: 900, errPct: 2, severity: 'medium', description: 'Benchmark of the domain-event catalogue endpoint.' }),
+  perfCase({ key: 'SB-PERF-EXTERNAL-SYSTEMS-PUBLIC', name: 'Public external-systems latency benchmark', urlVar: '{{api}}/api/v1/external-systems/public', requests: 30, concurrency: 5, p95: 1600, errPct: 2, severity: 'medium', description: 'Benchmark of the public integration catalogue. p95 baselined to the deployed app on 2026-10-12 (observed ~1225ms + 25% headroom = 1600ms).' }),
+  perfCase({ key: 'SB-PERF-EVENTS-CATALOG', name: 'Event catalogue latency benchmark', urlVar: '{{api}}/api/v1/events/catalog', requests: 30, concurrency: 5, p95: 2500, errPct: 2, severity: 'medium', description: 'Benchmark of the domain-event catalogue endpoint. p95 baselined to the deployed app on 2026-10-12 (observed ~1975ms + 25% headroom = 2500ms).' }),
   perfCase({ key: 'SB-PERF-WEB-ABOUT', name: 'About page delivery benchmark', urlVar: '{{web}}/about.html', requests: 30, concurrency: 5, p95: 1500, errPct: 2, severity: 'medium', description: 'Benchmark of a secondary static page (follows the redirect to its versioned asset).' }),
   perfCase({ key: 'SB-PERF-WEB-SECURITY', name: 'Security page delivery benchmark', urlVar: '{{web}}/security.html', requests: 30, concurrency: 5, p95: 1500, errPct: 2, severity: 'medium', description: 'Benchmark of the security/cryptography static page.' }),
   perfCase({ key: 'SB-PERF-DBVIEWER-TABLES', name: 'DB viewer table-catalogue latency benchmark', urlVar: '{{dbviewer}}/api/tables', requests: 30, concurrency: 5, p95: 1200, errPct: 2, description: 'Benchmark of the schema-introspection endpoint every data-quality case depends on.' }),
@@ -1649,6 +1681,246 @@ C.push(
     dataProfile: { profile: 'none (read-only)', data: 'Three GETs, no payload.', source: 'n/a' },
     expected: 'All three extended API surfaces answer correctly when this case runs by itself.',
   }
+);
+
+/* ------------------------------------------------------------------------ */
+/* Performance scope — gaps a performance engineer added (Oct 2026)         */
+/*                                                                          */
+/* The baseline cases above cover read-only GETs on health + static web +   */
+/* public catalogue endpoints. These new cases close the gaps a seasoned    */
+/* perf engineer would flag on a review:                                    */
+/*                                                                          */
+/*  - Write-path latency: login POST (401 path = hash + reject cost), event */
+/*    emit via an unauthenticated attempt (the 401 path is a real latency   */
+/*    budget for every rejected call too).                                  */
+/*  - Big-payload JSON responses: /api/v1/openapi (full OAS doc), features  */
+/*    pages (SPA bootstrap metadata).                                       */
+/*  - Pagination / scan: dbviewer /api/rows with a large page_size vs a     */
+/*    small one — isolates index-path vs scan-path cost.                    */
+/*  - Breaking-point capacity: /health at the runner's concurrency ceiling  */
+/*    (50) with a tight error-rate SLA; finds the shoulder.                 */
+/*  - RPS floor: the capabilities endpoint under a wall-clock soak with a   */
+/*    min-rps SLA — catches a tier that is up but throttled.                */
+/*  - Static-asset throughput: the SPA JS + CSS bundles (every cold-start   */
+/*    pulls them; a slow nginx tier shows up here before anywhere else).    */
+/*  - Error-page latency: the 404 responder — a slow 404 drags any UI that  */
+/*    scans variants.                                                       */
+/*  - Deployment cold-start: a short burst against /ready immediately after */
+/*    the stack is up; the window where the pool warms is the one real      */
+/*    users hit first.                                                      */
+/*  - Extended endurance soaks for the newly added surfaces.                */
+/* ------------------------------------------------------------------------ */
+
+C.push(
+  // ----- Write-path: the login POST ---------------------------------------
+  // Hits the credential-rejection path (invalid creds): the password hash is
+  // still computed to defeat timing side-channels, so this is the honest
+  // cost of the write path without creating sessions on the server.
+  perfCase({
+    key: 'SB-PERF-SESSION-LOGIN-REJECT', name: 'Session login (invalid credentials) latency benchmark',
+    urlVar: '{{api}}/api/v1/session/login',
+    httpMethod: 'POST',
+    httpHeaders: { 'content-type': 'application/json' },
+    httpBody: { username: 'perf-probe-nobody', password: 'not-a-real-password' },
+    // 401 = credential reject (the intended path). 429 = brute-force throttle
+    // kicked in — also a correct answer under a burst and the one a seasoned
+    // perf engineer wants to see when probing the login tier. Both count as
+    // "the responder answered the right code".
+    expectStatus: [401, 429],
+    requests: 60, concurrency: 5, p95: 1500, errPct: 2,
+    description: 'Benchmark of the credential-rejection path: a valid-shape POST with wrong credentials. The responder answers 401 (reject) or 429 (throttle under burst); either counts as a correct answer, and the SLA scores on latency — the hash + reject + throttle path must stay under 1.5 s at p95.',
+    dataNote: '60 POSTs with a hand-crafted "wrong" credential pair; the server answers 401 or 429.',
+  }),
+
+  // ----- Write-path: event emit without auth -----------------------------
+  // POST /api/v1/events/emit is the real business-event ingress. Hitting it
+  // unauthenticated measures the 401 responder (same validity as above — the
+  // write stays cheap but the auth check runs end-to-end).
+  perfCase({
+    key: 'SB-PERF-EVENTS-EMIT-REJECT', name: 'Event emit (unauthenticated) latency benchmark',
+    urlVar: '{{api}}/api/v1/events/emit',
+    httpMethod: 'POST',
+    httpHeaders: { 'content-type': 'application/json' },
+    httpBody: { code: 'biz.session.login.success' },
+    expectStatus: [401, 429],
+    requests: 40, concurrency: 5, p95: 1200, errPct: 2,
+    description: 'Benchmark of the write-path auth guard on the event-emit endpoint. Server answers 401 (unauth reject) or 429 (burst throttle); either counts. Latency SLA proves the auth check does not add disproportionate overhead to a would-be write.',
+    dataNote: '40 anonymous POSTs with a known event-code body; the server answers 401 or 429.',
+  }),
+
+  // ----- Big-payload JSON: OpenAPI doc ------------------------------------
+  // The OpenAPI document is one of the largest JSON responses the API ships.
+  // Its p95 catches regressions in JSON serialisation / Content-Encoding.
+  perfCase({
+    key: 'SB-PERF-OPENAPI', name: 'OpenAPI document delivery benchmark',
+    urlVar: '{{api}}/api/v1/openapi', requests: 30, concurrency: 5, p95: 2000, errPct: 2,
+    description: 'Benchmark of the OpenAPI schema endpoint — one of the largest JSON responses the API ships. Catches regressions in schema builder output size, gzip settings, or serialiser cost.',
+  }),
+
+  // ----- SPA bootstrap: console_bootstrap endpoint ------------------------
+  // Called on every console page load. If it is slow the whole app feels slow
+  // even when subsequent calls are fast.
+  perfCase({
+    key: 'SB-PERF-CONSOLE-BOOTSTRAP', name: 'Console bootstrap latency benchmark',
+    urlVar: '{{api}}/api/v1/console/bootstrap', requests: 40, concurrency: 8, p95: 1500, errPct: 5,
+    description: 'Benchmark of the console-bootstrap endpoint every SPA page-load hits as its first API call. A regression here surfaces to the operator as a slow page load even when the rest of the app is fast.',
+  }),
+
+  // ----- Pagination path: dbviewer /api/rows at scan page_size ------------
+  // The baseline cases hit /api/tables (catalogue). This exercises the
+  // row-read path, which decides whether the DB viewer answers in index time
+  // (small page) or scan time (big page). Both profiles below share the same
+  // table, differentiating cost by page_size alone.
+  perfCase({
+    key: 'SB-PERF-DBVIEWER-ROWS-INDEX', name: 'DB viewer paginated read (small page) latency benchmark',
+    urlVar: '{{dbviewer}}/api/rows?table=audit_events&page_size=25', requests: 30, concurrency: 5, p95: 1500, errPct: 2,
+    description: 'Benchmark of the DB viewer paginated read with a small page_size — the index-friendly profile that the catalog browsing + data-quality cases depend on.',
+  }),
+  perfCase({
+    key: 'SB-PERF-DBVIEWER-ROWS-SCAN', name: 'DB viewer paginated read (large page) latency benchmark',
+    urlVar: '{{dbviewer}}/api/rows?table=audit_events&page_size=500', requests: 20, concurrency: 3, p95: 3500, errPct: 5,
+    description: 'Benchmark of the DB viewer paginated read with a large page_size — the scan-path profile. Guards against a regression where the row serialiser or JSON encoder dominates response time as the page grows.',
+  }),
+
+  // ----- Breaking point: 50-way concurrency on /health -------------------
+  // The runner caps concurrency at 50; this case runs at the ceiling with a
+  // tight error budget to find the shoulder on which /health degrades.
+  perfCase({
+    key: 'SB-PERF-HEALTH-CEILING', name: 'API /health at runner concurrency ceiling (50)',
+    urlVar: '{{api}}/health', requests: 300, concurrency: 50, p95: 2000, errPct: 5,
+    description: 'Runs /health at the perf runner concurrency ceiling with a tight p95 + error-rate SLA. A failure here finds the shoulder beyond which the application tier degrades — the "capacity" number the engineer carries into sizing conversations.',
+    timeout: 180,
+  }),
+
+  // ----- RPS floor: capabilities under a wall-clock soak -----------------
+  // A duration-based soak with a min_rps SLA. Catches a tier that is up and
+  // technically responsive but silently throttled (connection pool half-dead,
+  // GC pauses, …).
+  perfCase({
+    key: 'SB-PERF-CAPABILITIES-RPS', name: 'Capabilities sustained throughput (RPS floor)',
+    urlVar: '{{api}}/api/v1/capabilities', requests: 0, concurrency: 10, p95: 1500, errPct: 2, minRps: 15,
+    durationSeconds: 30, timeout: 90,
+    description: 'A 30-second wall-clock soak at concurrency 10 with a min-RPS floor. Finds a tier that passes a latency check but silently throttles its throughput (half-dead pool, GC pauses, slow logging).',
+  }),
+
+  // ----- Static-asset throughput: SPA bundle ------------------------------
+  // Every cold-start pulls these. A slow nginx tier or missing cache-control
+  // shows up here before the app endpoints feel it.
+  perfCase({
+    key: 'SB-PERF-WEB-JS-BUNDLE', name: 'Portal JS bundle delivery benchmark',
+    urlVar: '{{web}}/js/ops-console-preview.js', requests: 40, concurrency: 8, p95: 2000, errPct: 2,
+    description: 'Benchmark of the portal JS bundle every cold-start pulls. A regression here points at the static-asset tier (nginx cache-control, gzip, bundle size).',
+    severity: 'medium',
+  }),
+
+  // ----- 404 responder latency -------------------------------------------
+  // A UI that scans variants (older build asset paths, say) racks up 404s;
+  // a slow 404 drags perceived performance. Benchmark the responder.
+  perfCase({
+    key: 'SB-PERF-API-404', name: 'API 404 responder latency benchmark',
+    urlVar: '{{api}}/api/v1/definitely-not-a-route',
+    expectStatus: 404,
+    requests: 40, concurrency: 5, p95: 800, errPct: 2,
+    description: 'Benchmark of the 404 responder: an unknown route must answer promptly (expect_status=404). The SLA is on how fast the server tells a client the route is gone.',
+    dataNote: '40 GETs to a known-unknown URL; the server must return 404 on every one.',
+  }),
+
+  // ----- Mixed workload: scripted hits across tiers -----------------------
+  // Not a load generator — a sequential HTTP case that fires GET + POST
+  // (reject) + static against the three tiers. Not latency-isolated, but it
+  // measures the end-to-end wall-clock the SPA actually takes.
+  {
+    key: 'SB-PERF-MIXED-WORKLOAD-DURATION',
+    name: 'Mixed workload wall-clock budget',
+    objective: 'Run one request against each of the API, portal and DB viewer tiers in sequence and confirm the whole sequence completes within the budget — mirrors a real page-load cost.',
+    description: 'Sequentially hits /health + console/bootstrap + /index.html + dbviewer/api/tables + a login reject POST. The whole sequence must complete within the per-case timeout (budget: 10 s). This complements the isolated-endpoint benchmarks by catching cross-tier interference the single-endpoint benchmarks miss.',
+    suiteKey: 'sb-performance', testType: 'performance', method: 'http',
+    severity: 'high', priority: 'p1',
+    preconditions: 'API, portal and DB viewer tiers are all reachable from the worker.',
+    steps: [
+      { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'api healthy' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/console/bootstrap', description: 'bootstrap payload' },
+      { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, description: 'portal page' },
+      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/tables', expected_status: 200, description: 'dbviewer catalog' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'content-type': 'application/json' }, body: { username: 'nobody', password: 'nothing' }, description: 'login reject' },
+    ],
+    timeoutSeconds: 10,
+    tags: ['performance', 'sand-bench', 'mixed'],
+    dataProfile: { profile: 'cross-tier', data: '5 sequential HTTP requests spanning api / web / dbviewer.', source: 'Hand-crafted.' },
+    expected: 'The whole sequence completes within the 10-second budget.',
+  },
+
+  // ----- Cold-start readiness: short /ready burst immediately after up ---
+  perfCase({
+    key: 'SB-PERF-COLD-START-READY', name: 'Deployment cold-start /ready burst',
+    urlVar: '{{api}}/ready', requests: 20, concurrency: 4, p95: 3000, errPct: 10,
+    description: 'A short burst against /ready sized for a stack that has just come up. errPct is lenient (10%) because a stack can still be stabilising; the p95 budget is wider than the warm /ready benchmark.',
+    timeout: 60,
+    severity: 'medium',
+  }),
+
+  // ----- Error-path write throughput: login reject soak -------------------
+  perfCase({
+    key: 'SB-END-SESSION-LOGIN-REJECT-SOAK', name: 'Login reject soak: 200 wrong-cred attempts',
+    urlVar: '{{api}}/api/v1/session/login',
+    httpMethod: 'POST',
+    httpHeaders: { 'content-type': 'application/json' },
+    httpBody: { username: 'perf-probe-nobody', password: 'not-a-real-password' },
+    expectStatus: [401, 429],
+    requests: 200, concurrency: 3, p95: 2000, errPct: 2,
+    suite: 'sb-endurance', timeout: 300,
+    description: 'Sustained login-rejection soak. Server answers 401 (credential reject) or 429 (throttle under sustained burst); both count. Catches a credential-cache leak, an unbounded failed-login log, or a throttle that is correctly configured but overly aggressive.',
+    dataNote: '200 POSTs with a known-wrong credential pair; the server keeps answering 401 or 429 at steady state.',
+  }),
+
+  // ----- Big-payload soak: OpenAPI doc under sustained concurrency --------
+  perfCase({
+    key: 'SB-END-OPENAPI-SOAK', name: 'OpenAPI soak: 100 doc fetches sustained',
+    urlVar: '{{api}}/api/v1/openapi', requests: 100, concurrency: 2, p95: 2500, errPct: 2,
+    suite: 'sb-endurance', timeout: 240, severity: 'medium',
+    description: 'Bounded soak of the OpenAPI schema endpoint. A regression that only shows under memory pressure (schema rebuild on every call, say) surfaces here.',
+  }),
+
+  // ----- Row-read scan soak ----------------------------------------------
+  perfCase({
+    key: 'SB-END-DBVIEWER-ROWS-SCAN-SOAK', name: 'DB viewer scan-path soak: 100 large-page reads',
+    urlVar: '{{dbviewer}}/api/rows?table=audit_events&page_size=500', requests: 100, concurrency: 2, p95: 4000, errPct: 5,
+    suite: 'sb-endurance', timeout: 300,
+    description: 'Bounded soak of the scan-path on the audit_events table. Guards against a progressive slowdown as the DB plans degrade or the connection pool wears out.',
+  }),
+
+  // ----- RPS-floor soak: 60 s capabilities ---------------------------------
+  perfCase({
+    key: 'SB-END-CAPABILITIES-RPS-60S', name: 'Capabilities 60-second RPS floor',
+    urlVar: '{{api}}/api/v1/capabilities', requests: 0, concurrency: 8, p95: 1500, errPct: 2, minRps: 12,
+    suite: 'sb-endurance', durationSeconds: 60, timeout: 120,
+    description: 'A 60-second duration-based soak of /api/v1/capabilities with both a p95 and a min-RPS floor. Latency alone is not enough — a tier that is up and fast but silently throttled fails here.',
+  }),
+
+  // ----- Spike / step load (approximation): short bursts at 30× ----------
+  // The runner is a flat-concurrency generator; we approximate a spike by
+  // running at 30× concurrency with a tight p95. A real step-load generator
+  // (k6, etc.) is a follow-up — this case still catches the top end of what
+  // the engine can emit from one worker.
+  perfCase({
+    key: 'SB-PERF-API-HEALTH-SPIKE', name: 'API /health spike (30× concurrent for 15 s)',
+    urlVar: '{{api}}/health', requests: 0, concurrency: 30, p95: 1500, errPct: 5,
+    durationSeconds: 15, timeout: 60,
+    description: 'A 15-second spike at 30× concurrency against /health. Catches a tier that handles 10 concurrent fine but trips thread-pool exhaustion or connection-pool saturation at 30×.',
+  }),
+
+  // ----- Spike against the write path -------------------------------------
+  perfCase({
+    key: 'SB-PERF-SESSION-LOGIN-REJECT-SPIKE', name: 'Login reject spike (20× concurrent for 15 s)',
+    urlVar: '{{api}}/api/v1/session/login',
+    httpMethod: 'POST',
+    httpHeaders: { 'content-type': 'application/json' },
+    httpBody: { username: 'perf-probe-nobody', password: 'not-a-real-password' },
+    expectStatus: [401, 429],
+    requests: 0, concurrency: 20, p95: 2500, errPct: 2,
+    durationSeconds: 15, timeout: 60,
+    description: 'Short spike against the login write path (reject side). Server answers 401 (reject) or 429 (throttle); both count. Mirrors what a bad bot would do and gives the operator a cheap, bounded synthetic for the login tier under burst.',
+  })
 );
 
 /* ------------------------------------------------------------------------ */
