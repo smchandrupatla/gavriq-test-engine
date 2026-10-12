@@ -61,12 +61,16 @@ export function validateCaseShape(tc: any, vars: Record<string, string>): string
     for (const name of Object.keys(s.save || {})) savedByMain.add(name);
   }
 
+  // Cleanup steps can also save vars for later cleanup steps (e.g. a GET that
+  // captures an ETag so the following DELETE sends an If-Match). Walk cleanup
+  // in order and track its own saves alongside what main saved.
+  const savedByCleanup = new Set<string>();
   for (const [i, s] of (cleanup as any[]).entries()) {
     if (!s || typeof s !== 'object') continue;
     const refs = new Set<string>();
     collectRefs(s, refs);
     for (const r of refs) {
-      if (KNOWN_VARS.has(r) || savedByMain.has(r)) continue;
+      if (KNOWN_VARS.has(r) || savedByMain.has(r) || savedByCleanup.has(r)) continue;
       // `skip_if_missing` protects a cleanup step that references a var only
       // some code paths saved — if the var is listed there, it's an opt-in
       // skip, not a shape violation.
@@ -74,6 +78,7 @@ export function validateCaseShape(tc: any, vars: Record<string, string>): string
       if (skipIf.includes(r)) continue;
       return `cleanup step ${i + 1}: references unresolved {{${r}}} — add it to skip_if_missing or save it in main steps`;
     }
+    for (const name of Object.keys(s.save || {})) savedByCleanup.add(name);
   }
 
   return null;
