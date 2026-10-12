@@ -28,22 +28,63 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
-const PROJECT = 'sand-bench-staging';
-const ENV_KEY = 'sand-bench-staging';
 const SERVICES = ['db', 'minio', 'api', 'worker', 'web', 'testhub', 'dbviewer'];
 const KEEP_SOURCES = 2;
 
 const repo = path.resolve(process.env.SANDBENCH_REPO || path.join(root, '../sand-bench-enterprise'));
-const home = path.resolve(process.env.STAGING_HOME || path.join(root, '../sand-bench-staging'));
 const engine = (process.env.TE_BASE || 'http://127.0.0.1:8797').replace(/\/$/, '');
-const ports = {
-  web: Number(process.env.STAGING_WEB_PORT) || 18080,
-  api: Number(process.env.STAGING_API_PORT) || 18787,
-  testhub: Number(process.env.STAGING_TESTHUB_PORT) || 18091,
-  dbviewer: Number(process.env.STAGING_DBVIEWER_PORT) || 18090,
-};
+
+// Per-env configuration. When STAGING_ENV_KEY is set (passed by the infra-agent
+// from the queued infra_job's env_key param), the engine environment of that
+// key supplies the compose project and host ports — so parallel staging envs
+// like sand-bench-staging-2, -3, … each deploy to their own compose project
+// and port set without colliding. The fan-out envs also skip the shared
+// commit-gate step: five parallel deploys would race the same checkout.
+const envKey = process.env.STAGING_ENV_KEY || 'sand-bench-staging';
+const PROJECT = process.env.STAGING_COMPOSE_PROJECT || await resolveComposeProject(envKey);
+const ENV_KEY = envKey;
+const isFanOut = /-staging-\d+$/.test(envKey);
+const home = path.resolve(process.env.STAGING_HOME || path.join(root, `../${envKey}`));
+const ports = await resolvePorts(envKey);
+console.log(`[staging] resolved env=${ENV_KEY} project=${PROJECT} ports=${JSON.stringify(ports)}`);
 const secretsFile = path.join(home, 'staging.env');
 const stateFile = path.join(home, 'deployed.json');
+
+async function resolveComposeProject(key) {
+  if (key === 'sand-bench-staging') return 'sand-bench-staging';
+  try {
+    const res = await fetch(`${engine}/api/v1/environments/${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return key;
+    const d = (await res.json()).data || {};
+    return d.config?.infra?.compose_project || key;
+  } catch { return key; }
+}
+
+async function resolvePorts(key) {
+  // The engine env config stores vars.web/api/testhub/dbviewer as full URLs
+  // like "http://127.0.0.1:28080"; parse the port out. Env vars still win,
+  // so an operator can force a port set from the command line.
+  const dflt = { web: 18080, api: 18787, testhub: 18091, dbviewer: 18090 };
+  let fromEngine = {};
+  if (key !== 'sand-bench-staging') {
+    try {
+      const res = await fetch(`${engine}/api/v1/environments/${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const vars = ((await res.json()).data?.config?.vars) || {};
+        for (const name of ['web', 'api', 'testhub', 'dbviewer']) {
+          const m = String(vars[name] || '').match(/:(\d+)(?:\/|$)/);
+          if (m) fromEngine[name] = Number(m[1]);
+        }
+      }
+    } catch { /* keep defaults */ }
+  }
+  return {
+    web: Number(process.env.STAGING_WEB_PORT) || fromEngine.web || dflt.web,
+    api: Number(process.env.STAGING_API_PORT) || fromEngine.api || dflt.api,
+    testhub: Number(process.env.STAGING_TESTHUB_PORT) || fromEngine.testhub || dflt.testhub,
+    dbviewer: Number(process.env.STAGING_DBVIEWER_PORT) || fromEngine.dbviewer || dflt.dbviewer,
+  };
+}
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024, ...opts });
@@ -192,17 +233,35 @@ async function verify(sourceDir) {
     await probe('testhub', `${host}:${ports.testhub}/health`),
     await probe('dbviewer', `${host}:${ports.dbviewer}/health`),
   ];
-  try {
-    const res = await fetch(`${host}:${ports.api}/api/v1/session/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'operator', password: 'password' }),
-      signal: AbortSignal.timeout(10_000),
+  // Retry demo sign-in: cold migrations on a contended host can take 30-60s
+  // past the container healthcheck. A single 10s shot was timing out on fan-out
+  // deploys while the engine was running another suite in parallel.
+  {
+    const deadline = Date.now() + 90_000;
+    let signIn = null;
+    let lastErr = null;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${host}:${ports.api}/api/v1/session/login`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: 'operator', password: 'password' }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        const body = await res.json().catch(() => ({}));
+        signIn = { ok: res.ok && !!body.token, detail: `HTTP ${res.status}` };
+        if (signIn.ok) break;
+      } catch (err) {
+        lastErr = err;
+      }
+      await new Promise((r) => setTimeout(r, 3_000));
+    }
+    checks.push({
+      name: 'demo sign-in',
+      url: `${host}:${ports.api}/api/v1/session/login`,
+      ok: !!signIn?.ok,
+      detail: signIn?.detail || lastErr?.cause?.code || lastErr?.message || 'no response',
     });
-    const body = await res.json().catch(() => ({}));
-    checks.push({ name: 'demo sign-in', url: `${host}:${ports.api}/api/v1/session/login`, ok: res.ok && !!body.token, detail: `HTTP ${res.status}` });
-  } catch (err) {
-    checks.push({ name: 'demo sign-in', url: '', ok: false, detail: err.cause?.code || err.message });
   }
   for (const c of checks) console.log(`[staging] ${c.ok ? 'ok  ' : 'FAIL'} ${c.name.padEnd(13)} ${c.detail}  ${c.url}`);
   // Login-page check: fetch the deployed index.html, parse the composed
@@ -234,11 +293,12 @@ async function verify(sourceDir) {
     console.log(`[staging] ok   ${'commit gate'.padEnd(13)} SKIPPED (SKIP_GATE=1)`);
   } else {
     try {
-      // Windows resolves npm -> npm.cmd via PATHEXT; spawnSync does not, so name the
-      // right binary explicitly on Windows. Avoids DEP0190 (passing an args array with
-      // shell:true is deprecated for security reasons).
-      const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-      run(npmBin, ['run', 'gate:commit'], { cwd: repo });
+      // Windows resolves npm -> npm.cmd via PATHEXT; spawnSync does not. On Node 20+
+      // calling .cmd without shell:true raises EINVAL (CVE-2024-27980 hardening), so
+      // route the gate through the shell on Windows. DEP0190 is a warning here, not a
+      // security issue — the args list is a fixed string from this script.
+      const isWin = process.platform === 'win32';
+      run(isWin ? 'npm.cmd' : 'npm', ['run', 'gate:commit'], { cwd: repo, shell: isWin });
       checks.push({ name: 'commit gate', url: '', ok: true, detail: 'fast unit tier passed' });
       console.log(`[staging] ok   ${'commit gate'.padEnd(13)} fast unit tier passed`);
     } catch (err) {
@@ -359,7 +419,9 @@ async function register(state) {
   const existing = await fetch(`${engine}/api/v1/environments/${ENV_KEY}`);
   const existingConfig = existing.ok ? ((await existing.json().catch(() => ({}))).data || {}).config || {} : {};
   const body = {
-    name: 'Sand Bench · local Docker (staging)',
+    name: isFanOut
+      ? `Sand Bench · local Docker (staging #${ENV_KEY.split('-').pop()})`
+      : 'Sand Bench · local Docker (staging)',
     env_type: 'staging',
     base_url: `${host}:${ports.web}`,
     status: 'active',
