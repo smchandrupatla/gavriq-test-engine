@@ -181,9 +181,10 @@ async function scaleWorkers(job: Job, progress: Progress) {
 async function deploy(job: Job, progress: Progress) {
   const file = scriptPath(job.params);
   const ref = String(job.params.ref || 'main');
-  progress(`$ node ${path.relative(ROOT, file)} deploy --ref ${ref}\n`);
+  const envKey = typeof job.params.env_key === 'string' ? job.params.env_key : '';
+  progress(`$ node ${path.relative(ROOT, file)} deploy --ref ${ref}${envKey ? ` (env ${envKey})` : ''}\n`);
   const res = await run(process.execPath, [file, 'deploy', '--ref', ref], {
-    env: { ...process.env, TE_BASE: API },
+    env: { ...process.env, TE_BASE: API, ...(envKey ? { STAGING_ENV_KEY: envKey } : {}) },
     timeoutMs: TIMEOUTS_MS.deploy,
     onOutput: progress,
   });
@@ -224,12 +225,13 @@ async function sweepProject(project: string, opts: { images: boolean; volumes: b
 async function teardown(job: Job, progress: Progress) {
   const file = scriptPath(job.params);
   const project = typeof job.params.compose_project === 'string' ? job.params.compose_project : null;
+  const envKey = typeof job.params.env_key === 'string' ? job.params.env_key : '';
   const removeImages = job.params.remove_images !== false;
   const removeVolumes = job.params.remove_volumes === true;
   const args = [file, 'down', ...(removeImages ? ['--rmi'] : []), ...(removeVolumes ? ['--volumes'] : [])];
-  progress(`$ node ${path.relative(ROOT, file)} ${args.slice(1).join(' ')}\n`);
+  progress(`$ node ${path.relative(ROOT, file)} ${args.slice(1).join(' ')}${envKey ? ` (env ${envKey})` : ''}\n`);
   let scriptError: string | null = null;
-  const res = await run(process.execPath, args, { env: { ...process.env, TE_BASE: API }, timeoutMs: TIMEOUTS_MS.teardown, onOutput: progress });
+  const res = await run(process.execPath, args, { env: { ...process.env, TE_BASE: API, ...(envKey ? { STAGING_ENV_KEY: envKey } : {}) }, timeoutMs: TIMEOUTS_MS.teardown, onOutput: progress });
   if (res.code !== 0) scriptError = `down exited ${res.code}: ${tail(res.output, 600)}`;
 
   let swept = null;

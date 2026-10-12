@@ -347,10 +347,11 @@ export async function queueInfraJob(input: QueueJobInput): Promise<{ job: any; c
   return { job: rows[0], created: true };
 }
 
-function teardownParams(env: { infra: InfraConfig; state: EnvState }, policy: InfraPolicy) {
+function teardownParams(env: { key?: string; infra: InfraConfig; state: EnvState }, policy: InfraPolicy) {
   return {
     script: env.infra.script,
     compose_project: env.infra.compose_project,
+    env_key: env.key,
     remove_images: policy.remove_images_on_teardown,
     remove_volumes: policy.remove_volumes_on_teardown,
     previous_state: env.state,
@@ -508,7 +509,7 @@ export async function createDeployment(r: DeployRequest, actorId?: string | null
       environment_id: environment.id,
       deployment_id: row.id,
       reason: r.reason || 'requested',
-      params: { script: infra.script, ref, compose_project: infra.compose_project, previous_state: environmentState(environment) },
+      params: { script: infra.script, ref, compose_project: infra.compose_project, env_key: environment.key, previous_state: environmentState(environment) },
       requested_by: requestedBy,
     });
     if (job.deployment_id !== row.id) {
