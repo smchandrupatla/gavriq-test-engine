@@ -225,6 +225,27 @@ async function verify(sourceDir) {
       console.log(`[staging] FAIL ${'login page'.padEnd(13)} ${err.message}  ${host}:${ports.web}/`);
     }
   }
+  // Post-deploy commit gate (owner rule, 2026-10-12). Runs against the shared Sand Bench
+  // checkout so every staging deploy ends with the same fast unit tier a commit would
+  // have faced. Fails verify() if the gate fails. Skipped only when the operator passes
+  // SKIP_GATE=1 in the environment, same discipline as a local commit.
+  if (process.env.SKIP_GATE === '1') {
+    checks.push({ name: 'commit gate', url: '', ok: true, detail: 'SKIPPED (SKIP_GATE=1)' });
+    console.log(`[staging] ok   ${'commit gate'.padEnd(13)} SKIPPED (SKIP_GATE=1)`);
+  } else {
+    try {
+      // Windows resolves npm -> npm.cmd via PATHEXT; spawnSync does not, so name the
+      // right binary explicitly on Windows. Avoids DEP0190 (passing an args array with
+      // shell:true is deprecated for security reasons).
+      const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      run(npmBin, ['run', 'gate:commit'], { cwd: repo });
+      checks.push({ name: 'commit gate', url: '', ok: true, detail: 'fast unit tier passed' });
+      console.log(`[staging] ok   ${'commit gate'.padEnd(13)} fast unit tier passed`);
+    } catch (err) {
+      checks.push({ name: 'commit gate', url: '', ok: false, detail: err.message });
+      console.log(`[staging] FAIL ${'commit gate'.padEnd(13)} ${err.message}`);
+    }
+  }
   return checks.every((c) => c.ok);
 }
 
