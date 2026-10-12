@@ -215,11 +215,11 @@ C.push(
     key: 'SB-UC-users-MAIN',
     name: 'UC-users main flow: Users',
     objective: 'Walk through the "Users" screen the way its main use case describes it: administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access.',
-    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access. The gated /admin.html serves the sign-in shell until JS renders the authenticated screen; the stable fragment "<title>Sand Bench" confirms the route is reachable.',
+    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access. The user admin screen lives at /configuration-users.html (the old /admin.html retired when the console was reorganised); the route-shield 302s the request to a short-id URL, so [200, 302] both count as reachable.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/configuration-users.html', expected_status: [200, 302], description: 'load screen (route-shield may 302 to /v/<id>)' },
       ADMIN_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { any_user_id: 'data.0.id' }, description: 'retrieve tenant users' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{any_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{any_user_id}}' }, { path: 'functionalPermissions', exists: true }], description: 'retrieve effective access for that user' },
