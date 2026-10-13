@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ENV } from "../lib/env.ts";
-import { apiJson, correlationId, pollUntil, testhubJson } from "../lib/client.ts";
+import { apiJson, correlationId, expectedDeliveryStatus, pollUntil, testhubJson } from "../lib/client.ts";
 
 type InboundEvent = { id: string; channel: string; systemId: string; payload: Record<string, unknown> };
 type TesthubInboxRow = { at: string; channel: string; payload: Record<string, unknown> };
@@ -32,7 +32,7 @@ test("application posts a message to an external API and delivery is confirmed t
   const before = await testhubJson<{ total: number }>("/hub/inbox?channel=api");
 
   const run = await apiJson<{
-    delivery: { sent: number; blocked: number; failed: number };
+    delivery: { sent: number; simulated: number; blocked: number; failed: number };
   }>("/api/v1/runs", {
     method: "POST",
     body: JSON.stringify({ messageTypeCode: ENV.messageTypeCode, count: 1, channel: "api", seed: correlationId("seed") }),
@@ -40,7 +40,8 @@ test("application posts a message to an external API and delivery is confirmed t
   assert.equal(run.status, 202, "run request was rejected");
   assert.equal(run.body.delivery.blocked, 0, "generated message failed schema validation and was never dispatched");
   assert.equal(run.body.delivery.failed, 0, "API adapter reported a failed send");
-  assert.equal(run.body.delivery.sent, 1);
+  const expected = await expectedDeliveryStatus("api");
+  assert.equal(expected === "acknowledged" ? run.body.delivery.sent : run.body.delivery.simulated, 1);
 
   const after = await pollUntil(
     () => testhubJson<{ data: TesthubInboxRow[]; total: number }>("/hub/inbox?channel=api"),

@@ -113,6 +113,14 @@ export async function recordSkip(name, reason) {
   return file;
 }
 
+/** @typedef {ReturnType<typeof session>} Session */
+
+/**
+ * Run `fn` in a fresh WebDriver session, or report a skip when Selenium is down.
+ * @template T
+ * @param {(sess: Session) => Promise<T>} fn
+ * @returns {Promise<{ skipped: true, reason: string } | { skipped: false, result: T }>}
+ */
 export async function withBrowser(fn) {
   const ready = await seleniumReady();
   if (!ready) {

@@ -11,12 +11,12 @@ import { clickButtonByLabel, openConsole, openNav, selectFieldOption, setFieldTe
 // UI's own success toast is never treated as proof by itself — same principle as
 // sit/cases/60-ui-eventing.sit.ts applied to the MQ/Kafka/API eventing panel.
 //
-// Only forms that are real, standalone, and safely repeatable are covered here. The
-// Message Designer wizard's "Create message(s)" action also writes to the database
-// (POST /api/v1/message-types) but always submits the same default code
-// ("custom.type") — a second UI-driven run would collide with the tenant's own
-// code-uniqueness constraint, so it stays covered only as page/navigation coverage
-// (see sit/cases/70-ui-pages.sit.ts) rather than as a repeatable workflow case here.
+// Only forms that are real, standalone, and safely repeatable are covered here. Create
+// message definition (the definition studio) also writes to the database as soon as a
+// message type is chosen (POST /api/v1/definitions, then autosave PUTs), but a repeated
+// UI-driven run would keep creating new draft definitions rather than reaching a single
+// idempotent end state, so it stays covered only as page/navigation coverage (see
+// sit/cases/70-ui-pages.sit.ts) rather than as a repeatable workflow case here.
 
 type DbRows<T> = { total: number; columns: string[]; data: T[] };
 

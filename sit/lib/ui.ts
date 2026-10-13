@@ -26,11 +26,18 @@ export async function withConsolePage<T>(fn: (page: Page) => Promise<T>): Promis
   }
 }
 
-// The console auto-authenticates on load (apps/web/public/js/live-bind.js's enter()
-// runs on DOMContentLoaded) and mounts the SPA into #console-root once #gate is
-// hidden — that's the real, user-visible signal that sign-in and mount succeeded.
+// apps/web/public/config/login.json decides whether the console auto-authenticates
+// (loginScreenEnabled: false) or shows the sign-in gate and waits for a click
+// (loginScreenEnabled: true — the default since 2d06753's multi-tenancy/sign-in-page
+// work). Either way #gate hides once a session exists — that's the real, user-visible
+// signal sign-in and mount succeeded — so this handles both: click Sign in only if the
+// gate is still up, using the tenant/username the gate itself pre-fills from login.json.
 export async function openConsole(page: Page): Promise<void> {
   await page.goto(`${ENV.webBase}/`, { waitUntil: "networkidle", timeout: 30000 });
+  const gate = page.locator("#gate");
+  if (await gate.isVisible().catch(() => false)) {
+    await page.locator("#login").click();
+  }
   await page.waitForSelector("#gate", { state: "hidden", timeout: 20000 });
 }
 
