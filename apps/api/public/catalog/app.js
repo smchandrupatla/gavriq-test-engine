@@ -22,7 +22,7 @@ const TYPES=[
 const SIT_GROUPS=[
 {id:'sit-health',title:'Health',summary:'Post-deploy reachability.',keys:['sit-health']},
 {id:'sit-integration',title:'Integration',summary:'MQ, Kafka, API, worker, DB.',keys:['sit-mq','sit-kafka','sit-api','sit-worker','sit-db','sit-use-case-api']},
-{id:'sit-gui',title:'GUI / Screens',summary:'Selenium and Playwright UI.',keys:['sit-gui-smoke','sit-ui-eventing','sit-selenium-screens','sit-selenium-fields','sit-selenium-workflows','sit-use-case-ui','sit-official-clicks','sit-feature-access','sit-console-chrome','sit-ui-pages','sit-ui-workflows']},
+{id:'sit-gui',title:'GUI / Screens',summary:'Selenium and Playwright UI.',keys:['sit-gui-smoke','sit-ui-eventing','sit-selenium-screens','sit-selenium-fields','sit-selenium-workflows','sit-selenium-message-definition-wizard','sit-use-case-ui','sit-official-clicks','sit-feature-access','sit-console-chrome','sit-ui-pages','sit-ui-workflows']},
 {id:'sit-e2e',title:'End-to-end',summary:'Full UX paths.',keys:['sit-e2e-ux']},
 {id:'sit-security',title:'Security',summary:'Auth, headers, vuln, ZAP, SAST.',keys:['sit-security']},
 {id:'sit-agents',title:'Agents',summary:'Agent desk orchestration.',keys:['sit-agents']},
