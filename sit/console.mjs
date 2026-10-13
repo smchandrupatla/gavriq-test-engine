@@ -165,6 +165,7 @@ const CATEGORY_BY_FILE = {
   "50-dbviewer-cross-check": "Database cross-check",
   "60-ui-eventing": "UI — Eventing panel (Playwright)",
   "70-ui-pages": "UI — page coverage (Selenium)",
+  "71-selenium-screen-coverage": "UI — screen coverage (Selenium)",
   "80-ui-workflows": "UI — workflow & data integrity (Selenium)",
 };
 
