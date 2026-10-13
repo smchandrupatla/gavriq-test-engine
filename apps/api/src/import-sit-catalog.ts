@@ -25,6 +25,7 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '61-selenium-screens': { suite: 'sit-selenium-screens', type: 'ui', method: 'selenium' },
   '62-selenium-fields': { suite: 'sit-selenium-fields', type: 'ui', method: 'selenium' },
   '63-selenium-workflows': { suite: 'sit-selenium-workflows', type: 'ui', method: 'selenium' },
+  '63-selenium-message-definition-wizard': { suite: 'sit-selenium-message-definition-wizard', type: 'ui', method: 'selenium' },
   '64-use-case-ui': { suite: 'sit-use-case-ui', type: 'ui', method: 'selenium' },
   '66-official-clicks': { suite: 'sit-official-clicks', type: 'ui', method: 'selenium' },
   '67-feature-access-ui': { suite: 'sit-feature-access', type: 'ui', method: 'selenium' },
