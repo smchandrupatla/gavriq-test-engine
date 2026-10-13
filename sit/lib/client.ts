@@ -48,6 +48,18 @@ export async function apiJson<T = unknown>(path: string, init: RequestInit = {})
   return { status: res.status, body };
 }
 
+/**
+ * The delivery status a run on this channel must report on the stack under test: acknowledged
+ * when /ready lists the channel as configured, otherwise what the stack does with an
+ * unconfigured channel (simulated on development, demo and test; failed elsewhere). IMP-PM021.
+ */
+export async function expectedDeliveryStatus(channel: string): Promise<"acknowledged" | "simulated" | "failed"> {
+  const res = await fetch(`${ENV.apiBase}/ready`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const body = (await res.json().catch(() => ({}))) as { delivery?: { configured?: string[]; unconfiguredDeliveries?: "simulated" | "failed" } };
+  if (body.delivery?.configured?.includes(channel)) return "acknowledged";
+  return body.delivery?.unconfiguredDeliveries || "simulated";
+}
+
 export async function testhubJson<T = unknown>(path: string, init: RequestInit = {}): Promise<{ status: number; body: T }> {
   const res = await fetch(`${ENV.testhubBase}${path}`, {
     ...init,
