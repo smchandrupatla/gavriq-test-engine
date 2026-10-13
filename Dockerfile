@@ -35,6 +35,7 @@ COPY tests/fixtures ./tests/fixtures
 COPY dev ./dev
 COPY docs ./docs
 COPY data ./data
+COPY targets ./targets
 COPY tsconfig.json* ./
 COPY scripts/consolidated-entrypoint.mjs ./scripts/consolidated-entrypoint.mjs
 

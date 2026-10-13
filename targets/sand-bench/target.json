@@ -1,0 +1,19 @@
+{
+  "$schema": "../target.schema.json",
+  "key": "sand-bench",
+  "name": "Sand Bench Enterprise",
+  "repo": "smchandrupatla/sand-bench-enterprise",
+  "environments": [
+    {"name": "local", "base_url": "http://host.docker.internal:8080"},
+    {"name": "render", "base_url": "https://sandbench-web.onrender.com"}
+  ],
+  "services": {
+    "api": "http://host.docker.internal:8787",
+    "web": "http://host.docker.internal:8080",
+    "dbviewer": "http://host.docker.internal:8090",
+    "testhub": "http://host.docker.internal:8091"
+  },
+  "suites": {"dir": "sit/cases", "taxonomy": "manifest", "catalog": "data/sandbench-catalog.json"},
+  "auth": {"tenant_env": "SIT_TENANT_SLUG", "user_env": "SIT_USERNAME", "password_env": "SIT_PASSWORD"},
+  "seed": {"enabled": true}
+}
