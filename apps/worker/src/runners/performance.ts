@@ -21,6 +21,15 @@ export interface PerfRunInput {
   timeoutSeconds?: number;
   headers?: Record<string, string>;
   body?: unknown;
+  /**
+   * Status code (or list of codes) that count as "the responder answered
+   * correctly" for THIS benchmark. Defaults to 2xx. A perf engineer
+   * benchmarking the 401 responder (login reject, authz guard) sets this
+   * to 401, or `[401, 429]` to also count the brute-force throttle as a
+   * correct response under burst. Arrays are always a list of exact
+   * codes — never a range.
+   */
+  expectStatus?: number | number[];
   /** Optional SLA thresholds */
   sla?: {
     p95_ms?: number;
@@ -79,6 +88,19 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
   // First failure seen, so a fully failing run says why (unreachable target,
   // 401, ...) instead of only reporting an error rate.
   let firstError = '';
+  // Status predicate: 2xx is the default "answered correctly" window. A
+  // caller may opt into a specific status (401 reject-path) or a list of
+  // acceptable codes ([401, 429] = reject OR throttle both count). An array
+  // is always interpreted as a list of exact codes, never a range — that
+  // was the first draft and the heuristic (gap >= 10 → range) swallowed
+  // too much. Writing a case like `expect_status: [401, 429]` means those
+  // two codes, nothing in between.
+  const want = input.expectStatus;
+  const statusOk = (status: number): boolean => {
+    if (want === undefined) return status >= 200 && status < 300;
+    if (Array.isArray(want)) return want.includes(status);
+    return status === want;
+  };
 
   let next = 0;
   async function worker() {
@@ -97,7 +119,7 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
         await res.arrayBuffer().catch(() => undefined);
         const ms = Date.now() - t0;
         latencies.push(ms);
-        if (res.ok) success++;
+        if (statusOk(res.status)) success++;
         else {
           failed++;
           firstError ||= `HTTP ${res.status}`;

@@ -24,6 +24,7 @@ button,select,input{font:inherit;color:inherit}
 /* Home screen: the whole left-hand sidebar is suppressed so the user focuses on
    the application tiles. The top app/env/version bar still renders. */
 body.home-only .sidebar{display:none}
+body.home-only .topbar .app-name{display:none}
 .brand{display:flex;align-items:center;gap:10px;padding:18px 16px;border-bottom:1px solid var(--line)}
 .brand-mark{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#1e3a5f);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;flex:0 0 auto;font-size:12px}
 .brand-title{font-weight:600;font-size:15px}
@@ -47,6 +48,7 @@ body.home-only .sidebar{display:none}
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
 .topbar{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
 .topbar h1{font-size:18px;margin:0;flex:0 0 auto}
+.topbar .app-name{font-size:22px;font-weight:700;color:var(--gold-text);letter-spacing:.01em;margin-left:4px;padding:2px 10px;border-left:3px solid var(--gold);line-height:1.2;flex:0 0 auto}
 .icon-btn{background:transparent;border:1px solid var(--line);color:var(--text);border-radius:6px;width:34px;height:34px;cursor:pointer;display:none}
 .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap}
 input[type=search],input[type=date],input[type=datetime-local],input[type=number],input[type=text],select{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
@@ -279,6 +281,21 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
 .pstage.st-pending{opacity:.55}
 .pbar-detail{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel)}
 .pbar-detail-head{font-size:13px;margin-bottom:6px}
+/* Big tile view: the active (or failed) stage lifts off the segmented bar so the
+   operator sees "Tearing down…", its status, and any error without hunting for them.
+   The tone-coloured left border matches the stage pstage- colours. */
+.pbar-detail-big{padding:16px 18px;margin-top:12px;border-radius:12px;border-left-width:5px;background:linear-gradient(180deg,var(--panel),var(--panel2))}
+.pbar-detail-big .pbar-detail-head{font-size:18px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pbar-detail-big .pbar-detail-head::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+.pbar-detail-big.pbar-detail-warn{border-left-color:var(--amber)}
+.pbar-detail-big.pbar-detail-warn .pbar-detail-head::before{background:var(--amber);animation:ping 1.6s ease-out infinite}
+.pbar-detail-big.pbar-detail-fail{border-left-color:var(--red)}
+.pbar-detail-big.pbar-detail-fail .pbar-detail-head::before{background:var(--red)}
+.pbar-detail-big.pbar-detail-pass{border-left-color:var(--green)}
+.pbar-detail-big.pbar-detail-pass .pbar-detail-head::before{background:var(--green)}
+.pbar-detail-big.pbar-detail-idle{border-left-color:var(--line)}
+.pbar-detail-big.pbar-detail-idle .pbar-detail-head::before{background:var(--muted)}
+.pbar-detail-big .pbar-log{max-height:300px}
 .pbar-log{white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:4px 0 0;padding:8px 10px;background:var(--panel2);border-radius:6px;font-size:12px;line-height:1.4}
 @media(max-width:700px){.pbar{flex-direction:column}.pstage-arrow{display:none}}
 /* Overview: run-by-type multi-select */
@@ -359,21 +376,22 @@ a.toast{display:block}a.toast:hover{text-decoration:none;border-color:var(--gold
     <header class="topbar">
       <button class="icon-btn" id="menuToggle" aria-label="Toggle menu">&#9776;</button>
       <h1 id="viewTitle">Overview</h1>
+      <span id="appLabel" class="app-name" title="Switch applications from the Home screen"></span>
       <div class="topbar-actions">
-        <input id="globalSearch" type="search" placeholder="Search cases…" aria-label="Search">
+        <input id="globalSearch" type="search" placeholder="Search anything…" aria-label="Search">
         <!--
           The application context is picked once at Home and stays fixed; the
-          only way to switch is to go back there. Dropping the <select> keeps
-          users from accidentally jumping apps mid-browse.
+          only way to switch is to go back there. Environment + version live
+          in the overview actions bar now (per-run choice, not a global one).
         -->
-        <label class="pill" style="border:none;background:none;padding-right:0">App</label>
-        <span id="appLabel" class="pill" title="Switch applications from the Home screen" style="font-weight:600"></span>
         <a id="appHomeLink" class="pill" href="#/home" title="Change application" aria-label="Change application" style="text-decoration:none">↻ Home</a>
         <select id="appSelect" aria-label="Application under test" hidden></select>
-        <label class="pill" id="envLabel" style="border:none;background:none;padding-right:0">Env</label>
-        <select id="envSelect" aria-label="Target environment"></select>
-        <label class="pill" id="versionLabel" style="border:none;background:none;padding-right:0" title="Branch / tag / version to run against. Stamped on every run queued from this console (Run everything, Run suite, Run case, Schedule) and shown in the App version column.">Version</label>
-        <input id="appVersionInput" type="text" list="appVersionList" value="main" style="width:140px;padding:4px 8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;font:inherit" aria-label="Application version / branch">
+        <!-- The env/version selectors have moved into the overview actions bar
+             (per-run choice, not a global chrome). These hidden fallbacks keep
+             legacy readers (currentAppVersion, renderEnvSelect) addressable
+             without putting a second control on screen. -->
+        <select id="envSelect" aria-label="Target environment" hidden></select>
+        <input id="appVersionInput" type="hidden" value="main">
         <datalist id="appVersionList"></datalist>
         <label class="pill" id="headedToggle" title="Run browser-based tests with a visible window instead of headless"><input type="checkbox" id="headedCheck"> Show browser</label>
         <span id="livePill" class="pill" title="Live status poll">connecting…</span>

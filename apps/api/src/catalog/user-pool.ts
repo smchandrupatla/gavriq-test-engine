@@ -51,6 +51,35 @@ export function pickAdmin(caseKey: string): PoolSlot {
   };
 }
 
+/**
+ * Per-worker pool slot: deterministic WORKER_ID → slot mapping so each
+ * worker drains the queue with its own operator identity. A horizontally
+ * scaled compose (`--scale test-engine-worker=N`) gets N distinct logins
+ * as long as N ≤ POOL_SIZE; above the cap, workers wrap around and share.
+ * Pick by `pool_user_<slot>` env var — same scheme as pickUser so the
+ * setup credentials (seeded by scripts/seed-user-pool.mjs) are reused.
+ */
+export function pickUserForWorker(workerId: string): PoolSlot {
+  const slot = hashSlot(workerId || 'worker-anonymous', POOL_SIZE);
+  return {
+    usernameVar: `pool_user_${slot}`,
+    passwordVar: `pool_pass_${slot}`,
+    tokenVar: `token_u${slot}`,
+    slot,
+  };
+}
+
+/** Per-worker admin slot — same shape, drawn from the smaller admin pool. */
+export function pickAdminForWorker(workerId: string): PoolSlot {
+  const slot = hashSlot(`${workerId || 'worker-anonymous'}:admin`, ADMIN_POOL_SIZE);
+  return {
+    usernameVar: `pool_admin_${slot}`,
+    passwordVar: `pool_adminpass_${slot}`,
+    tokenVar: `token_a${slot}`,
+    slot,
+  };
+}
+
 /** Login step for an operator picked from the pool by case key. */
 export function userLoginStep(caseKey: string, apiVar = 'api') {
   const p = pickUser(caseKey);

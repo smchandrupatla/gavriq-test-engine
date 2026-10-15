@@ -55,13 +55,17 @@ export async function defectLogRoutes(app: FastifyInstance) {
     return reply.send({ data: await listManagers() });
   });
 
-  app.post<{ Body: { action?: unknown; ids?: unknown; rejected_reason?: unknown } }>('/api/v1/defect-log/bulk', async (req, reply) => {
+  app.post<{ Body: { action?: unknown; ids?: unknown; rejected_reason?: unknown; resolution?: unknown; resolution_notes?: unknown } }>('/api/v1/defect-log/bulk', async (req, reply) => {
     const b = req.body || {};
-    if (!isBulkAction(b.action)) return reply.status(400).send({ error: `action must be one of delete, send, validate, reject` });
+    if (!isBulkAction(b.action)) return reply.status(400).send({ error: `action must be one of delete, send, validate, reject, set_resolution` });
     if (!Array.isArray(b.ids) || !b.ids.length) return reply.status(400).send({ error: 'ids must be a non-empty array' });
     const ids = b.ids.map(String).slice(0, 500);
     try {
-      const out = await bulkAction(b.action, ids, actorOf(req), typeof b.rejected_reason === 'string' ? b.rejected_reason : undefined);
+      const out = await bulkAction(b.action, ids, actorOf(req), {
+        reason: typeof b.rejected_reason === 'string' ? b.rejected_reason : undefined,
+        resolution: typeof b.resolution === 'string' ? (b.resolution as any) : undefined,
+        resolution_notes: typeof b.resolution_notes === 'string' ? b.resolution_notes : undefined,
+      });
       await audit(req, `defect-log.bulk.${b.action}`, 'defect_log', 'bulk', { count: out.done, failed: out.failed.length });
       return reply.send({ data: out });
     } catch (err) {

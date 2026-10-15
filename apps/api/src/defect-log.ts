@@ -282,7 +282,9 @@ export async function listDefectLog(f: ListFilter) {
   const { rows } = await query(
     `SELECT dl.id, dl.key, a.key AS application, dl.title, dl.severity, dl.status, dl.origin, dl.case_key,
             dl.run_id, dl.environment_key, dl.application_version, dl.logged_by, dl.validated_by, dl.sent_by,
-            dl.sent_at, dl.implementation_manager, dl.rejected_reason, dl.created_at, dl.updated_at,
+            dl.sent_at, dl.implementation_manager, dl.rejected_reason,
+            dl.resolution, dl.resolution_reviewer, dl.resolution_notes, dl.resolution_at,
+            dl.created_at, dl.updated_at,
             (SELECT count(*)::int FROM defect_log_attachments att WHERE att.defect_log_id = dl.id) AS attachments
        FROM defect_log dl JOIN applications a ON a.id = dl.application_id
        ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
@@ -377,6 +379,10 @@ export interface PatchInput {
   application_version?: string;
   status?: string;
   rejected_reason?: string;
+  // Reviewer baseline decision — fix_test_case / fix_application / other.
+  // Passing null clears a previous decision; omitting leaves it alone.
+  resolution?: string | null;
+  resolution_notes?: string | null;
 }
 
 export async function updateDefectLog(id: string, patch: PatchInput, by: string) {
@@ -429,6 +435,22 @@ export async function updateDefectLog(id: string, patch: PatchInput, by: string)
         }
         set('status', patch.status);
       }
+    }
+    // Reviewer baseline decision: null clears a previous decision; a string
+    // must be one of the canonical values. The reviewer identity + timestamp
+    // are stamped automatically so the audit trail is complete.
+    if (patch.resolution !== undefined) {
+      if (patch.resolution === null) {
+        sets.push('resolution = NULL, resolution_reviewer = NULL, resolution_at = NULL');
+      } else {
+        if (!isResolution(patch.resolution)) throw new LogError(400, `resolution must be one of ${RESOLUTIONS.join(', ')}`);
+        set('resolution', patch.resolution);
+        set('resolution_reviewer', by);
+        sets.push('resolution_at = now()');
+      }
+    }
+    if (patch.resolution_notes !== undefined) {
+      set('resolution_notes', patch.resolution_notes || null);
     }
     if (!sets.length) return cur;
     sets.push('updated_at = now()');
@@ -567,7 +589,17 @@ function labelAction(a: string): string {
 
 // ------------------------------------------------------------------ bulk
 
-export const BULK_ACTIONS = ['delete', 'send', 'validate', 'reject'] as const;
+// Review decisions a defect reviewer picks per log entry. Standing on the
+// line: fix_test_case means the application is baseline (rewrite the test),
+// fix_application means the test is baseline (fix the app), other covers
+// flake / duplicate / environment with the specifics in resolution_notes.
+export const RESOLUTIONS = ['fix_test_case', 'fix_application', 'other'] as const;
+export type Resolution = (typeof RESOLUTIONS)[number];
+export function isResolution(v: unknown): v is Resolution {
+  return typeof v === 'string' && (RESOLUTIONS as readonly string[]).includes(v);
+}
+
+export const BULK_ACTIONS = ['delete', 'send', 'validate', 'reject', 'set_resolution'] as const;
 export type BulkAction = (typeof BULK_ACTIONS)[number];
 
 export function isBulkAction(v: unknown): v is BulkAction {
@@ -575,7 +607,12 @@ export function isBulkAction(v: unknown): v is BulkAction {
 }
 
 /** Apply one action to many defects, reporting per-id success so the UI can show what stuck. */
-export async function bulkAction(action: BulkAction, ids: string[], by: string, reason?: string) {
+export async function bulkAction(
+  action: BulkAction,
+  ids: string[],
+  by: string,
+  opts?: { reason?: string; resolution?: Resolution; resolution_notes?: string }
+) {
   const done: string[] = [];
   const failed: Array<{ id: string; error: string }> = [];
   for (const id of ids) {
@@ -587,7 +624,10 @@ export async function bulkAction(action: BulkAction, ids: string[], by: string, 
       } else if (action === 'validate') {
         await updateDefectLog(id, { status: 'validated' }, by);
       } else if (action === 'reject') {
-        await updateDefectLog(id, { status: 'rejected', rejected_reason: reason || 'Rejected in bulk' }, by);
+        await updateDefectLog(id, { status: 'rejected', rejected_reason: opts?.reason || 'Rejected in bulk' }, by);
+      } else if (action === 'set_resolution') {
+        if (!opts?.resolution || !isResolution(opts.resolution)) throw new LogError(400, `resolution must be one of ${RESOLUTIONS.join(', ')}`);
+        await updateDefectLog(id, { resolution: opts.resolution, resolution_notes: opts.resolution_notes }, by);
       }
       done.push(id);
     } catch (err) {

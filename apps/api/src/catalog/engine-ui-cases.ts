@@ -282,6 +282,247 @@ C.push(
     dataProfile: { profile: 'viewport-matrix', data: 'Viewport 390×844; engine chromium; no input data.', source: 'Runner-configured browser context.' },
     expected: 'Menu opens, navigates and closes.',
   }),
+  // ---------------------------------------------------------------------
+  // Overview chrome refresh (Oct 2026): env + version moved into the
+  // Overview actions bar, app name promoted, running cycles render a big
+  // progress tile, previous-failure banners made dismissable, generic search.
+  // Three live Playwright cases cover what Playwright can observe without
+  // seeding synthetic state. The rest (progress tile for a running cycle,
+  // dismiss handler) are covered by tests/console-ui-shape.test.ts.
+  // ---------------------------------------------------------------------
+  screen({
+    key: 'TE-SCR-TOPBAR-APP-NAME', name: 'The application name sits prominently in the top bar',
+    objective: 'Open the overview and confirm the top bar carries a large #appLabel.app-name chip and a generic search placeholder.',
+    description: 'The top bar now identifies the current application with the large #appLabel.app-name chip, and the search placeholder reads "Search anything…" — the old Env / Version pickers have moved into the Overview actions bar.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      { action: 'wait_for', selector: '#appLabel.app-name', timeout_ms: 15000, description: 'enlarged app name present' },
+      { action: 'assert_selector_text', selector: '#appLabel.app-name', expected: 'Sand Bench', description: 'app name is readable' },
+      { action: 'assert_selector_count_min', selector: '#globalSearch[placeholder="Search anything…"]', value: '1', description: 'search placeholder is generic' },
+    ],
+    tags: ['playwright', 'console', 'chrome'],
+    expected: 'A large app-name chip and a generic "Search anything…" placeholder.',
+  }),
+  screen({
+    key: 'TE-SCR-OVERVIEW-ENV-VERSION-PICKERS', name: 'Overview actions bar carries the env and version listboxes',
+    objective: 'Open the overview and confirm the deploy actions bar hosts the env listbox (#ovEnvSelect) and the version listbox (#ovVersionSelect) with a plain ⇪ Deploy button.',
+    description: 'The Env + Version pickers that used to live in the top chrome now sit inline with the Deploy button on the Overview, next to the deploy mode selector. Both must be rendered as <select> elements with options.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      { action: 'wait_for', selector: '#ovEnvSelect', timeout_ms: 15000, description: 'env listbox rendered on the overview' },
+      { action: 'assert_selector_count_min', selector: '#ovEnvSelect option', value: '1', description: 'at least one env offered' },
+      { action: 'wait_for', selector: '#ovVersionSelect', timeout_ms: 10000, description: 'version listbox rendered on the overview' },
+      { action: 'assert_selector_count_min', selector: '#ovVersionSelect option', value: '1', description: 'at least one version offered' },
+      // The deploy button that used to sit next to these pickers moved into
+      // Create run. Overview is read-only now; the pickers persist choices
+      // the user takes with them into #/create-run.
+      { action: 'assert_selector_count_min', selector: '.hp-actions a.btn.primary[href="#/create-run"]', value: '1', description: '+ Create run is the run-starting entry point' },
+    ],
+    tags: ['playwright', 'console', 'chrome'],
+    expected: 'Env and version listboxes on the overview, and a + Create run entry point.',
+  }),
+  screen({
+    key: 'TE-SCR-SEARCH-GENERIC', name: 'The search box matches more than a case name',
+    objective: 'Open the overview and search by a tag/suite word, and confirm the Matching cases panel appears — proving the filter runs across more fields than just name + key.',
+    description: 'Typing a suite / tag word into #globalSearch surfaces the "Matching cases" panel; the client-side filter now also runs across suite name, tags, method and type on top of name + key, so a tag like "smoke" matches cases that do not carry it in their name.',
+    severity: 'medium',
+    steps: [
+      ...OPEN,
+      { action: 'type', selector: '#globalSearch', value: 'smoke', description: 'search by suite / tag' },
+      { action: 'wait', value: '900', description: 'debounced search' },
+      { action: 'assert_text', expected: 'Matching cases', description: 'overview switched to the search results panel' },
+    ],
+    tags: ['playwright', 'console', 'search'],
+    dataProfile: { profile: 'lookup', data: 'Search term "smoke" (matches a suite / tag, not necessarily a case key).', source: 'Hand-crafted.' },
+    expected: 'The search surfaces the "Matching cases" panel for a tag query.',
+  }),
+  // ---------------------------------------------------------------------
+  // Runs consolidation (Oct 2026): sidebar now shows Overview / Running
+  // now / + Create run / All runs / Schedule runs. The old "Test runs"
+  // entry has been folded; Overview carries a Recent runs section. Create
+  // run is one form that handles both run-now and schedule.
+  // ---------------------------------------------------------------------
+  screen({
+    key: 'TE-SCR-NAV-CREATE-RUN', name: 'The Runs sidebar carries a Create run entry (and no more Test runs)',
+    objective: 'Open the overview and confirm the Runs section of the sidebar lists Overview, Running now, + Create run, All runs and Schedule runs — the old "Test runs" entry is gone.',
+    description: 'The sidebar\'s Runs section was reorganised: + Create run is the single entry point for starting or scheduling a run, the old Test runs page is folded into Overview + All runs, and Schedule runs stays as a passive list page.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      { action: 'wait_for', selector: '#sideNav .nav-item[data-view="create-run"]', timeout_ms: 15000, description: 'Create run nav item attached' },
+      { action: 'assert_selector_text', selector: '#sideNav .nav-item[data-view="create-run"]', expected: 'Create run', description: 'label is "Create run"' },
+      { action: 'assert_selector_count_min', selector: '#sideNav .nav-item[data-view="runs-running"]', value: '1', description: 'Running now still there' },
+      { action: 'assert_selector_count_min', selector: '#sideNav .nav-item[data-view="runs-all"]', value: '1', description: 'All runs still there' },
+      // The Test runs entry has been removed from the Runs section — assert
+      // via wait_for_hidden since assert_selector_count_min defaults a 0 value
+      // back to >= 1 and would therefore always expect a match.
+      { action: 'wait_for_hidden', selector: '#sideNav .nav-item[data-view="history"]', description: 'Test runs entry gone' },
+    ],
+    tags: ['playwright', 'console', 'nav'],
+    expected: 'The Runs section lists Create run / Running now / All runs; Test runs is gone.',
+  }),
+  screen({
+    key: 'TE-SCR-CREATE-RUN-FORM', name: 'The Create run page When has two levels: Run now vs Schedule',
+    objective: 'Open #/create-run and confirm When shows two top-level radios (Run now, Schedule); click Schedule and the nested Once / Repeating radios appear.',
+    description: 'Create run owns both run-now and scheduling. The When section collapses to two top-level choices: Run now (default) and Schedule. Picking Schedule reveals a nested radio group — Once at a date and time, Repeating — and the detail pane that follows that choice.',
+    severity: 'high',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/create-run', description: 'open Create run' },
+      { action: 'wait_for', selector: '#schedName', timeout_ms: 15000, description: 'form rendered' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Create a run', description: 'view title' },
+      { action: 'assert_selector_count_min', selector: 'input[name="schedWhen"][value="now"]:checked', value: '1', description: 'Run now is the default top radio' },
+      { action: 'assert_selector_count_min', selector: 'input[name="schedWhen"][value="schedule"]', value: '1', description: 'Schedule top radio present' },
+      // Before switching, the nested radios must NOT yet be in the DOM.
+      { action: 'wait_for_hidden', selector: 'input[name="schedScheduleType"]', description: 'nested Once/Repeat only appears when Schedule is picked' },
+      { action: 'click', selector: 'input[name="schedWhen"][value="schedule"]', description: 'select Schedule' },
+      { action: 'wait_for', selector: 'input[name="schedScheduleType"][value="once"]', timeout_ms: 10000, description: 'nested Once radio rendered' },
+      { action: 'assert_selector_count_min', selector: 'input[name="schedScheduleType"][value="repeat"]', value: '1', description: 'nested Repeating radio rendered' },
+      { action: 'assert_selector_count_min', selector: '[data-action="create-run-save"]', value: '1', description: 'Create run submit button' },
+    ],
+    tags: ['playwright', 'console', 'create-run'],
+    expected: 'Two top-level When radios (Run now default, Schedule); picking Schedule reveals the nested Once / Repeating radios.',
+  }),
+  screen({
+    key: 'TE-SCR-OVERVIEW-NO-TABS', name: 'Overview no longer shows Running now and Run by test type tabs',
+    objective: 'Open the overview and confirm the page shows the Summary surface directly, with no tab strip for Running now or Run by test type.',
+    description: 'The Overview page used to carry three tabs (Summary, Running now, Run by test type). Running now moved to its own sidebar entry and Run by test type folds into Create run, so the Overview is a single Summary surface with no tab strip at the top.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      { action: 'wait_for', selector: '#content .kpi', timeout_ms: 30000, description: 'summary rendered' },
+      // There must be no overview-tab buttons any more.
+      { action: 'wait_for_hidden', selector: '[data-action="overview-tab"]', description: 'no Overview tab strip' },
+    ],
+    tags: ['playwright', 'console', 'overview'],
+    expected: 'Overview page without the Running now / Run by test type tab strip.',
+  }),
+  screen({
+    key: 'TE-SCR-SIDEBAR-DEFECT-LOG-SPA', name: 'Defect log and Defect dashboard stay inside the SPA',
+    objective: 'Click Defect log in the sidebar and confirm it opens as a SPA view (viewTitle = Defect log) with the sidebar still visible.',
+    description: 'The old Defect log / Defect dashboard entries used to be external links to /defect-log that left the SPA shell. They are now first-class SPA views: clicking them keeps the sidebar visible and sets the view title.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      // The nav item lives inside a collapsed Defects accordion by default,
+      // so navigate via its hash route (the same thing the sidebar click emits)
+      // to make the assertion deterministic across browser profiles.
+      { action: 'wait_for', selector: '#sideNav .nav-item[data-view="defect-log"]', state: 'attached', timeout_ms: 15000, description: 'Defect log nav item attached' },
+      { action: 'navigate', value: '{{engine}}/#/defect-log', description: 'open Defect log inside the SPA' },
+      { action: 'wait_for', selector: '#content', timeout_ms: 15000, description: 'view switched' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Defect log', description: 'view title' },
+      // Sidebar must still be visible — we did not leave the SPA.
+      { action: 'assert_selector_count_min', selector: '#sidebar', value: '1', description: 'sidebar still rendered' },
+    ],
+    tags: ['playwright', 'console', 'defects', 'nav'],
+    expected: 'Defect log opens inside the console shell as a SPA view.',
+  }),
+  screen({
+    key: 'TE-SCR-INSIGHTS-SUMMARY', name: 'Quality insights renders a holistic summary at the top',
+    objective: 'Open Quality insights and confirm the Holistic summary section appears with KPIs (Cases, Never run, Flaky, Max workers used) and a Refresh now action.',
+    description: 'The Quality insights view now carries a holistic summary section with per-case / per-run / worker-usage KPIs and a Refresh now button, above the existing versioned review.',
+    severity: 'high',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/insights', description: 'open Quality insights' },
+      // Wait specifically for the Refresh now button — it is only emitted by the
+      // holistic summary renderer, so its presence is the earliest cross-browser
+      // signal the summary has mounted (not just the versioned-review KPI grid).
+      { action: 'wait_for', selector: '[data-action="insights-summary-reload"]', timeout_ms: 30000, description: 'holistic summary mounted' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Quality insights', description: 'view title' },
+      { action: 'assert_text', expected: 'Holistic summary', description: 'section heading' },
+      { action: 'assert_text', expected: 'Never run', description: 'Never-run KPI' },
+      { action: 'assert_text', expected: 'Flaky', description: 'Flaky KPI' },
+      { action: 'assert_text', expected: 'Max workers used', description: 'Max workers KPI' },
+      { action: 'assert_text', expected: 'Recommendations', description: 'rules-based recommendations section' },
+    ],
+    tags: ['playwright', 'console', 'insights'],
+    expected: 'Holistic summary with KPIs and a Refresh now action.',
+  }),
+  screen({
+    key: 'TE-SCR-INSIGHTS-APPLY-REC', name: 'Each actionable recommendation shows an Apply button',
+    objective: 'Open Quality insights and confirm the actionable recommendations in the Holistic summary each carry an Apply button that the operator can press.',
+    description: 'Every recommendation stamped with an apply payload (never-run, flaky, always-fail, slow-cases, add-worker, fail-rate) renders an Apply → button next to its title. The button carries a base64-encoded apply payload on data-apply that the handler reads back on click.',
+    severity: 'medium',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/insights', description: 'open Quality insights' },
+      { action: 'wait_for', selector: '[data-action="apply-rec"]', timeout_ms: 30000, description: 'at least one Apply button mounted' },
+      { action: 'assert_text', expected: 'Apply →', description: 'Apply button label visible' },
+      { action: 'assert_attribute_exists', selector: '[data-action="apply-rec"]', value: 'data-apply', description: 'apply payload stashed on data-apply' },
+      { action: 'assert_attribute_exists', selector: '[data-action="apply-rec"]', value: 'data-rec-id', description: 'rec id stashed on data-rec-id' },
+    ],
+    tags: ['playwright', 'console', 'insights'],
+    expected: 'Apply → button with its payload on at least one recommendation.',
+  }),
+  screen({
+    key: 'TE-SCR-SETTINGS-QUALITY-INSIGHTS', name: 'Quality insights settings page carries the API key + refresh fields',
+    objective: 'Open Settings · Quality insights and confirm the auto-refresh field defaults to 6 hours and the Anthropic API key input is present.',
+    description: 'The new Settings page lets operators set the holistic-insights auto-refresh cadence (default 6 hours) and store a browser-local Anthropic API key.',
+    severity: 'medium',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/config-insights', description: 'open the settings page' },
+      { action: 'wait_for', selector: '#setInsightsRefresh', timeout_ms: 15000, description: 'refresh field rendered' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Quality insights', description: 'view title' },
+      { action: 'assert_selector_count_min', selector: '#setInsightsRefresh', value: '1', description: 'refresh field present' },
+      { action: 'assert_selector_count_min', selector: '#setAnthropicKey', value: '1', description: 'Anthropic API key field present' },
+      { action: 'assert_selector_count_min', selector: '[data-action="save-insights-settings"]', value: '1', description: 'Save button present' },
+    ],
+    tags: ['playwright', 'console', 'settings'],
+    expected: 'Insights settings page with refresh=6 and API key field.',
+  }),
+  screen({
+    key: 'TE-SCR-SCHEDULES-LIST-ONLY', name: 'Schedule runs page is a read-only list, no inline form',
+    objective: 'Open #/schedules and confirm the page shows the schedules list and a + New schedule link to Create run — no inline schedule form.',
+    description: 'The Schedule runs page used to embed the entire create / schedule form. Now that scheduling lives inside Create run (under When → Schedule), this page is a passive list: existing schedules + a "+ New schedule" button that jumps to #/create-run.',
+    severity: 'medium',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/schedules', description: 'open Schedule runs' },
+      // Wait for the schedules list to have hydrated — the group header for
+      // the Scheduled runs section only renders after /api/v1/schedules has
+      // answered, so this is the earliest point the "+ New schedule" link
+      // is in the DOM.
+      { action: 'wait_for', selector: '#content .group-head.first h2', timeout_ms: 30000, description: 'Scheduled runs header rendered' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Schedule runs', description: 'view title' },
+      { action: 'assert_selector_count_min', selector: '#content .group-head.first a.btn[href="#/create-run"]', value: '1', description: '+ New schedule links to Create run' },
+      // The inline schedule form (identified by #schedName and the create-run-save button) must not be rendered here.
+      { action: 'wait_for_hidden', selector: '#schedName', description: 'no inline create form on the schedules page' },
+      { action: 'wait_for_hidden', selector: '[data-action="create-run-save"]', description: 'no submit button on the schedules page' },
+    ],
+    tags: ['playwright', 'console', 'schedules'],
+    expected: 'Schedule runs is a list page with a + New schedule link; no inline form.',
+  }),
+  screen({
+    key: 'TE-SCR-OVERVIEW-CREATE-RUN-LINK', name: 'The Overview + Create run button jumps to the Create run page',
+    objective: 'Open the overview, confirm the + Create run button is present and clicking it navigates to #/create-run.',
+    description: 'The old Run everything / Deploy main buttons have been removed from the Overview. The single entry point to start or schedule a run is the "+ Create run" primary button that opens the Create run form.',
+    severity: 'high',
+    steps: [
+      ...OPEN,
+      { action: 'wait_for', selector: '.hp-actions a.btn.primary[href="#/create-run"]', timeout_ms: 15000, description: '+ Create run link rendered' },
+      { action: 'assert_selector_text', selector: '.hp-actions a.btn.primary[href="#/create-run"]', expected: '+ Create run', description: 'button label' },
+      { action: 'click', selector: '.hp-actions a.btn.primary[href="#/create-run"]', description: 'click Create run' },
+      { action: 'wait_for', selector: '#schedName', timeout_ms: 15000, description: 'Create run form opens' },
+      { action: 'assert_selector_text', selector: '#viewTitle', expected: 'Create a run', description: 'landed on Create run' },
+    ],
+    tags: ['playwright', 'console', 'overview', 'create-run'],
+    expected: '+ Create run button in the Overview actions bar links to the Create run page.',
+  }),
+  screen({
+    key: 'TE-SCR-OVERVIEW-RECENT-RUNS', name: 'Overview Recent runs shows one row per run with cumulative counts',
+    objective: 'Open the overview, wait for the Recent runs section, and confirm its table shows the cumulative columns (Done, Pass / Fail / Queued) — one row per run, aggregated across any workers that executed it.',
+    description: 'The Recent runs section is grouped: one row per metadata.run_group, with aggregated per-case counts across every worker that drained the run. The row header reads "cumulative across workers · one row per run", and the columns include Done and a Pass / Fail / Queued cell.',
+    severity: 'high',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/overview', description: 'open overview' },
+      { action: 'wait_for', selector: '#content .kpi', timeout_ms: 30000, description: 'summary rendered' },
+      { action: 'wait_for', selector: 'a.btn[href="#/runs-all"]', timeout_ms: 20000, description: 'All runs link rendered' },
+      { action: 'assert_text', expected: 'Recent runs', description: 'section heading' },
+      { action: 'assert_text', expected: 'cumulative across workers', description: 'grouped-view hint' },
+      { action: 'assert_text', expected: 'Pass / Fail / Queued', description: 'cumulative column header' },
+    ],
+    tags: ['playwright', 'console', 'overview', 'runs'],
+    expected: 'Recent runs is a grouped list with Done and Pass / Fail / Queued columns.',
+  }),
   screen({
     key: 'TE-SCR-SIT-CONSOLE', name: 'Embedded SIT console page renders',
     objective: 'Open the embedded SIT console page and confirm it renders its own catalogue.',
@@ -542,6 +783,125 @@ C.push(
     tags: ['compatibility', 'test-engine', 'webkit', 'tablet'],
     dataProfile: { profile: 'viewport-matrix', data: 'Viewport 768×1024; engine webkit; no input data.', source: 'Runner-configured browser context.' },
     expected: 'Case screen renders in WebKit without overflow.',
+  }
+);
+
+// ---------------------------------------------------------------------
+// Commit gate / Release gate — out-container (Playwright) cases
+//
+// Pattern mirrors Sand Bench's CommitGate/ReleaseGate convention:
+//  - Commit gate: fast browser-side checks a developer runs before pushing.
+//    Covers the Create run bug the user hit (types / suite / case / all
+//    scopes resolve to real cases), scope validation, and the chrome.
+//  - Release gate: broader acceptance against the engine's own console.
+// ---------------------------------------------------------------------
+C.push(
+  {
+    key: 'TE-CG-CREATE-RUN-TYPES-SCOPE',
+    name: 'Commit gate · Create run resolves a test-type scope to real cases',
+    objective: 'Open Create run, pick scope = Test types + tick Smoke, click Create run, and confirm the server queued at least one execution (not "Nothing to run").',
+    description: 'Guards against the "Nothing to run" false alarm the client used to show when the sparse case cache was empty but the catalog genuinely held cases for the chosen test type. The server-side scope resolver on POST /api/v1/runs is the right path; this case asserts the UI uses it.',
+    suiteKey: 'te-commit-gate-out-container', testType: 'ui', method: 'playwright', severity: 'critical', priority: 'p0',
+    preconditions: 'Engine reachable; the catalog has at least one Smoke-type case for the test engine application.',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/create-run', description: 'open Create run' },
+      { action: 'wait_for', selector: '#schedName', timeout_ms: 15000, description: 'form rendered' },
+      { action: 'click', selector: 'input[name="schedKind"][value="types"]', description: 'pick Test types scope' },
+      { action: 'wait_for', selector: '[data-scopetype="sched"][value="smoke"]', timeout_ms: 10000, description: 'types grid rendered' },
+      { action: 'click', selector: '[data-scopetype="sched"][value="smoke"]', description: 'tick Smoke' },
+      { action: 'click', selector: '[data-action="create-run-save"]', description: 'click Create run' },
+      // The error box must stay empty / hidden, and a toast confirming the run must appear.
+      { action: 'wait_for_hidden', selector: '#schedError:not([hidden])', description: 'no "Nothing to run" error' },
+      { action: 'wait_for', selector: '.toast-wrap .toast', timeout_ms: 15000, description: 'queued toast rendered' },
+      { action: 'assert_text', expected: 'Run queued', description: 'the server accepted the run' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'screen', 'create-run', 'scope-resolver'],
+    dataProfile: { profile: 'none (read-only setup, write-once action)', data: 'Pick scope = Test types, tick Smoke, click Create run.', source: 'Hand-crafted.' },
+    expected: 'A toast reading "Run queued …" lands; the Nothing-to-run error does not.',
+  },
+  {
+    key: 'TE-CG-CREATE-RUN-SUITE-SCOPE',
+    name: 'Commit gate · Create run resolves a suite scope to real cases',
+    objective: 'Open Create run, pick scope = A test suite, choose the first suite in the list, click Create run, and confirm the server queued the suite as an execution.',
+    description: 'The suite path uses the server-side scope resolver (POST /api/v1/runs with scope.suites). This case asserts the UI routes the suite choice correctly instead of falling into the stale "Nothing to run" branch.',
+    suiteKey: 'te-commit-gate-out-container', testType: 'ui', method: 'playwright', severity: 'critical', priority: 'p0',
+    preconditions: 'Engine reachable; the test engine application has at least one suite with cases.',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/create-run', description: 'open Create run' },
+      { action: 'wait_for', selector: '#schedName', timeout_ms: 15000, description: 'form rendered' },
+      { action: 'click', selector: 'input[name="schedKind"][value="suite"]', description: 'pick Suite scope' },
+      { action: 'wait_for', selector: '#schedSuite', timeout_ms: 10000, description: 'suite dropdown rendered' },
+      { action: 'click', selector: '[data-action="create-run-save"]', description: 'click Create run' },
+      { action: 'wait_for_hidden', selector: '#schedError:not([hidden])', description: 'no error banner' },
+      { action: 'wait_for', selector: '.toast-wrap .toast', timeout_ms: 15000, description: 'queued toast rendered' },
+      { action: 'assert_text', expected: 'Run queued', description: 'the server accepted the run' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'screen', 'create-run', 'scope-resolver'],
+    dataProfile: { profile: 'none (read-only setup, write-once action)', data: 'Pick scope = Suite, use the default-selected suite, click Create run.', source: 'Hand-crafted.' },
+    expected: 'A toast reading "Run queued …" lands when the suite scope is picked.',
+  },
+  {
+    key: 'TE-CG-CREATE-RUN-ALL-SCOPE',
+    name: 'Commit gate · Create run accepts the "Everything" scope',
+    objective: 'Open Create run with the default Everything scope and click Create run — the server must accept it and queue a run.',
+    description: 'The default scope is Everything (every case for the current application on the picked environment). This case guards against a regression that would require the client to resolve case ids before the server will take the request.',
+    suiteKey: 'te-commit-gate-out-container', testType: 'ui', method: 'playwright', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; the test engine application has cases on engine-local.',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/create-run', description: 'open Create run' },
+      { action: 'wait_for', selector: 'input[name="schedKind"][value="all"]:checked', timeout_ms: 15000, description: 'Everything is the default scope' },
+      { action: 'click', selector: '[data-action="create-run-save"]', description: 'click Create run' },
+      { action: 'wait_for_hidden', selector: '#schedError:not([hidden])', description: 'no error' },
+      { action: 'wait_for', selector: '.toast-wrap .toast', timeout_ms: 20000, description: 'queued toast rendered' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'screen', 'create-run', 'scope-resolver'],
+    dataProfile: { profile: 'none (write action)', data: 'Default scope = Everything; click Create run.', source: 'Hand-crafted.' },
+    expected: 'A queued toast appears for the Everything scope.',
+  },
+  {
+    key: 'TE-RG-CREATE-RUN-NAME-POPULATES',
+    name: 'Release gate · Create run auto-name updates as scope changes',
+    objective: 'Open Create run and confirm the auto-populated name reads cleanly as the user flips scope — Everything shows "All <app> cases", Suite shows "Suite: <name>".',
+    description: 'The auto-name used to emit raw fragments like "types" or "Suite —" when the picker was blank. The tuned autoScheduleName drops those placeholders and reads as a sentence. Guards against a regression that would reintroduce them.',
+    suiteKey: 'te-release-gate-out-container', testType: 'acceptance', method: 'playwright', severity: 'medium', priority: 'p2',
+    preconditions: 'Engine reachable; the test engine application has at least one suite.',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/create-run', description: 'open Create run' },
+      { action: 'wait_for', selector: '#schedName', timeout_ms: 15000, description: 'form rendered' },
+      // Default scope = Everything → the name should contain "All ".
+      { action: 'wait', value: '600', description: 'auto-name settles' },
+      { action: 'assert_attribute', selector: '#schedName', value: 'value', must_contain: 'All', expected: 'auto-name begins with "All …" for scope=Everything', description: 'Everything scope → "All …"' },
+      { action: 'click', selector: 'input[name="schedKind"][value="suite"]', description: 'switch scope to Suite' },
+      { action: 'wait_for', selector: '#schedSuite', timeout_ms: 10000, description: 'suite dropdown rendered' },
+      { action: 'wait', value: '600', description: 'auto-name re-populates' },
+      { action: 'assert_attribute', selector: '#schedName', value: 'value', must_contain: 'Suite:', expected: 'auto-name reads "Suite: …" for a suite scope', description: 'Suite scope → "Suite: …"' },
+    ],
+    tags: ['release-gate', 'test-engine', 'usecase', 'create-run', 'naming'],
+    dataProfile: { profile: 'none (read-only)', data: 'Flip scope radio between Everything and Suite.', source: 'Hand-crafted.' },
+    expected: 'The auto-name reads cleanly as the scope flips.',
+  },
+  {
+    key: 'TE-RG-DEFECT-LOG-REVIEWER-BULK',
+    name: 'Release gate · Defect log reviewer bulk apply flips many rows',
+    objective: 'Open the Defect log, tick Select all, click Fix test case, and confirm the chip on at least one row changes to "Fix test case".',
+    description: 'The reviewer baseline-decision workflow lets a reviewer flip many defects to the same resolution in one click. This case drives the UI end-to-end: tick all, apply "Fix test case", confirm chip change.',
+    suiteKey: 'te-release-gate-out-container', testType: 'acceptance', method: 'playwright', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; at least one open defect exists on sand-bench for the Defect log table to render.',
+    steps: [
+      { action: 'navigate', value: '{{engine}}/#/defect-log', description: 'open Defect log' },
+      { action: 'wait_for', selector: '#defectPickAll', timeout_ms: 20000, description: 'bulk toolbar + row ticks rendered' },
+      { action: 'click', selector: '#defectPickAll', description: 'Select all' },
+      { action: 'wait_for', selector: '[data-action="defect-bulk-fix-test"]:not([disabled])', timeout_ms: 10000, description: 'bulk Fix test case enabled' },
+      // Dialog confirmation: handled by the runner's confirmdialog accept hook.
+      // On this engine the browser dialog is bypassed by setting window.confirm.
+      { action: 'evaluate_js', value: 'window.confirm = () => true;', description: 'auto-accept confirm' },
+      { action: 'click', selector: '[data-action="defect-bulk-fix-test"]', description: 'apply bulk Fix test case' },
+      { action: 'wait_for', selector: '.toast-wrap .toast', timeout_ms: 15000, description: 'bulk apply toast' },
+      { action: 'assert_text', expected: 'Decision applied', description: 'bulk apply reported success' },
+    ],
+    tags: ['release-gate', 'test-engine', 'usecase', 'defect-log', 'reviewer', 'bulk'],
+    dataProfile: { profile: 'bulk-review', data: 'Tick every row + bulk-apply Fix test case.', source: 'Hand-crafted.' },
+    expected: 'A toast reading "Decision applied to N defect(s)" lands.',
   }
 );
 
