@@ -75,7 +75,7 @@ const state={
   // Deploy to the selected environment: null until triggered, then polled to a terminal status (and through its teardown).
   deploy:null,deployMode:'deploy_run_teardown',
   // Deploy, run, tear down — repeated N times. Comes from /api/v1/ui/live and survives refresh.
-  cycleRun:null,cycleIterations:3,
+  cycleRun:null,cycleIterations:1,
   // Deploy-failure loop for the selected app+env (null when quiet). Comes from /api/v1/ui/live.
   deployLoop:null,
   // Configuration · Infrastructure (managed Docker stacks, lifecycle policy, jobs)
@@ -118,7 +118,17 @@ const state={
   // Overview run-bar auto-fix opt-in (persisted in localStorage). Matches the
   // testbench S.autoFix/S.autoFixAttempts pair so the same preference applies
   // regardless of where the operator kicks a run off.
-  autoFix:false,autoFixMax:2,
+  autoFix:false,autoFixMax:1,
+  // Create run page: last-submitted result (run / deploy / cycle / schedule) so
+  // the operator sees a "View run →" card right under the form.
+  createRunResult:null,
+  // Defect log + dashboard: lazy-loaded from /api/v1/defect-log and
+  // /api/v1/defect-log/dashboard respectively. defectLogSelected is a Set
+  // of defect ids ticked for bulk reviewer-decision apply.
+  defectLog:null,defectDashboard:null,defectLogSelected:new Set(),
+  // Quality insights holistic summary (never-run count, flaky, avg duration,
+  // worker usage). Backed by /api/v1/ui/insights-summary (new).
+  insightsSummary:null,
   // Reports: filter form + the last preview
   reportForm:{title:'',appScope:'current',envId:'',kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],runSel:'last_run',from:'',to:'',status:'all',details:true,evidence:false},
   report:{data:null,loading:false,error:null,busy:''},
@@ -130,7 +140,25 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 async function api(path,opts){const res=await fetch(path,opts);const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body?.error?.message||body?.error||('HTTP '+res.status));return body;}
 const postJson=(path,body)=>api(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 function toast(m,href){const n=document.createElement(href?'a':'div');n.className='toast';n.textContent=m;if(href){n.href=href;n.append(' →');}el('toastWrap').appendChild(n);setTimeout(()=>n.remove(),6000);}
-function banner(m){const b=el('banner');if(!m){b.hidden=true;return;}b.hidden=false;b.textContent=m;}
+function banner(m,opts){
+  const b=el('banner');
+  // Clear every piece of state that could keep the strip visible — the
+  // bug was: style.display='flex' from a previous render overrode the
+  // `hidden` attribute, so the padded + bordered empty strip stayed on
+  // screen even though the content had been removed. Always reset both.
+  const hide=()=>{b.hidden=true;b.textContent='';b.style.display='none';};
+  if(!m){hide();return;}
+  b.hidden=false;b.style.display='flex';b.style.alignItems='center';b.style.gap='10px';
+  if(opts&&opts.dismissKey){
+    b.innerHTML='';
+    const span=document.createElement('span');span.textContent=m;span.style.flex='1';
+    const btn=document.createElement('button');btn.className='btn';btn.textContent='×';btn.title='Hide this message';btn.style.marginLeft='10px';btn.style.padding='2px 10px';btn.style.fontSize='12px';btn.style.lineHeight='1.2';
+    btn.onclick=()=>{dismissLoop(opts.dismissKey);hide();};
+    b.append(span,btn);
+  }else{
+    b.textContent=m;
+  }
+}
 function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
 const plural=(n,w)=>n+' '+w+(n===1?'':'s');
 const ms=t=>t?new Date(t).getTime():0;
@@ -258,7 +286,22 @@ const totalCases=()=>{
   if(c&&Number.isFinite(c.total))return Number(c.total);
   return state.cases.length;
 };
-function filterCases(list){const q=state.search.trim().toLowerCase();if(!q)return list;return list.filter(c=>String(c.name||'').toLowerCase().includes(q)||String(c.key||'').toLowerCase().includes(q));}
+function filterCases(list){
+  const q=state.search.trim().toLowerCase();if(!q)return list;
+  // Generic client-side filter: match the query against anything the user can
+  // reasonably remember a case by — not just name + key. Suite-level fields
+  // (name, key) count too, so searching for a suite name surfaces its cases.
+  const suiteById=state.idx&&state.idx.suiteById;
+  return list.filter(c=>{
+    const bits=[c.name,c.key,c.execution_method,c.test_type,c.component,c.environment,c.visibility,c.automation_link,c.objective,c.preconditions,c.overall_test_data,c.notes];
+    if(Array.isArray(c.tags))bits.push(c.tags.join(' '));
+    if(Array.isArray(c.owners))bits.push(c.owners.join(' '));
+    if(Array.isArray(c.suite_ids)&&suiteById){
+      for(const sid of c.suite_ids){const s=suiteById.get(sid);if(s){bits.push(s.name,s.key,s.suite_type);}}
+    }
+    return bits.some(v=>v&&String(v).toLowerCase().includes(q));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Data loading
@@ -394,7 +437,7 @@ async function applyLive(d){
   // Form screens show no live data; re-rendering them on a poll would wipe what is being typed.
   if(dirty){renderSideNav();if(!FORM_VIEWS.has(state.view))renderCurrentView();}
 }
-const FORM_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-remote-triggers','config-apps','config-envs','schedules','reports','case','test-cases','test-case-form','test-suites','test-suite-form']);
+const FORM_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-remote-triggers','config-insights','config-apps','config-envs','schedules','reports','case','test-cases','test-case-form','test-suites','test-suite-form']);
 async function loadRun(id){
   try{
     const [run,ev]=await Promise.all([
@@ -417,7 +460,7 @@ async function loadBuildRows(){
   try{state.buildRows=(await api('/api/v1/build-results'+appQuery())).data||[];}catch{state.buildRows=[];}
   if(state.view==='builds')renderCurrentView();
 }
-const SETTINGS_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix']);
+const SETTINGS_VIEWS=new Set(['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-insights']);
 async function loadSettings(){
   try{state.settings=(await api('/api/v1/settings')).data;}catch(e){state.settings={error:e.message};}
   if(SETTINGS_VIEWS.has(state.view))renderCurrentView();
@@ -442,16 +485,20 @@ async function loadRunsList(reset){
   if(state.runsList.loading)return;
   const offset=reset?0:state.runsList.offset;
   state.runsList={...state.runsList,loading:true};
-  if(state.view==='history')renderCurrentView();
+  // Overview hosts the Recent runs section and depends on this list too.
+  if(state.view==='history'||state.view==='overview'||state.view==='runs-all')renderCurrentView();
   try{
     const pageSize=[25,50,75,100,200].includes(Number(state.runsPageSize))?Number(state.runsPageSize):RUNS_PAGE;
-    const res=await api('/api/v1/ui/runs'+runsQuery()+'&limit='+pageSize+'&offset='+offset);
+    // Grouped run list: one row per metadata.run_group, aggregating case
+    // counts across every execution the run spawned (several workers → one
+    // row). The /api/v1/ui/run-groups endpoint does the aggregation.
+    const res=await api('/api/v1/ui/run-groups'+runsQuery()+'&limit='+pageSize+'&offset='+offset);
     const rows=reset?(res.data||[]):[...state.runsList.rows,...(res.data||[])];
     state.runsList={rows,total:res.total||0,offset:offset+(res.data||[]).length,loading:false,loaded:true,facets:res.facets||{triggers:[],versions:[]}};
     if(typeof updateAppVersionDatalist==='function')updateAppVersionDatalist();
     if(reset)state.runsSel=new Set();
   }catch(e){state.runsList={...state.runsList,loading:false,loaded:true,error:e.message};}
-  if(state.view==='history')renderCurrentView();
+  if(state.view==='history'||state.view==='overview'||state.view==='runs-all')renderCurrentView();
 }
 function markHistoryStale(){for(const h of state.history.values())h.stale=true;}
 async function loadHistory(tile){
@@ -787,20 +834,27 @@ function renderSideNav(){
     navItem('test-suites',null,'Test suites',state.suites.length||null)+
     navItem('test-suite-form',null,'New test suite'),
     ['test-cases','test-case-form','test-suites','test-suite-form'].includes(V));
-  // Runs: everything about running cases (overview, history, schedules).
+  // Runs: everything about running cases. Create run is the single entry point
+  // for kicking off or scheduling a run (merges the former "Schedule runs"
+  // page). The old "Test runs" item is folded: Overview now hosts the summary
+  // + a recent-runs section, and All runs keeps the paginated/filterable view.
   h+=navSection('runs','Runs',
     navItem('overview',null,'Overview')+
     navItem('runs-running',null,live?`Running now · ${live}`:'Running now',live||null,live?'blue pulse-dot':null)+
-    navItem('history',null,'Test runs',state.executions.length||null)+
+    navItem('create-run',null,'Create run')+
     navItem('runs-all',null,'All runs')+
     navItem('schedules',null,'Schedule runs',Array.isArray(state.schedules)?state.schedules.filter(s=>s.enabled&&s.application_key===state.appKey).length||null:null),
-    ['overview','runs-running','history','run','runs-all','schedules'].includes(V));
-  // Defects: fix proposals + the per-run defect log + the cross-app dashboard.
+    ['overview','runs-running','create-run','run','runs-all','schedules'].includes(V));
+  // Defects: fixer-agent proposals, the per-run defect log, and the
+  // cross-app dashboard — all rendered inside the main SPA shell (previously
+  // the two defect items left the shell for /defect-log). Each item is a
+  // first-class view so the sidebar stays visible when the user is drilling
+  // through defects.
   h+=navSection('defects','Defects',
     navItem('fixes',null,'Fix log',Array.isArray(state.fixProposals)?state.fixProposals.filter(p=>p.status==='pending'||p.status==='claimed').length||null:null)+
-    '<a class="nav-item" href="/defect-log" style="text-decoration:none"><span class="nav-label">Defect log</span></a>'+
-    '<a class="nav-item" href="/defect-log#dashboard" style="text-decoration:none"><span class="nav-label">Defect dashboard</span></a>',
-    ['fixes'].includes(V));
+    navItem('defect-log',null,'Defect log',Array.isArray(state.defectLog&&state.defectLog.rows)?state.defectLog.rows.length||null:null)+
+    navItem('defect-dashboard',null,'Defect dashboard'),
+    ['fixes','defect-log','defect-dashboard'].includes(V));
   // Reports: reports, insights and the defect log (defects are the engine's "findings" report).
   h+=navSection('reports','Reports',
     navItem('reports',null,'Reports')+
@@ -816,11 +870,12 @@ function renderSideNav(){
     navItem('config-per-type-retention',null,'Past runs retained per test type')+
     navItem('config-circuit-breaker',null,'Failure circuit breaker')+
     navItem('config-auto-fix',null,'Auto-fix & fixer agent')+
+    navItem('config-insights',null,'Quality insights')+
     navItem('config-remote-triggers',null,'Remote execution triggers')+
     navItem('config-apps',null,'Applications',state.applications.length||null)+
     navItem('config-envs',null,'Environments',state.environments.length||null)+
     navItem('config-infra',null,'Infrastructure',null,infraNavDot()),
-    ['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-remote-triggers','config-apps','config-envs','config-infra'].includes(V));
+    ['config-retention','config-timeouts','config-per-type-retention','config-circuit-breaker','config-auto-fix','config-insights','config-remote-triggers','config-apps','config-envs','config-infra'].includes(V));
   // The engine's own self-test cases are a single body of QC — they verify
   // the engine itself. Collapse every one of them under Quality control
   // regardless of their test_type's declared category. Any other application
@@ -911,10 +966,12 @@ function summarySubTabsHtml(){
   const body=(buckets[active]||[]).map(tileGroupHtml).join('');
   return bar+body;
 }
-function overviewTabsHtml(live){
-  const tab=state.overviewTab||'summary';
-  const t=(id,label)=>`<button class="tab-btn${tab===id?' active':''}" data-action="overview-tab" data-tab="${id}">${label}</button>`;
-  return `<div class="tabs" style="margin-bottom:16px">${t('summary','Summary')}${t('running','Running now'+(live.length?' ('+live.length+')':''))}${t('types','Run by test type')}</div>`;
+function overviewTabsHtml(_live){
+  // The former Running now and Run by test type tabs have been retired:
+  //  - Running now lives at #/runs-running (its own sidebar entry).
+  //  - Run by test type folds into #/create-run (its scope picker covers it).
+  // The Overview is now a single Summary surface; no tab strip needed.
+  return '';
 }
 // Deploy actions bar + current deployment progress — shared across every
 // overview tab (summary, running, types) so the user never loses sight of the
@@ -924,54 +981,62 @@ function overviewActionsAndStatusHtml({runAllCount}={}){
   const all=runAllCount==null?totalCases():runAllCount;
   const live=activeRuns();
   const appName=(state.applications.find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
-  const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null,ref=(managed&&env.infra.default_ref)||'main';
+  const env=currentEnv(),managed=!!(env&&env.infra),stackSt=managed?stackState(env):null;
+  const defaultRef=(managed&&env&&env.infra&&env.infra.default_ref)||'main';
+  const chosenVersion=(state.appVersion||defaultRef);
   const mode=state.deployMode||'deploy_run_teardown';
   const opt=(v,l,t)=>`<option value="${v}"${mode===v?' selected':''} title="${esc(t)}">${l}</option>`;
   const tearBtn=managed&&(stackSt==='up'||stackSt==='failed'||stackSt==='unknown')?`<button class="btn" data-action="infra-teardown" data-id="${esc(env.id)}" data-name="${esc(env.name||env.key)}" data-active="${live.length}" title="Take the Docker stack down now — it is deployed again on the next deploy or run">⏏ Tear down</button>`:'';
   const cyc=state.cycleRun&&state.cycleRun.status==='running';
   const cancelBtn=live.length?`<button class="btn" data-action="cancel-all-runs" title="Cancel every run in progress for ${esc(appName)} on ${esc(envName())}">⏹ Cancel runs (${live.length})</button>`:'';
-  const iters=Math.max(1,Math.min(100,state.cycleIterations||3));
+  const iters=Math.max(1,Math.min(100,state.cycleIterations||1));
   const isLoop=mode==='deploy_run_teardown_loop'||mode==='clean_cycle';
   const iterInput=isLoop||cyc?`<label class="muted small" style="display:inline-flex;align-items:center;gap:4px">× <input type="number" id="cycleIterations" min="1" max="100" value="${iters}" style="width:56px" aria-label="iterations" title="How many deploy → run → tear down cycles"${cyc?' disabled':''}></label>`:'';
   const deployBtnLabel=mode==='clean_cycle'?`▶ Clean cycle (${iters}×)`
     :mode==='deploy_run_teardown_loop'?`▶ Start cycle (${iters}×)`
-    :`⇪ Deploy ${esc(ref)}`;
+    :`⇪ Deploy`;
   const deployBtnTitle=mode==='clean_cycle'
-    ?`Tear down whatever is there, prune Docker (dangling images, old build cache, stopped containers), then deploy ${esc(ref)} (with every dependency the compose stack brings up), run everything, tear down — repeat ${iters} times`
+    ?`Tear down whatever is there, prune Docker (dangling images, old build cache, stopped containers), then deploy the selected version (with every dependency the compose stack brings up), run everything, tear down — repeat ${iters} times`
     :mode==='deploy_run_teardown_loop'
-    ?`Deploy ${esc(ref)}, run everything, tear down — repeat ${iters} times (cancel any time)`
-    :`Deploy ${esc(ref)} to the selected environment`;
-  // "Run by test type" tab: the main run button runs only the selected types,
-  // and the Schedule button scopes to those types too. On every other tab it
-  // keeps running / scheduling everything for the application.
+    ?`Deploy the selected version, run everything, tear down — repeat ${iters} times (cancel any time)`
+    :`Deploy the selected version to the selected environment`;
+  // Run everything / Run selected types used to live here. Overview is now a
+  // read-only board — the single entry point for starting a run is the
+  // "+ Create run" button (which opens #/create-run with scope + env + version
+  // + run type + when-now/schedule all in one form). The "Run by test type"
+  // tab's selected types are passed as a preset into Create run.
   const onTypes=state.overviewTab==='types';
   const typesCount=[...(state.selectedTypes||[])].reduce((n,id)=>n+casesForType(id).length,0);
-  const runBtn=onTypes
-    ? `<button class="btn primary" data-action="run-types"${state.selectedTypes&&state.selectedTypes.size?'':' disabled'} title="Queue one execution per suite within the selected test types on ${esc(envName())}">▶ Run selected types${typesCount?' ('+typesCount+' cases)':''}</button>`
-    : `<button class="btn primary" data-action="run-all"${all?'':' disabled'} title="Queue one execution per suite — every runnable case for this application on the selected environment${managed?'. A stack that is down is deployed first and torn down after the run':''}">▶ Run everything (${all})</button>`;
-  const schedBtn=onTypes
-    ? `<button class="btn" data-action="schedule" data-what="types"${state.selectedTypes&&state.selectedTypes.size?'':' disabled'}>Schedule…</button>`
-    : `<button class="btn" data-action="schedule" data-what="all"${all?'':' disabled'}>Schedule…</button>`;
-  const head=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions">${runBtn}${autoFixControlsHtml()}${schedBtn}${cancelBtn}<select id="deployMode" aria-label="What to do after deploying" title="What happens once the deploy succeeds"${cyc?' disabled':''}>${opt('deploy_run_teardown','Deploy, run, tear down','Deploy, run everything, then take the stack down once the run has finished — whatever the result')}${opt('deploy_run_teardown_loop','Loop: deploy, run, tear down ×N','Deploy, run everything, tear down — then repeat the whole thing N times. Cancel any time.')}${opt('clean_cycle','Clean cycle: teardown + prune, then deploy–run–teardown ×N','Starts clean: tears down whatever is up, prunes Docker (stopped containers, dangling images, build cache), then runs the normal deploy–run–teardown ×N. Dependencies (Kafka, MQ, portals, …) come up as part of the compose deploy.')}${opt('deploy_and_run','Deploy and run','Deploy and run everything; the stack stays up until the idle or max-uptime rule takes it down')}${opt('deploy_only','Deploy only','Deploy and leave the stack up; nothing is run')}</select>${iterInput}<button class="btn" data-action="deploy-main"${state.envId&&!cyc?'':' disabled'} title="${esc(deployBtnTitle)}">${deployBtnLabel}</button>${tearBtn}</div></div>`;
+  const createRunHref=onTypes&&state.selectedTypes&&state.selectedTypes.size?`#/create-run?scope=types`:'#/create-run';
+  const runBtn=`<a class="btn primary" href="${esc(createRunHref)}" title="${onTypes?`Create a run for ${typesCount} cases across the selected types`:`Create a run (now or scheduled) for ${esc(appName)} on ${esc(envName())}`}">+ Create run${onTypes&&typesCount?' ('+typesCount+' cases)':''}</a>`;
+  const schedBtn='';
+  // Target picker + version picker, inline with the deploy actions. These used
+  // to live in the top chrome; moving them here keeps the choice next to the
+  // button that fires it and lets the top bar focus on identity + search.
+  const envOpts=(state.environments||[]).map(e=>`<option value="${esc(e.id)}"${e.id===state.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment</option>';
+  const envPicker=`<label class="muted small" style="display:inline-flex;align-items:center;gap:4px">Env <select id="ovEnvSelect" aria-label="Target environment" title="Where to run / deploy">${envOpts}</select></label>`;
+  const facetVersions=(state.runsList&&state.runsList.facets&&state.runsList.facets.versions)||[];
+  const versions=[defaultRef,...facetVersions,chosenVersion].filter((v,i,a)=>v&&a.indexOf(v)===i);
+  const versionOpts=versions.map(v=>`<option value="${esc(v)}"${v===chosenVersion?' selected':''}>${esc(v)}</option>`).join('');
+  const versionPicker=`<label class="muted small" style="display:inline-flex;align-items:center;gap:4px">Version <select id="ovVersionSelect" aria-label="Branch / tag / version to deploy and run" title="Which branch, tag or version this run / deploy targets">${versionOpts}</select></label>`;
+  // Overview actions bar: identity (app on env + stack chip) + the env/version
+  // pickers (so the operator can switch target before jumping into Create run)
+  // + the single "+ Create run" entry point. Tear-down + Cancel runs are kept
+  // here because they are management actions (not run-creation), and they are
+  // only visible when there is something to tear down / cancel.
+  const head=`<div class="group-head first"><h2>${esc(appName)} <span class="muted small">on ${esc(envName())}</span> ${managed?stackChipHtml(env,'Docker stack: '+stackSt):''}</h2><div class="hp-actions">${envPicker}${versionPicker}${runBtn}${cancelBtn}${tearBtn}</div></div>`;
   return head+cycleRunHtml()+deployStatusHtml();
 }
 function renderOverview(){
   el('viewTitle').textContent='Overview';
   if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
-  const tab=state.overviewTab||'summary';
   const live=activeRuns();
-  let h=overviewTabsHtml(live);
-  // Shared across every tab: the deploy actions + deploy progress bar — so
-  // the deploy→run→teardown stages stay in sight on Running now and Run by
-  // test type too, with the same clickable per-stage detail.
+  let h='';
+  // Deploy actions bar + cycle progress + deploy stage tile — the operator
+  // always sees them. Running now and Run by test type have moved out of
+  // the Overview (dedicated sidebar entries) so there is no tab strip.
   h+=overviewActionsAndStatusHtml();
-  if(tab==='running'){
-    h+=live.length
-      ?`<div class="live-board">${live.map(liveCardHtml).join('')}</div>`
-      :'<div class="card empty">No runs in progress. Start one from any catalog page — it appears here with live per-case progress.</div>';
-  }else if(tab==='types'){
-    h+=typeRunSelectorHtml();
-  }else{
+  {
     // The repo-wide rollup is the sum of every per-type rollup — pulling it
     // from overview-stats keeps the Overview tiles additive-consistent with
     // the per-type numbers and avoids iterating the whole case cache.
@@ -993,8 +1058,35 @@ function renderOverview(){
     if(state.search)h+=overviewSearchHtml();
     h+=legendHtml();
     h+=summarySubTabsHtml();
+    // Overview now owns a Recent runs condensed section (consolidating the old
+    // "Test runs" page). Full paginated / filterable history still lives
+    // under "All runs"; this strip is just the last 10 the operator cares about.
+    h+=overviewRecentRunsHtml();
   }
   el('content').innerHTML=h;
+}
+function overviewRecentRunsHtml(){
+  const rl=state.runsList||{rows:[],loaded:false,loading:false};
+  if(!rl.loaded&&!rl.loading){loadRunsList(true);}
+  const rows=(rl.rows||[]).slice(0,10);
+  if(!rows.length){
+    if(rl.loading)return `<div class="group-head"><h2>Recent runs</h2></div><div class="card"><div class="hp-body"><div class="skel" style="height:80px"></div></div></div>`;
+    return `<div class="group-head"><h2>Recent runs</h2><a class="btn" href="#/runs-all">All runs →</a></div><div class="card empty">No runs have been queued yet. Create one with <a href="#/create-run">+ Create run</a>.</div>`;
+  }
+  const tbody=rows.map(r=>{
+    const st=badge(r.status||'queued');
+    const start=r.started_at||r.created_at;
+    const elapsed=r.finished_at?dur(ms(r.finished_at)-ms(start)):(ACTIVE.has(String(r.status))?`<span data-elapsed="${esc(start)}">${dur(serverNow()-ms(start))}</span>`:'—');
+    const name=esc(r.name||r.key||'Run');
+    // Cumulative count across every worker in this run_group: done / total,
+    // plus pass / fail / queued chips.
+    const total=Number(r.total||0),done=Number(r.done||0),passed=Number(r.passed||0),failed=Number(r.failed||0),queued=Number(r.queued||Math.max(0,total-done));
+    const workers=Number(r.executions||1);
+    const workersChip=workers>1?` <span class="chip" title="${workers} worker executions in this run">${workers}×</span>`:'';
+    const counts=`<span class="counts"><span><span class="kdot pass"></span><b>${passed}</b> pass</span><span><span class="kdot fail"></span><b>${failed}</b> fail</span>${queued?`<span><span class="kdot other"></span><b>${queued}</b> queued</span>`:''}</span>`;
+    return `<tr data-run="${esc(r.id)}" class="clickable"><td><a href="#/run/${esc(r.id)}">${name}</a>${workersChip}<div class="muted small">${esc(r.key||'')}</div></td><td>${st}</td><td class="num">${done}/${total}</td><td>${counts}</td><td class="muted small">${esc(r.environment_name||r.environment_key||'—')}</td><td class="muted small">${esc(r.trigger_source||'manual')}</td><td class="muted small">${esc(r.application_version||'—')}</td><td class="muted small">${esc(when(start))}</td><td class="num">${elapsed}</td></tr>`;
+  }).join('');
+  return `<div class="group-head" style="margin-top:24px"><h2>Recent runs <span class="muted small">cumulative across workers · one row per run</span></h2><a class="btn" href="#/runs-all">All runs (${rl.total||rows.length}) →</a></div><div class="card"><div class="table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th class="num">Done</th><th>Pass / Fail / Queued</th><th>Environment</th><th>Trigger</th><th>App version</th><th>Started</th><th>Duration</th></tr></thead><tbody>${tbody}</tbody></table></div></div>`;
 }
 function typeRunSelectorHtml(){
   const tl=typeList();
@@ -1833,7 +1925,7 @@ function renderConfigAutoFixCard(s){
       <div class="hp-body">
         <p class="muted small">The auto-fix loop reruns failing cases (transient failures) and asks the fixer agent to patch the test case source for real defects. Production (Sand Bench) is the baseline: when the agent decides a failure is a prod defect, it files a defect and parks the loop — never patches the app.</p>
         <div class="toolbar" style="border:none;padding:0;gap:14px;flex-wrap:wrap">
-          <label class="muted small">Default max attempts <input type="number" id="setAutoFixMax" min="1" max="20" step="1" value="${esc(s.auto_fix_default_max_attempts??2)}" style="width:72px"></label>
+          <label class="muted small">Default max attempts <input type="number" id="setAutoFixMax" min="1" max="20" step="1" value="${esc(s.auto_fix_default_max_attempts??1)}" style="width:72px"></label>
           <label class="muted small">Fixer mode
             <select id="setFixerMode" style="margin-left:4px">
               <option value="off"${s.fixer_agent_mode==='off'?' selected':''}>off — never open a proposal</option>
@@ -1847,6 +1939,27 @@ function renderConfigAutoFixCard(s){
         <p class="muted small" style="margin-top:10px">The host-side fixer agent (<code>scripts/start-fixer-agent.ps1</code>) polls for proposals and calls the local <code>claude</code> CLI. Without a running agent, proposals stay in <em>pending</em> on the Fix log.</p>
       </div></div>`;
 }
+function renderConfigInsightsCard(_s){
+  // Local-only settings (persist to the browser's localStorage). The server
+  // doesn't carry these — they are per-operator preferences on this browser
+  // so the auto-refresh cadence and the Anthropic API key apply here only.
+  let hours=6;let hasKey=false;
+  try{hours=Number(localStorage.getItem('te.insightsRefreshHours'))||6;}catch{}
+  try{hasKey=!!localStorage.getItem('te.anthropicKey');}catch{}
+  return `<div class="card"><div class="card-head"><h2>Quality insights</h2></div>
+    <div class="hp-body">
+      <p class="muted small">The holistic insights summary on the Quality insights page refreshes on this cadence. The Anthropic API key below is used by the AI analyst if you have one — otherwise the engine falls back to rules-based recommendations (which do not need a key).</p>
+      <div class="toolbar" style="border:none;padding:0;gap:14px;flex-wrap:wrap;align-items:flex-start">
+        <label class="muted small">Auto-refresh every <input type="number" id="setInsightsRefresh" min="1" max="72" step="1" value="${esc(hours)}" style="width:76px"> hours</label>
+      </div>
+      <div class="toolbar" style="border:none;padding:0;gap:14px;flex-wrap:wrap;margin-top:10px">
+        <label class="muted small" style="flex:1 1 320px;max-width:600px">Anthropic API key <input type="password" id="setAnthropicKey" placeholder="${hasKey?'•••••• (stored locally)':'sk-ant-…'}" style="width:100%;max-width:420px" autocomplete="off"></label>
+        <button class="btn" data-action="clear-anthropic-key" title="Remove the stored key from this browser">Clear key</button>
+      </div>
+      <div style="margin-top:10px"><button class="btn primary" data-action="save-insights-settings">Save</button><div id="insightsSettingsError" class="field-error" hidden></div></div>
+      <p class="muted small" style="margin-top:10px">The key is stored only in this browser's localStorage (<code>te.anthropicKey</code>). The engine never sees it unless you pass it through an outbound request.</p>
+    </div></div>`;
+}
 function renderConfigView(){
   const titles={
     'config-retention':'Settings · Run retention',
@@ -1855,6 +1968,7 @@ function renderConfigView(){
     'config-circuit-breaker':'Settings · Failure circuit breaker',
     'config-auto-fix':'Settings · Auto-fix & fixer agent',
     'config-remote-triggers':'Settings · Remote execution triggers',
+    'config-insights':'Settings · Quality insights',
   };
   el('viewTitle').textContent=titles[state.view]||'Settings';
   // Remote triggers is file-backed (no settings row needed); the others all
@@ -1868,6 +1982,7 @@ function renderConfigView(){
   else if(state.view==='config-per-type-retention')el('content').innerHTML=renderPerTypeRetention(s);
   else if(state.view==='config-circuit-breaker')el('content').innerHTML=renderConfigCircuitBreakerCard(s);
   else if(state.view==='config-auto-fix')el('content').innerHTML=renderConfigAutoFixCard(s);
+  else if(state.view==='config-insights')el('content').innerHTML=renderConfigInsightsCard(s);
   else el('content').innerHTML=renderConfigRetentionCard(s);
 }
 
@@ -2097,6 +2212,41 @@ function scopeCases(f){
   if(f.kind==='selected'){const keys=new Set(f.caseKeys);return state.cases.filter(c=>keys.has(c.key));}
   return state.cases;
 }
+/**
+ * How many cases a scope resolves to, using the fast counts endpoint when it
+ * has it — not the sparse state.cases cache. scopeCases above only returns
+ * cases that have been pulled into state.idx by navigating to a type/suite
+ * page; on Create run we never pull them, so scopeCases returned [] while
+ * the user could clearly see "(42)" next to the type they ticked. This
+ * helper fixes the "Nothing to run" false alarm by asking the counts
+ * endpoint directly.
+ */
+function scopeCount(f){
+  if(!f)return 0;
+  if(f.kind==='types')return (f.types||[]).reduce((n,t)=>n+countForType(t),0);
+  if(f.kind==='suite')return f.suiteId?countForSuite(f.suiteId):0;
+  if(f.kind==='case')return findCaseByText(f.caseText||'')?1:0;
+  if(f.kind==='selected')return (f.caseKeys||[]).length;
+  return totalCases();
+}
+/**
+ * Build the scope payload /api/v1/runs expects. The server already knows how
+ * to resolve test_types / suites / case_keys into executions, so we don't
+ * need the client to hold the full case list in memory.
+ */
+function buildRunScope(f){
+  if(f.kind==='types')return { test_types: (f.types||[]).slice() };
+  if(f.kind==='suite'){
+    const s=state.idx&&state.idx.suiteById.get(f.suiteId);
+    return s?{ suites: [s.key] }:null;
+  }
+  if(f.kind==='case'){
+    const c=findCaseByText(f.caseText||'');
+    return c?{ case_keys: [c.key] }:null;
+  }
+  if(f.kind==='selected')return { case_keys: (f.caseKeys||[]).slice() };
+  return null; // "all" → no scope, server runs everything for app+env
+}
 function scopeLabel(f){
   if(f.kind==='types')return 'Test types: '+(f.types.map(typeTitle).join(', ')||'none');
   if(f.kind==='suite'){const s=state.idx&&state.idx.suiteById.get(f.suiteId);return 'Suite: '+(s?(s.name||s.key):'—');}
@@ -2179,7 +2329,8 @@ function openScheduleForm(preset){
     name:'',nameTouched:false,
     kind:'all',types:[],suiteId:'',caseText:'',caseKeys:[],
     envId:state.envId||'',
-    when:'once',at:'',
+    // "Create run" default: fire right away. Users who want a schedule flip to Once / Repeat.
+    when:'now',at:'',
     repeatMode:'everyMin',
     everyMin:30,everyHour:1,
     dailyTime:'02:00',
@@ -2188,12 +2339,13 @@ function openScheduleForm(preset){
     cron:'0 2 * * *',
     maxFires:'',
     runType:'run_only',
-    autoFix:false,autoFixMax:2,
+    autoFix:false,autoFixMax:1,
     applicationVersion:(state.appVersion||'main'),
     ...(preset||{})
   };
   state.schedFormOpen=true;
-  if(state.view==='schedules')renderCurrentView();else location.hash='#/schedules';
+  // Create run is the merged entry point for both run-now and scheduling.
+  if(state.view==='create-run'||state.view==='schedules')renderCurrentView();else location.hash='#/create-run';
 }
 function readSchedForm(){
   const f=state.schedForm;if(!el('schedName'))return;
@@ -2202,7 +2354,21 @@ function readSchedForm(){
   else if(typed!==f.name)f.nameTouched=true;
   f.name=typed;
   f.envId=el('schedEnv').value;
-  const w=document.querySelector('input[name="schedWhen"]:checked');if(w)f.when=w.value;
+  // Two-level When: top radio picks Run now vs Schedule; the nested radio
+  // (schedScheduleType, only rendered when Schedule is selected) picks Once
+  // vs Repeating. The final f.when is one of 'now' | 'once' | 'repeat' so the
+  // rest of the form logic and the save path keep working unchanged.
+  const top=document.querySelector('input[name="schedWhen"]:checked');
+  if(top){
+    if(top.value==='now')f.when='now';
+    else if(top.value==='schedule'){
+      const sub=document.querySelector('input[name="schedScheduleType"]:checked');
+      f.when=sub?sub.value:(f.when==='repeat'?'repeat':'once');
+    }else{
+      // Legacy value from a cached render: 'once' / 'repeat' land directly.
+      f.when=top.value;
+    }
+  }
   if(el('schedAt'))f.at=el('schedAt').value;
   if(el('schedRepeatMode'))f.repeatMode=el('schedRepeatMode').value;
   if(el('schedEveryMin'))f.everyMin=Number(el('schedEveryMin').value)||f.everyMin;
@@ -2240,19 +2406,36 @@ function summariseRepeat(f){
   return 'cron';
 }
 function autoScheduleName(f){
+  // Tune: build a readable, sentence-cased name of the form
+  //   "<Scope> on <env> <when> [<run-type>] [<version>] [× <max>]"
+  // Dropped the raw app key from "All …" because the current application is
+  // shown next to the Create run heading already, and dropped bare "types" /
+  // "Suite —" fallbacks that landed when the picker was blank.
   const parts=[];
-  if(f.kind==='all')parts.push('All '+(state.appKey||''));
-  else if(f.kind==='types')parts.push(f.types.length?f.types.map(typeTitle).join('+'):'types');
-  else if(f.kind==='suite'){const s=state.idx&&state.idx.suiteById.get(f.suiteId);parts.push('Suite '+(s?(s.name||s.key):'—'));}
-  else if(f.kind==='case'){const c=findCaseByText(f.caseText);parts.push(c?c.name:(f.caseText||'case'));}
-  else if(f.kind==='selected')parts.push(plural((f.caseKeys||[]).length,'case'));
-  const env=(state.environments||[]).find(e=>e.id===f.envId);if(env)parts.push(env.key||env.name);
-  parts.push(summariseRepeat(f));
-  const rt={run_only:'',deploy_run_teardown:'deploy+teardown',deploy_and_run:'deploy+keep',deploy_only:'deploy only',deploy_run_teardown_loop:'loop',clean_cycle:'clean cycle'}[f.runType||'run_only'];
+  const appName=((state.applications||[]).find(a=>a.key===state.appKey)||{}).name||state.appKey||'application';
+  if(f.kind==='all')parts.push('All '+appName+' cases');
+  else if(f.kind==='types'){
+    if(f.types&&f.types.length){
+      const n=scopeCount(f);
+      parts.push((f.types.map(typeTitle).join(' + '))+' ('+plural(n,'case')+')');
+    }
+  }
+  else if(f.kind==='suite'&&f.suiteId){
+    const s=state.idx&&state.idx.suiteById.get(f.suiteId);
+    if(s){const n=countForSuite(f.suiteId);parts.push('Suite: '+(s.name||s.key)+(n?' ('+plural(n,'case')+')':''));}
+  }
+  else if(f.kind==='case'){const c=findCaseByText(f.caseText);if(c)parts.push('Case: '+(c.name||c.key));}
+  else if(f.kind==='selected'&&(f.caseKeys||[]).length)parts.push(plural(f.caseKeys.length,'selected case'));
+  const env=(state.environments||[]).find(e=>e.id===f.envId);
+  if(env)parts.push('on '+(env.name||env.key));
+  const whenPart=summariseRepeat(f);
+  if(whenPart&&whenPart!=='once')parts.push(whenPart);
+  const rt={run_only:'',deploy_run_teardown:'deploy + teardown',deploy_and_run:'deploy + keep',deploy_only:'deploy only',deploy_run_teardown_loop:'loop',clean_cycle:'clean cycle'}[f.runType||'run_only'];
   if(rt)parts.push(rt);
-  if(f.applicationVersion&&f.applicationVersion!=='main')parts.push(f.applicationVersion);
-  if(f.when==='repeat'&&f.maxFires)parts.push('x'+f.maxFires);
+  if(f.applicationVersion&&f.applicationVersion!=='main')parts.push('@ '+f.applicationVersion);
+  if(f.when==='repeat'&&f.maxFires)parts.push('× '+f.maxFires);
   let name=parts.filter(Boolean).join(' · ');
+  if(!name)name='Untitled run';
   if(Array.isArray(state.schedules)){
     const used=new Set(state.schedules.map(s=>s.name));
     if(used.has(name)){let i=2;while(used.has(name+' #'+i))i++;name=name+' #'+i;}
@@ -2305,19 +2488,62 @@ function scheduleFormHtml(){
         ${repeatPreview}
         <div class="form-row" style="margin-top:10px"><span class="form-label">Stop after</span><div><input type="number" min="1" step="1" id="schedMaxFires" value="${esc(f.maxFires||'')}" placeholder="unlimited" style="width:120px"> <span class="muted small">runs (leave empty for no limit)</span></div></div>
       </div></div>`;
-  const nameHint=f.nameTouched?'You named this schedule — clear the box to let it auto-name from your choices again.':'Auto-named from the options below. Type here to override.';
-  return `<div class="card" data-form="sched"><div class="card-head"><h2>Schedule a run</h2><span class="muted small">${esc(state.appKey||'')} · ${plural(n,'test case')} in this selection</span></div>
+  const nameHint=f.nameTouched?'You named this run — clear the box to let it auto-name from your choices again.':'Auto-named from the options below. Type here to override.';
+  // The merged form: when === 'now' queues the run / deploy / cycle right away;
+  // when === 'once' or 'repeat' saves a schedule. The runner-side payload picks
+  // the right endpoint in saveCreateRun / saveSchedule.
+  const isNow=f.when==='now';
+  const isSchedule=f.when==='once'||f.when==='repeat';
+  const submitLabel=isNow?'▶ Create run':'🗓 Save schedule';
+  const headTitle=state.view==='create-run'?'Create a run':'Schedule a run';
+  const headSub=isNow?' · fires immediately':' · fires on the schedule';
+  // Two-level When: top radios pick Run now vs Schedule. When Schedule is
+  // selected a nested radio picks Once vs Repeating; the detail pane follows
+  // that nested choice. Having Schedule as a single top choice keeps the form
+  // compact and matches the operator's mental model: "now or later".
+  const topRadios=`<div class="radio-row">
+    <label class="type-check"><input type="radio" name="schedWhen" value="now"${isNow?' checked':''}> Run now</label>
+    <label class="type-check"><input type="radio" name="schedWhen" value="schedule"${isSchedule?' checked':''}> Schedule</label>
+  </div>`;
+  const nestedRadios=isSchedule?`<div class="radio-row" style="margin-top:10px;padding-left:18px;border-left:2px solid var(--line)">
+    <label class="type-check"><input type="radio" name="schedScheduleType" value="once"${f.when==='once'?' checked':''}> Once, at a date and time</label>
+    <label class="type-check"><input type="radio" name="schedScheduleType" value="repeat"${f.when==='repeat'?' checked':''}> Repeating</label>
+  </div>`:'';
+  const schedulePane=isSchedule?`<div style="margin-top:8px;padding-left:18px;border-left:2px solid var(--line)">${whenDetail}</div>`:'';
+  const whenPane=isNow
+    ?'<div class="muted small" style="margin-top:8px">The run is queued the moment you press <b>Create run</b>. A link to the run appears here and in the toast.</div>'
+    :`${nestedRadios}${schedulePane}`;
+  const whenRadios=topRadios;
+  const resultCard=state.createRunResult?createRunResultHtml(state.createRunResult):'';
+  return `<div class="card" data-form="sched"><div class="card-head"><h2>${esc(headTitle)}</h2><span class="muted small">${esc(state.appKey||'')} · ${plural(n,'test case')} in this selection${esc(headSub)}</span></div>
     <div class="form-row"><span class="form-label">Name</span><div><input type="text" id="schedName" value="${esc(f.name)}" placeholder="auto-named from your choices" style="width:min(520px,100%)"><div class="muted small" style="margin-top:4px">${esc(nameHint)}</div></div></div>
     ${scopePickerHtml('sched',f)}
     <div class="form-row"><span class="form-label">Environment</span><div><select id="schedEnv">${state.environments.map(e=>`<option value="${esc(e.id)}"${e.id===f.envId?' selected':''}>${esc(e.name||e.key)}</option>`).join('')||'<option value="">No environment available</option>'}</select></div></div>
-    <div class="form-row"><span class="form-label">Branch / version</span><div><input type="text" id="schedVersion" list="schedVersionList" value="${esc(f.applicationVersion||'main')}" placeholder="main" style="width:220px" autocomplete="off"><datalist id="schedVersionList">${versionDataList}</datalist><div class="muted small" style="margin-top:4px">Which branch, tag, or version of the app to run against. Stamped on every run this schedule queues.</div></div></div>
-    <div class="form-row"><span class="form-label">Run type</span><div><select id="schedRunType">${SCHED_RUN_TYPES.map(([v,l])=>`<option value="${esc(v)}"${f.runType===v?' selected':''}>${esc(l)}</option>`).join('')}</select><div class="muted small" style="margin-top:4px">What the scheduler does when the time comes. "Just run" queues an execution; the others shape the deploy around it (same options as the Overview page).</div></div></div>
-    <div class="form-row"><span class="form-label">On failure</span><div><label class="type-check"><input type="checkbox" id="schedAutoFix"${f.autoFix?' checked':''}> Auto-fix loop</label> <span class="muted small">retry up to</span> <input type="number" id="schedAutoFixMax" min="1" max="20" step="1" value="${esc(f.autoFixMax||2)}" style="width:72px"${f.autoFix?'':' disabled'}> <span class="muted small">attempts</span><div class="muted small" style="margin-top:4px">Transient failures retry without redeploying. Real failures redeploy the app (production is the baseline) and rerun the failing cases only. Hitting the cap files a defect and parks the loop.</div></div></div>
-    <div class="form-row"><span class="form-label">When</span><div><div class="radio-row"><label class="type-check"><input type="radio" name="schedWhen" value="once"${f.when==='once'?' checked':''}> Once, at a date and time</label><label class="type-check"><input type="radio" name="schedWhen" value="repeat"${f.when==='repeat'?' checked':''}> Repeating</label></div><div style="margin-top:8px">${whenDetail}</div></div></div>
-    <div class="form-row"><span></span><div><button class="btn primary" data-action="sched-save">Save schedule</button> <button class="btn" data-action="sched-new">Cancel</button><div id="schedError" class="field-error" hidden></div></div></div>
-  </div>`;
+    <div class="form-row"><span class="form-label">Branch / version</span><div><input type="text" id="schedVersion" list="schedVersionList" value="${esc(f.applicationVersion||'main')}" placeholder="main" style="width:220px" autocomplete="off"><datalist id="schedVersionList">${versionDataList}</datalist><div class="muted small" style="margin-top:4px">Which branch, tag, or version of the app to run against. Stamped on every run queued from this form.</div></div></div>
+    <div class="form-row"><span class="form-label">Run type</span><div><select id="schedRunType">${SCHED_RUN_TYPES.map(([v,l])=>`<option value="${esc(v)}"${f.runType===v?' selected':''}>${esc(l)}</option>`).join('')}</select><div class="muted small" style="margin-top:4px">"Just run" queues an execution; the others shape the deploy around it. On <b>Run now</b> the loop and clean-cycle options drive the full cycle run API; otherwise the schedule stamps the choice for the scheduler to apply.</div></div></div>
+    <div class="form-row"><span class="form-label">On failure</span><div><label class="type-check"><input type="checkbox" id="schedAutoFix"${f.autoFix?' checked':''}> Auto-fix loop</label> <span class="muted small">retry up to</span> <input type="number" id="schedAutoFixMax" min="1" max="20" step="1" value="${esc(f.autoFixMax||1)}" style="width:72px"${f.autoFix?'':' disabled'}> <span class="muted small">attempts</span><div class="muted small" style="margin-top:4px">Transient failures retry without redeploying. Real failures redeploy the app (production is the baseline) and rerun the failing cases only. Hitting the cap files a defect and parks the loop.</div></div></div>
+    <div class="form-row"><span class="form-label">When</span><div>${whenRadios}${whenPane}</div></div>
+    <div class="form-row"><span></span><div><button class="btn primary" data-action="create-run-save">${esc(submitLabel)}</button> <a class="btn" href="#/overview">Cancel</a><div id="schedError" class="field-error" hidden></div></div></div>
+  </div>${resultCard}`;
 }
-async function saveSchedule(btn){
+// Inline result card shown after a successful run / deploy / cycle / schedule
+// creation so the operator can jump straight to the thing they just made.
+function createRunResultHtml(r){
+  if(!r)return '';
+  const name=esc(r.name||r.key||'Run');
+  if(r.kind==='schedule'){
+    return `<div class="card" style="margin-top:12px;border-left:3px solid var(--green)"><div class="card-head"><h2>Scheduled: ${name}</h2><a class="btn" href="#/schedules">View schedules →</a></div><div class="hp-body"><div class="muted small">${esc(r.summary||'')}</div></div></div>`;
+  }
+  if(r.kind==='cycle'){
+    return `<div class="card" style="margin-top:12px;border-left:3px solid var(--green)"><div class="card-head"><h2>Cycle started: ${name}</h2><a class="btn" href="#/overview">View progress →</a></div><div class="hp-body"><div class="muted small">${esc(r.summary||'')}</div></div></div>`;
+  }
+  if(r.kind==='deploy'){
+    return `<div class="card" style="margin-top:12px;border-left:3px solid var(--green)"><div class="card-head"><h2>Deploy queued: ${name}</h2><a class="btn" href="#/overview">View progress →</a></div><div class="hp-body"><div class="muted small">${esc(r.summary||'')}</div></div></div>`;
+  }
+  const href=r.runId?`#/run/${esc(r.runId)}`:'#/overview';
+  return `<div class="card" style="margin-top:12px;border-left:3px solid var(--green)"><div class="card-head"><h2>Run created: ${name}</h2><a class="btn" href="${href}">View run →</a></div><div class="hp-body"><div class="muted small">${esc(r.summary||'')}</div></div></div>`;
+}
+async function saveSchedule(btn,opts){
   readSchedForm();
   const f=state.schedForm,err=m=>formError('schedError',m);
   err('');
@@ -2340,21 +2566,18 @@ async function saveSchedule(btn){
   let scope={};
   if(f.kind==='suite'){const s=state.idx.suiteById.get(f.suiteId);scope={suites:[s.key],label:scopeLabel(f)};}
   else if(f.kind!=='all')scope={case_keys:cases.map(c=>c.key),label:scopeLabel(f)+(f.kind==='types'?' ('+plural(cases.length,'case')+')':'')};
-  // Capture the user's Run-type + App-version choices in scope. These are
-  // read by the scheduler when it fires: deploy_mode shapes the deploy, and
-  // application_version is stamped on each queued run (shown in the App
-  // version column + filter on Test runs).
   if(f.runType)scope.run_type=f.runType;
   if(f.applicationVersion&&f.applicationVersion.trim())scope.application_version=f.applicationVersion.trim();
   if(f.when==='repeat'&&f.maxFires)scope.max_fires=Number(f.maxFires);
-  if(f.autoFix)scope.auto_fix={enabled:true,max_attempts:Math.max(1,Math.min(20,Number(f.autoFixMax)||2))};
+  if(f.autoFix)scope.auto_fix={enabled:true,max_attempts:Math.max(1,Math.min(20,Number(f.autoFixMax)||1))};
   btn.disabled=true;
   try{
     await postJson('/api/v1/schedules',{name:f.name.trim(),application:state.appKey,environment:f.envId,scope,cron_expression:cron});
-    toast('Scheduled "'+f.name.trim()+'"');
+    if(!(opts&&opts.silent))toast('Scheduled "'+f.name.trim()+'"');
     state.schedFormOpen=false;
     await loadSchedules();
-  }catch(e){err('Could not save: '+e.message);btn.disabled=false;}
+    return {ok:true};
+  }catch(e){err('Could not save: '+e.message);btn.disabled=false;return {ok:false};}
 }
 async function scheduleAction(kind,node){
   const id=node.dataset.id;
@@ -2365,12 +2588,108 @@ async function scheduleAction(kind,node){
   }catch(e){toast('Failed: '+e.message);}
   await loadSchedules();
 }
+function renderCreateRunView(){
+  el('viewTitle').textContent='Create a run';
+  if(!state.loaded){el('content').innerHTML=skeletonHtml();return;}
+  // The Create run page is always the form itself — not a list — because its job
+  // is to kick a new run off (or schedule one). Past schedules live under their
+  // own "Schedule runs" entry; the inline "View schedules →" link in the
+  // result card jumps there once a schedule is saved.
+  if(!state.schedFormOpen)openScheduleForm({when:'now'});
+  const head=`<div class="group-head first"><h2>Create a run <span class="muted small">for ${esc(state.appKey||'')}</span></h2><div class="hp-actions"><a class="btn" href="#/schedules">View schedules</a> <a class="btn" href="#/overview">Back to overview</a></div></div>`;
+  el('content').innerHTML=head+scheduleFormHtml();
+}
+async function saveCreateRun(btn){
+  readSchedForm();
+  const f=state.schedForm;const err=m=>formError('schedError',m);
+  err('');
+  if(!f.envId)return err('Choose an environment.');
+  // Scope validation now goes through scopeCount (counts endpoint — accurate
+  // even when the full case list is not in memory). The old scopeCases-only
+  // check saw [] for kind=types/suite on a fresh Create run page because the
+  // sparse state.idx cache had not been hydrated, and surfaced "Nothing to
+  // run" even when the type genuinely held cases.
+  const nCases=scopeCount(f);
+  if(f.kind==='types'&&(!f.types||!f.types.length))return err('Pick at least one test type.');
+  if(f.kind==='suite'&&!f.suiteId)return err('Pick a test suite.');
+  if(f.kind==='case'&&!findCaseByText(f.caseText||''))return err('Type a known test case name or key.');
+  if(f.kind==='selected'&&(!f.caseKeys||!f.caseKeys.length))return err('No cases selected.');
+  if(f.kind!=='all'&&nCases<=0)return err(`The ${f.kind==='types'?'selected types have':f.kind==='suite'?'selected suite has':'selection has'} no runnable cases on this application.`);
+  // Schedule path reuses the saveSchedule handler verbatim.
+  if(f.when==='once'||f.when==='repeat'){
+    const okName=f.name&&f.name.trim();
+    if(!okName)f.name=autoScheduleName(f);
+    const sched=await saveSchedule(btn,{silent:true});
+    if(sched&&sched.ok){
+      state.createRunResult={kind:'schedule',name:f.name,summary:summariseRepeat(f)+' · '+(nCases?plural(nCases,'case'):'all cases')};
+      renderCurrentView();
+    }
+    return;
+  }
+  // Run-now path. Route to the right endpoint based on the deploy mode.
+  const nameOverride=f.name&&f.name.trim()?f.name.trim():null;
+  const version=f.applicationVersion&&f.applicationVersion.trim()?f.applicationVersion.trim():null;
+  const af=f.autoFix?{enabled:true,max_attempts:Math.max(1,Math.min(20,Number(f.autoFixMax)||1))}:null;
+  const envId=f.envId;
+  btn.disabled=true;
+  try{
+    if(f.runType==='deploy_run_teardown_loop'||f.runType==='clean_cycle'){
+      // Cycle run
+      const iters=Math.max(1,Math.min(100,state.cycleIterations||1));
+      const res=await postJson('/api/v1/cycle-runs',{application:state.appKey,environment:envId,iterations:iters,clean_start:f.runType==='clean_cycle'});
+      state.cycleRun=res.data;
+      state.createRunResult={kind:'cycle',name:res.data.key,summary:'Cycle · '+iters+' iteration'+(iters===1?'':'s')+' · '+(f.runType==='clean_cycle'?'clean start':'standard loop')};
+      toast(res.message||'Cycle started','#/overview');
+      renderCurrentView();
+      return;
+    }
+    if(f.runType==='deploy_only'||f.runType==='deploy_and_run'||f.runType==='deploy_run_teardown'){
+      // Deploy
+      const body={environment_id:envId,application:state.appKey,mode:f.runType==='deploy_only'?'deploy_only':'deploy_and_run',teardown_after_run:f.runType==='deploy_run_teardown'};
+      if(version)body.ref=version;
+      // Clear any stale banners so progress is unambiguous.
+      state.deployStage=null;state.deployRun=null;state.deployLoop=null;
+      if(state.cycleRun&&state.cycleRun.status!=='running')state.cycleRun=null;
+      const res=await postJson('/api/v1/deployments',body);
+      state.deploy=res.data;
+      state.createRunResult={kind:'deploy',name:nameOverride||(res.data.ref?'Deploy '+res.data.ref:'Deploy'),summary:f.runType+' · '+envName()};
+      toast('Deploy queued','#/overview');
+      pollDeployment();
+      renderCurrentView();
+      return;
+    }
+    // run_only: route EVERY scope through POST /api/v1/runs. The server
+    // resolves test_types / suites / case_keys into the matching executions
+    // (see routes/trigger.ts), so we don't need the full case list in memory.
+    // This is what fixes the kind=types + kind=suite "Nothing to run" bug.
+    const scope=buildRunScope(f);
+    const body={ application:state.appKey, environment:envId, trigger_source:'manual' };
+    if(scope)body.scope=scope;
+    if(nameOverride)body.name=nameOverride;
+    const meta={...(version?{application_version:version}:{}),...(af?{auto_fix:af}:{}),...(nameOverride?{name:nameOverride}:{})};
+    if(Object.keys(meta).length)body.metadata=meta;
+    if(version)body.application_version=version;
+    const res=await postJson('/api/v1/runs',body);
+    const runId=res.data?.run_id||res.data?.id;
+    const execs=Array.isArray(res.data?.executions)?res.data.executions.length:0;
+    const totalCasesN=res.data?.total_cases||nCases||0;
+    state.createRunResult={kind:'run',name:nameOverride||(runId?'Run '+String(runId).slice(0,8):'Run'),runId,summary:(totalCasesN?plural(totalCasesN,'case'):plural(execs,'execution'))+' · '+envName()};
+    toast('Run queued — '+(res.data?.message||plural(totalCasesN||execs,'execution')),runId?'#/run/'+runId:'#/overview');
+    pollLive();
+    renderCurrentView();
+  }catch(e){err('Could not create run: '+e.message);}
+  finally{btn.disabled=false;}
+}
 function renderSchedulesView(){
   el('viewTitle').textContent='Schedule runs';
   const all=state.schedules;
   if(!state.loaded||all===null){el('content').innerHTML=skeletonHtml();return;}
-  let h=`<div class="group-head first"><h2>Scheduled runs <span class="muted small">for ${esc(state.appKey||'')}</span></h2><div class="hp-actions"><button class="btn primary" data-action="sched-new">${state.schedFormOpen?'Close':'+ Schedule a run'}</button></div></div>`;
-  if(state.schedFormOpen)h+=scheduleFormHtml();
+  // Schedule runs is a read-only list of existing schedules. The create / edit
+  // form that used to live here has moved under Create run → Schedule (so
+  // scheduling and run-now sit on the same page and there is no duplicated
+  // form). The header carries a muted hint pointing operators to that page.
+  let h=`<div class="group-head first"><h2>Scheduled runs <span class="muted small">for ${esc(state.appKey||'')}</span></h2><div class="hp-actions"><a class="btn" href="#/create-run">+ New schedule</a></div></div>`;
+  h+=`<div class="muted small" style="margin:-6px 0 10px">Create a new schedule from <a href="#/create-run">Create run</a> and pick <b>Schedule</b> under <i>When</i>.</div>`;
   if(all.error){el('content').innerHTML=h+`<div class="card empty">Could not load schedules: ${esc(all.error)}</div>`;return;}
   const list=all.filter(s=>!s.application_key||s.application_key===state.appKey);
   const envById=new Map(state.environments.map(e=>[e.id,e]));
@@ -2422,6 +2741,240 @@ function renderFixesView(){
   }).join('');
   h+=`<div class="card"><div class="card-head"><h2>Proposals</h2><span class="muted small">${plural(list.length,'proposal')} · ${list.filter(p=>p.status==='applied').length} applied · ${list.filter(p=>p.status==='rejected'||p.status==='failed'||p.status==='regressed').length} rejected</span></div><div class="table-wrap"><table><thead><tr><th>Run</th><th>Case</th><th>Source file</th><th>Status</th><th>Classification</th><th>Rationale</th><th>Diff</th><th>Created</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   el('content').innerHTML=h;
+}
+
+// ---------------------------------------------------------------------------
+// Quality Insights summary — a holistic snapshot of test quality for the
+// current application, loaded on demand and refreshed on the configured
+// cadence (default every 6 hours, settable in Configuration · Insights).
+// Backed by GET /api/v1/ui/insights-summary (apps/api/src/routes/ui.ts).
+// ---------------------------------------------------------------------------
+let insightsAutoRefreshTimer=null;
+async function loadInsightsSummary(){
+  state.insightsSummary={loading:true,data:state.insightsSummary?.data||null};
+  if(state.view==='insights')renderCurrentView();
+  try{
+    const res=await api('/api/v1/ui/insights-summary?application_key='+encodeURIComponent(state.appKey||''));
+    state.insightsSummary={loading:false,data:res.data||null,loadedAt:new Date().toISOString()};
+  }catch(e){state.insightsSummary={loading:false,error:e.message};}
+  if(state.view==='insights')renderCurrentView();
+}
+// Apply a holistic-insights recommendation. The server stamps each
+// recommendation with a structured apply payload — one of
+//   {kind:'run-cases',case_ids,label,auto_fix?}
+//   {kind:'open-case',case_id}
+//   {kind:'open-fix-log'}
+//   {kind:'enable-auto-fix'}
+//   {kind:'show-instructions',title,text}
+// We confirm with the operator (except for pure navigation) and then route
+// to the right action — queueing a run, flipping a server setting, or opening
+// an instructions panel the operator reads and dismisses.
+async function applyRecommendation(node){
+  let apply;
+  try{apply=JSON.parse(atob(node.dataset.apply||''));}catch{toast('Could not read the recommendation payload');return;}
+  const recId=node.dataset.recId||'rec';
+  if(!apply||!apply.kind)return;
+  if(apply.kind==='open-case'){
+    if(!apply.case_id){toast('No case linked to this recommendation');return;}
+    location.hash='#/case/'+encodeURIComponent(apply.case_id);
+    return;
+  }
+  if(apply.kind==='open-fix-log'){location.hash='#/fixes';return;}
+  if(apply.kind==='show-instructions'){
+    const existing=el('recInstructionsModal');if(existing)existing.remove();
+    const wrap=document.createElement('div');wrap.id='recInstructionsModal';
+    wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100';
+    const card=document.createElement('div');card.className='card';card.style.cssText='max-width:min(640px,calc(100vw - 48px));width:100%;background:var(--panel);padding:0';
+    card.innerHTML=`<div class="card-head"><h2>${esc(apply.title||'How to apply this')}</h2><button class="btn" data-action="dismiss-instructions">Close</button></div><div class="hp-body"><pre class="small" style="white-space:pre-wrap;max-height:50vh;overflow:auto;background:var(--panel2);padding:10px;border-radius:6px">${esc(apply.text||'')}</pre></div>`;
+    wrap.appendChild(card);
+    wrap.addEventListener('click',e=>{if(e.target===wrap){wrap.remove();}});
+    document.body.appendChild(wrap);
+    return;
+  }
+  if(apply.kind==='enable-auto-fix'){
+    const current=Number((state.settings||{}).auto_fix_default_max_attempts)||1;
+    const target=Math.max(2,current);
+    if(!confirm(`Enable the auto-fix loop with ${target} attempts? Failing cases will retry automatically.`))return;
+    node.disabled=true;
+    try{
+      state.settings=(await api('/api/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({auto_fix_default_max_attempts:target,fixer_agent_mode:'auto'})})).data;
+      toast(`Auto-fix enabled (${target} attempts)`);
+      loadInsightsSummary();
+    }catch(e){toast('Could not enable auto-fix: '+e.message);}
+    finally{node.disabled=false;}
+    return;
+  }
+  if(apply.kind==='run-cases'){
+    const ids=Array.isArray(apply.case_ids)?apply.case_ids.filter(Boolean):[];
+    if(!ids.length){toast('No cases to run — the recommendation may be stale.');return;}
+    if(!state.envId){toast('No environment selected.');return;}
+    const label=apply.label||plural(ids.length,'case');
+    if(!confirm(`Queue a run of ${label} on ${envName()}?`))return;
+    node.disabled=true;
+    try{
+      const body={test_case_ids:ids,environment_id:state.envId,trigger_source:'manual',requested_by:'insights-apply-'+recId};
+      const meta={};
+      if(apply.auto_fix)meta.auto_fix=apply.auto_fix;
+      meta.recommendation=recId;
+      body.metadata=meta;
+      const res=await postJson('/api/v1/executions',body);
+      toast('Queued '+label+' — '+(res.data.name||res.data.key),'#/run/'+res.data.id);
+      pollLive();
+      loadInsightsSummary();
+    }catch(e){toast('Could not apply: '+e.message);}
+    finally{node.disabled=false;}
+    return;
+  }
+  toast('Unknown recommendation kind: '+apply.kind);
+}
+function scheduleInsightsAutoRefresh(){
+  if(insightsAutoRefreshTimer)clearInterval(insightsAutoRefreshTimer);
+  let hours=6;try{hours=Number(localStorage.getItem('te.insightsRefreshHours'))||6;}catch{}
+  const ms=Math.max(1,Math.min(72,hours))*3600000;
+  insightsAutoRefreshTimer=setInterval(()=>{if(state.view==='insights')loadInsightsSummary();},ms);
+}
+function insightsSummaryHtml(){
+  const s=state.insightsSummary;
+  if(!s){loadInsightsSummary();return `<div class="card"><div class="hp-body"><div class="skel" style="height:160px"></div></div></div>`;}
+  if(s.loading&&!s.data)return `<div class="card"><div class="hp-body"><div class="skel" style="height:160px"></div></div></div>`;
+  if(s.error)return `<div class="card empty">Could not load insights summary: ${esc(s.error)}</div>`;
+  const d=s.data||{};
+  const t=d.totals||{};
+  let refreshHours=6;try{refreshHours=Number(localStorage.getItem('te.insightsRefreshHours'))||6;}catch{}
+  const kpis=`<div class="kpi-grid">${kpi('Cases',t.cases||0,'in catalogue')}${kpi('Never run',t.never_run||0,'no result in the last '+(d.window_days||30)+' days',t.never_run?'amber':'')}${kpi('Flaky',t.flaky||0,'pass sometimes, fail sometimes',t.flaky?'amber':'')}${kpi('Always-failing',t.always_fail||0,'always fail in the window',t.always_fail?'red':'')}${kpi('Avg fail rate',((t.avg_fail_rate||0)*100).toFixed(1)+'%','failures ÷ attempts',t.avg_fail_rate>0.1?'red':'')}${kpi('Avg case duration',(((t.avg_duration_ms||0)/1000).toFixed(1))+'s','per case',t.avg_duration_ms>60000?'amber':'')}${kpi('Runs',t.runs||0,'in the window')}${kpi('Max workers used',t.max_workers||0,'distinct worker ids on this app')}</div>`;
+  const recs=(d.recommendations||[]).map(r=>{
+    const chip=`<span class="chip chip-${r.severity==='high'?'fail':r.severity==='medium'?'warn':r.severity==='low'?'':'muted'}">${esc(r.severity||'info')}</span>`;
+    // Each recommendation that carries an `apply` payload gets an Apply button
+    // that the operator confirms. We stash the payload on the DOM node (base64)
+    // so the handler can read it back without a round-trip. applyRec() reads it.
+    const applyBtn=r.apply?`<button class="btn primary small-btn" style="margin-top:0" data-action="apply-rec" data-rec-id="${esc(r.id)}" data-apply="${esc(btoa(JSON.stringify(r.apply)))}">Apply →</button>`:'';
+    return `<li class="qi-finding"><div class="qi-finding-head">${chip}<b>${esc(r.title)}</b><span style="flex:1"></span>${applyBtn}</div>${r.detail?`<p>${esc(r.detail)}</p>`:''}${r.action?`<div class="muted small"><b>Action:</b> ${esc(r.action)}</div>`:''}</li>`;
+  }).join('');
+  const flakiest=(d.flakiest||[]).map(c=>`<tr><td><a href="#/case/${esc(c.id)}">${esc(c.name||c.key)}</a><div class="key small">${esc(c.key)}</div></td><td class="num">${c.runs}</td><td class="num">${c.passed}</td><td class="num">${c.failed}</td><td class="num">${(((c.avg_duration_ms||0))/1000).toFixed(1)}s</td></tr>`).join('');
+  const longest=(d.longest||[]).map(c=>`<tr><td><a href="#/case/${esc(c.id)}">${esc(c.name||c.key)}</a><div class="key small">${esc(c.key)}</div></td><td class="num">${(((c.avg_duration_ms||0))/1000).toFixed(1)}s</td><td class="num">${c.runs}</td></tr>`).join('');
+  const runSizes=Object.entries(d.run_size_buckets||{}).map(([b,n])=>`<li>${esc(b)} case${b==='1'?'':'s'} per run · <b>${esc(n)}</b> runs</li>`).join('');
+  return `<div class="group-head"><h2>Holistic summary <span class="muted small">last ${d.window_days||30} days${s.loadedAt?' · refreshed '+ago(s.loadedAt):''}</span></h2><div class="hp-actions"><a class="btn" href="#/config-insights">Settings</a> <button class="btn" data-action="insights-summary-reload">Refresh now</button> <span class="muted small">Auto-refresh every ${refreshHours} h</span></div></div>${kpis}
+    <div class="card"><div class="card-head"><h2>Recommendations</h2><span class="muted small">${plural((d.recommendations||[]).length,'recommendation')} · rules-based</span></div><div class="hp-body"><ul class="qi-findings" style="list-style:none;padding:0;margin:0">${recs}</ul></div></div>
+    <div class="hp-charts qi-even" style="margin-top:16px">
+      <div class="card"><div class="card-head"><h2>Flakiest cases</h2></div><div class="table-wrap"><table><thead><tr><th>Case</th><th class="num">Runs</th><th class="num">Pass</th><th class="num">Fail</th><th class="num">Avg dur</th></tr></thead><tbody>${flakiest||'<tr><td colspan="5" class="empty">No flaky cases 🎉</td></tr>'}</tbody></table></div></div>
+      <div class="card"><div class="card-head"><h2>Longest-running cases</h2></div><div class="table-wrap"><table><thead><tr><th>Case</th><th class="num">Avg dur</th><th class="num">Runs</th></tr></thead><tbody>${longest||'<tr><td colspan="3" class="empty">No case has recent timing.</td></tr>'}</tbody></table></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-head"><h2>Run size distribution</h2><span class="muted small">how many cases a run bundles</span></div><div class="hp-body"><ul>${runSizes||'<li class="empty">No runs in the window.</li>'}</ul></div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Defect log + Defect dashboard — SPA views over /api/v1/defect-log and
+// /api/v1/defect-log/dashboard. They replace the external /defect-log HTML
+// page in the sidebar so operators drilling through defects stay inside the
+// console shell.
+// ---------------------------------------------------------------------------
+async function setDefectResolution(node){
+  const id=node.dataset.id,resolution=node.dataset.resolution;
+  if(!id||!resolution)return;
+  node.disabled=true;
+  try{
+    await api('/api/v1/defect-log/'+encodeURIComponent(id),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({resolution})});
+    toast('Resolution set to '+resolution.replace(/_/g,' '));
+    // Patch the in-memory row so the chip updates without a full reload.
+    if(state.defectLog&&Array.isArray(state.defectLog.rows)){
+      const row=state.defectLog.rows.find(r=>r.id===id);
+      if(row){row.resolution=resolution;row.resolution_reviewer='reviewer-local';row.resolution_at=new Date().toISOString();}
+    }
+    renderCurrentView();
+  }catch(e){toast('Could not set resolution: '+e.message);}
+  finally{node.disabled=false;}
+}
+async function bulkDefectResolution(resolution){
+  const sel=state.defectLogSelected||new Set();
+  if(!sel.size){toast('Nothing selected');return;}
+  const ids=[...sel];
+  if(!confirm(`Apply reviewer decision "${resolution.replace(/_/g,' ')}" to ${plural(ids.length,'defect')}?`))return;
+  try{
+    const res=await postJson('/api/v1/defect-log/bulk',{action:'set_resolution',ids,resolution});
+    toast(`Decision applied to ${res.data.done} defect${res.data.done===1?'':'s'}${res.data.failed.length?` (${res.data.failed.length} failed)`:''}`);
+    state.defectLogSelected=new Set();
+    loadDefectLog();
+  }catch(e){toast('Bulk apply failed: '+e.message);}
+}
+async function loadDefectLog(){
+  state.defectLog={loading:true,rows:state.defectLog?.rows||[]};
+  if(state.view==='defect-log')renderCurrentView();
+  try{
+    const res=await api('/api/v1/defect-log?application='+encodeURIComponent(state.appKey||''));
+    state.defectLog={loading:false,rows:res.data||[]};
+  }catch(e){state.defectLog={loading:false,error:e.message,rows:[]};}
+  if(state.view==='defect-log')renderCurrentView();
+  renderSideNav();
+}
+async function loadDefectDashboard(){
+  state.defectDashboard={loading:true,data:state.defectDashboard?.data||null};
+  if(state.view==='defect-dashboard')renderCurrentView();
+  try{
+    const res=await api('/api/v1/defect-log/dashboard?application='+encodeURIComponent(state.appKey||''));
+    state.defectDashboard={loading:false,data:res.data||null};
+  }catch(e){state.defectDashboard={loading:false,error:e.message};}
+  if(state.view==='defect-dashboard')renderCurrentView();
+}
+function defectStatusBadge(s){
+  const map={open:'failed',investigating:'running',resolved:'passed',closed:'passed',deferred:'never'};
+  return `<span class="badge ${map[s]||'never'}">${esc(s||'—')}</span>`;
+}
+// Reviewer baseline-decision chip for a defect-log row. The three canonical
+// values are: fix_test_case (app is baseline), fix_application (test is
+// baseline), other. Null = not reviewed yet.
+function resolutionChip(r){
+  if(!r)return `<span class="chip chip-muted" title="No reviewer decision yet">unreviewed</span>`;
+  if(r==='fix_test_case')return `<span class="chip chip-warn" title="Application is the baseline — the test case should be rewritten">Fix test case</span>`;
+  if(r==='fix_application')return `<span class="chip chip-fail" title="Test case is the baseline — the application has the defect">Fix application</span>`;
+  return `<span class="chip" title="Other resolution (flake, duplicate, environment, …)">Other</span>`;
+}
+function renderDefectLogView(){
+  el('viewTitle').textContent='Defect log';
+  const d=state.defectLog;
+  if(!d){loadDefectLog();el('content').innerHTML=skeletonHtml();return;}
+  if(d.loading&&!d.rows.length){el('content').innerHTML=skeletonHtml();return;}
+  const selected=state.defectLogSelected||new Set();
+  const head=`<div class="group-head first"><h2>Defect log <span class="muted small">for ${esc(state.appKey||'')}</span></h2><div class="hp-actions"><a class="btn" href="#/defect-dashboard">Open dashboard</a> <button class="btn" data-action="defect-log-reload">Refresh</button></div></div>`;
+  if(d.error){el('content').innerHTML=head+`<div class="card empty">Could not load defects: ${esc(d.error)}</div>`;return;}
+  if(!d.rows.length){el('content').innerHTML=head+`<div class="card empty">No defects filed yet. A failing deploy loop or a failed run with the fixer agent opens one here.</div>`;return;}
+  // Bulk toolbar: tick rows, pick a resolution, apply to every ticked row in
+  // one shot. Mirrors the per-row three-way buttons so the reviewer can act
+  // on either scale without jumping around.
+  const bulkBar=`<div class="toolbar" style="border:none;padding:4px 0 10px;gap:10px;align-items:center;flex-wrap:wrap">
+    <label class="muted small"><input type="checkbox" id="defectPickAll"${selected.size===d.rows.length?' checked':''}> Select all (${selected.size}/${d.rows.length})</label>
+    <span class="spacer" style="flex:1"></span>
+    <span class="muted small">Bulk reviewer decision →</span>
+    <button class="btn" data-action="defect-bulk-fix-test"${selected.size?'':' disabled'}>Fix test case (app is baseline)</button>
+    <button class="btn" data-action="defect-bulk-fix-app"${selected.size?'':' disabled'}>Fix application (test is baseline)</button>
+    <button class="btn" data-action="defect-bulk-other"${selected.size?'':' disabled'}>Other</button>
+  </div>`;
+  const rows=d.rows.map(x=>{
+    const key=esc(x.key||x.id);
+    const sev=x.severity?`<span class="chip chip-${x.severity==='critical'||x.severity==='high'?'fail':x.severity==='medium'?'warn':''}">${esc(x.severity)}</span>`:'';
+    const createdAt=x.created_at?esc(when(x.created_at)):'—';
+    const chk=selected.has(x.id)?' checked':'';
+    const resChip=resolutionChip(x.resolution);
+    const resSub=x.resolution_reviewer?`<div class="muted small">${esc(x.resolution_reviewer)}${x.resolution_at?' · '+esc(when(x.resolution_at)):''}</div>`:'';
+    // Per-row three-way decision buttons. Each sets the resolution to one
+    // of fix_test_case / fix_application / other on this single defect.
+    const btns=`<div class="hp-actions" style="gap:4px"><button class="btn small-btn" style="margin:0" data-action="defect-set-resolution" data-id="${esc(x.id)}" data-resolution="fix_test_case" title="Mark the application as the baseline — the test case should be rewritten">test</button><button class="btn small-btn" style="margin:0" data-action="defect-set-resolution" data-id="${esc(x.id)}" data-resolution="fix_application" title="Mark the test case as the baseline — the application has the defect">app</button><button class="btn small-btn" style="margin:0" data-action="defect-set-resolution" data-id="${esc(x.id)}" data-resolution="other" title="Flake / duplicate / environment">other</button></div>`;
+    return `<tr><td><input type="checkbox" data-defect-pick="${esc(x.id)}"${chk}></td><td>${key}</td><td>${esc(x.title||'—')}</td><td>${defectStatusBadge(x.status)}</td><td>${sev}</td><td>${resChip}${resSub}</td><td>${btns}</td><td class="muted small">${esc(x.environment_key||x.environment||'—')}</td><td class="muted small">${createdAt}</td></tr>`;
+  }).join('');
+  el('content').innerHTML=head+`<div class="card"><div class="card-head"><h2>${plural(d.rows.length,'defect')}</h2></div><div class="hp-body">${bulkBar}<div class="table-wrap"><table><thead><tr><th style="width:28px"></th><th>Key</th><th>Title</th><th>Status</th><th>Severity</th><th>Reviewer decision</th><th>Set to</th><th>Env</th><th>Opened</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
+}
+function renderDefectDashboardView(){
+  el('viewTitle').textContent='Defect dashboard';
+  const d=state.defectDashboard;
+  if(!d){loadDefectDashboard();el('content').innerHTML=skeletonHtml();return;}
+  if(d.loading&&!d.data){el('content').innerHTML=skeletonHtml();return;}
+  const head=`<div class="group-head first"><h2>Defect dashboard <span class="muted small">cross-app rollup</span></h2><div class="hp-actions"><a class="btn" href="#/defect-log">Open the log</a> <button class="btn" data-action="defect-dashboard-reload">Refresh</button></div></div>`;
+  if(d.error){el('content').innerHTML=head+`<div class="card empty">Could not load dashboard: ${esc(d.error)}</div>`;return;}
+  const data=d.data||{};
+  const counts=data.counts_by_status||{};
+  const kpis=`<div class="kpi-grid">${kpi('Open',counts.open||0,'defects currently open',counts.open?'red':'')}${kpi('Investigating',counts.investigating||0,'under investigation',counts.investigating?'amber':'')}${kpi('Resolved',counts.resolved||0,'closed with a fix',counts.resolved?'green':'')}${kpi('Deferred',counts.deferred||0,'parked for later')}</div>`;
+  const perApp=(data.per_application||[]).map(a=>`<tr><td>${esc(a.application_key||a.application||'—')}</td><td class="num">${esc(a.open||0)}</td><td class="num">${esc(a.resolved||0)}</td><td class="num">${esc(a.total||0)}</td></tr>`).join('');
+  const perAppCard=perApp?`<div class="card" style="margin-top:16px"><div class="card-head"><h2>By application</h2></div><div class="table-wrap"><table><thead><tr><th>Application</th><th class="num">Open</th><th class="num">Resolved</th><th class="num">Total</th></tr></thead><tbody>${perApp}</tbody></table></div></div>`:'';
+  el('content').innerHTML=head+kpis+perAppCard;
 }
 
 // ---------------------------------------------------------------------------
@@ -2539,14 +3092,17 @@ function renderCurrentView(){
   else if(v==='case')renderCaseView();
   else if(v==='method')renderMethodView(state.methodName);
   else if(v==='tag')renderTagView(state.tagName);
-  else if(v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-remote-triggers')renderConfigView();
+  else if(v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-insights'||v==='config-remote-triggers')renderConfigView();
   else if(v==='config-apps')renderConfigAppsView();
   else if(v==='config-envs')renderConfigEnvsView();
   else if(v==='config-infra')renderInfraView();
   else if(v==='catalog-coverage')renderCoverageView();
   else if(v==='test-cases'||v==='test-case-form'||v==='test-suites'||v==='test-suite-form')TB.render(v);   // testbench.js
   else if(v==='schedules')renderSchedulesView();
+  else if(v==='create-run')renderCreateRunView();
   else if(v==='fixes')renderFixesView();
+  else if(v==='defect-log')renderDefectLogView();
+  else if(v==='defect-dashboard')renderDefectDashboardView();
   else if(v==='reports')renderReportsView();
   else if(v==='insights'){if(typeof renderInsightsView==='function')renderInsightsView();else{el('content').innerHTML=skeletonHtml();loadInsightsBundle();}}
 
@@ -2563,40 +3119,94 @@ function renderBanner(){
   if(state.loaded&&totalCases()===0)return banner('No test cases in DB. Enable AUTO_SEED / IMPORT_SIT and redeploy.');
   if(state.liveLoaded&&!state.workers.some(workerFresh))return banner('No live worker (no heartbeat in the last 90s) — queued runs will wait until one connects.');
   const dl=state.deployLoop;
-  if(dl){
+  // Hide the stale deploy-loop banner once something new is in flight: a fresh
+  // deploy or run has taken over the screen's attention, and leaving the old
+  // retry/parked notice on top only confuses the operator about what state the
+  // environment is in right now. The server keeps the loop record; we just
+  // stop surfacing it until it is relevant again.
+  const hasActive=state.deploy&&(state.deploy.status==='queued'||state.deploy.status==='deploying')
+    || (state.cycleRun&&state.cycleRun.status==='running')
+    || activeRuns().length>0;
+  // The parked state is also dismissible: the operator reads the message once
+  // and silences it on this browser. A new deploy or a fresh retry reopens
+  // the banner (new loop id / report key).
+  const dismissKey=dl&&(dl.report_key||dl.id||dl.environment_key);
+  if(dl&&!hasActive&&!isLoopDismissed(dismissKey)){
     const envName=dl.environment_name||dl.environment_key;
     if(dl.parked){
       const err=dl.last_error?' Last error: '+String(dl.last_error).slice(0,180):'';
-      return banner('Deploy to '+envName+' failed '+dl.retry_count+' times (cap '+dl.retry_cap+'). The loop is paused for offline investigation. Open '+dl.report_key+' for the full timeline.'+err);
+      return banner('Deploy to '+envName+' failed '+dl.retry_count+' times (cap '+dl.retry_cap+'). The loop is paused for offline investigation. Open '+dl.report_key+' for the full timeline.'+err,{dismissKey});
     }
     const left=dl.attempts_remaining;const n=dl.retry_count;
-    return banner('Deploy to '+envName+' is failing: '+n+' failed attempt'+(n===1?'':'s')+' handed to the implementation manager (report '+dl.report_key+'). '+left+' retry'+(left===1?'':'ies')+' left before the loop is parked.');
+    return banner('Deploy to '+envName+' is failing: '+n+' failed attempt'+(n===1?'':'s')+' handed to the implementation manager (report '+dl.report_key+'). '+left+' retry'+(left===1?'':'ies')+' left before the loop is parked.',{dismissKey});
   }
   banner(null);
 }
-// Cycle run status banner (its own strip, so the stage bar stays visible).
+const DISMISSED_LOOP_KEY='te.loopDismissed';
+function isLoopDismissed(id){
+  if(!id)return false;
+  try{const raw=localStorage.getItem(DISMISSED_LOOP_KEY);const set=new Set(raw?JSON.parse(raw):[]);return set.has(id);}catch{return false;}
+}
+function dismissLoop(id){
+  if(!id)return;
+  try{const raw=localStorage.getItem(DISMISSED_LOOP_KEY);const set=new Set(raw?JSON.parse(raw):[]);set.add(id);const arr=[...set].slice(-50);localStorage.setItem(DISMISSED_LOOP_KEY,JSON.stringify(arr));}catch{}
+}
+// Terminal cycle banners (completed / failed / cancelled) stick around on the
+// server as the "last cycle" for a long time. Dismissed ones live in
+// localStorage so a reload keeps them hidden; a new cycle re-opens the lane
+// (different id) and the banner comes back for it.
+const DISMISSED_CYCLE_KEY='te.cycleDismissed';
+function isCycleDismissed(id){
+  if(!id)return false;
+  try{const raw=localStorage.getItem(DISMISSED_CYCLE_KEY);const set=new Set(raw?JSON.parse(raw):[]);return set.has(id);}catch{return false;}
+}
+function dismissCycle(id){
+  if(!id)return;
+  try{const raw=localStorage.getItem(DISMISSED_CYCLE_KEY);const set=new Set(raw?JSON.parse(raw):[]);set.add(id);const arr=[...set].slice(-50);localStorage.setItem(DISMISSED_CYCLE_KEY,JSON.stringify(arr));}catch{}
+}
+// Cycle run status: a big progress tile while something is in flight (so the
+// operator sees the preparation / iteration phase, elapsed time, and a progress
+// bar at a glance), and a compact strip once it has reached a terminal state.
 function cycleRunHtml(){
   const c=state.cycleRun;if(!c)return'';
+  // Terminal + dismissed → render nothing. The dismiss is per-cycle-id so a
+  // new cycle starts a fresh banner even if the previous one was dismissed.
+  if(c.status!=='running'&&isCycleDismissed(c.id))return'';
   const total=c.iterations_total,done=c.iterations_done;
   const envLabel=c.environment_name||c.environment_key||envName();
+  const elapsed=c.started_at?dur(serverNow()-ms(c.started_at)):'';
   if(c.status==='running'){
     const i=Math.min(total,done+1);
     const prep=c.preparation_phase;
-    const phase=prep==='tearing_down'?`Preparation 1/2: tearing the stack down`
-      :prep==='pruning'?`Preparation 2/2: pruning Docker (stopped containers, dangling images, build cache)`
-      :prep==='ready'?`Preparation complete — queuing iteration 1`
+    const phaseLabel=prep==='tearing_down'?'Preparation 1/2 · tearing the stack down'
+      :prep==='pruning'?'Preparation 2/2 · pruning Docker (stopped containers, dangling images, build cache)'
+      :prep==='ready'?'Preparation complete — queuing iteration 1'
       :`Iteration ${i} of ${total} in flight · ${done} completed`;
+    // Rough progress model: preparation is the first ~20% of iteration 0, the
+    // rest is distributed evenly across iterations. Enough to tell at a glance
+    // whether the cycle is just starting or near the end.
+    const perIter=100/Math.max(1,total);
+    const prepPct=prep==='tearing_down'?6:prep==='pruning'?14:prep==='ready'?18:0;
+    const basePct=prep?prepPct:Math.round(done*perIter);
+    const pct=Math.max(1,Math.min(99,basePct));
     const cleanTag=c.clean_start?' <span class="chip">Clean cycle</span>':'';
-    // Running banner uses the default `.banner` dark-amber tokens (amber-soft bg + amber text).
-    // The old inline `background:var(--amber-50,#fff7ed)` fell through to a near-white #fff7ed
-    // because --amber-50 is not defined in this theme, which made the already-bright amber text
-    // unreadable against it.
-    return `<div class="banner" style="margin:0 0 12px">Cycle ${esc(c.key)} on ${esc(envLabel)}${cleanTag}: ${esc(phase)}. <button class="btn" data-action="cancel-cycle" data-id="${esc(c.id)}">Cancel cycle</button></div>`;
+    const facts=`<div class="pbar-facts">
+      <span><span class="muted small">Phase</span><b>${esc(phaseLabel)}</b></span>
+      <span><span class="muted small">Iteration</span><b>${done} of ${total} done</b></span>
+      ${elapsed?`<span><span class="muted small">Elapsed</span><b data-elapsed="${esc(c.started_at)}">${esc(elapsed)}</b></span>`:''}
+    </div>`;
+    const bar=`<div class="progress-seg big"><span class="pass" style="flex-grow:${pct}"></span><span class="rest running" style="flex-grow:${100-pct}"></span></div>`;
+    return `<div class="pbar-wrap"><div class="pbar-detail pbar-detail-big pbar-detail-warn">
+      <div class="pbar-detail-head"><b>Cycle ${esc(c.key)}</b> on ${esc(envLabel)}${cleanTag}</div>
+      ${facts}${bar}
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-action="cancel-cycle" data-id="${esc(c.id)}">⏹ Cancel cycle</button></div>
+    </div></div>`;
   }
-  if(c.status==='completed')return `<div class="banner" style="margin:0 0 12px;background:var(--green-soft);border-color:var(--green);color:var(--green)">Cycle ${esc(c.key)} completed: ${total} iteration${total===1?'':'s'} finished on ${esc(envLabel)}.</div>`;
+  const dismiss=`<button class="btn" data-action="dismiss-cycle" data-id="${esc(c.id)}" title="Hide this message. A new cycle brings its own banner." style="margin-left:10px;padding:2px 10px;font-size:12px;line-height:1.2">×</button>`;
+  if(c.status==='completed')return `<div class="banner" style="margin:0 0 12px;background:var(--green-soft);border-color:var(--green);color:var(--green);display:flex;align-items:center;justify-content:space-between;gap:10px"><span>Cycle ${esc(c.key)} completed: ${total} iteration${total===1?'':'s'} finished on ${esc(envLabel)}${elapsed?` in ${esc(elapsed)}`:''}.</span>${dismiss}</div>`;
   if(c.status==='failed'){const err=c.last_error?' — '+esc(String(c.last_error).slice(0,180)):'';
-    return `<div class="banner" style="margin:0 0 12px;background:var(--red-soft);border-color:var(--red);color:var(--red)">Cycle ${esc(c.key)} failed at iteration ${done+1} of ${total}${err}</div>`;}
-  if(c.status==='cancelled')return `<div class="banner" style="margin:0 0 12px;background:var(--panel,#1b1e24);border-color:var(--border,#30363d);color:var(--muted,#9aa0a6)">Cycle ${esc(c.key)} cancelled after ${done} of ${total} iterations.</div>`;
+    return `<div class="banner" style="margin:0 0 12px;background:var(--red-soft);border-color:var(--red);color:var(--red);display:flex;align-items:center;justify-content:space-between;gap:10px"><span>Cycle ${esc(c.key)} failed at iteration ${done+1} of ${total}${err}</span>${dismiss}</div>`;}
+  if(c.status==='cancelled')return `<div class="banner" style="margin:0 0 12px;background:var(--panel,#1b1e24);border-color:var(--border,#30363d);color:var(--muted,#9aa0a6);display:flex;align-items:center;justify-content:space-between;gap:10px"><span>Cycle ${esc(c.key)} cancelled after ${done} of ${total} iterations.</span>${dismiss}</div>`;
   return '';
 }
 function renderEnvSelect(){
@@ -2637,16 +3247,13 @@ function renderAppSelect(){
 }
 // Views whose data only makes sense against a chosen environment. Everything
 // else (test cases, suites, config, reports, insights, catalog coverage) is
-// environment-free so the Env chip and Version input are hidden there.
+// environment-free. The env + version pickers now live inside the Overview
+// actions bar, so there is nothing to toggle in the top chrome any more —
+// this hook stays for the hidden fallbacks the function used to drive.
 const ENV_SCOPED_VIEWS=new Set(['home','overview','history','run','schedules','builds','config-infra']);
 function syncEnvAndVersionChips(){
-  const v=state.view||'overview';
-  const envNeeded=ENV_SCOPED_VIEWS.has(v);
-  const show=(id,on)=>{const n=el(id);if(n)n.hidden=!on;};
-  show('envLabel',envNeeded);
-  show('envSelect',envNeeded);
-  show('versionLabel',envNeeded);
-  const vi=el('appVersionInput');if(vi)vi.hidden=!envNeeded;
+  // The hidden <select id="envSelect"> and <input id="appVersionInput"> stay
+  // hidden; they only exist as state carriers for legacy readers.
 }
 async function switchApplication(key){
   if(!key||key===state.appKey)return;
@@ -2670,6 +3277,14 @@ async function switchApplication(key){
 async function queueExecution(body,label){
   const environmentId=body.environment_id||state.envId;
   if(!environmentId){toast('No environment available.');return;}
+  // A new run supersedes the previous error state. Clear the retry/parked
+  // banner and any terminal cycle banner so the operator doesn't see stale
+  // red/amber chrome on top of a run they just started. The live poll will
+  // restore anything that is still live server-side.
+  let changed=false;
+  if(state.deployLoop){state.deployLoop=null;changed=true;}
+  if(state.cycleRun&&state.cycleRun.status!=='running'){state.cycleRun=null;changed=true;}
+  if(changed){renderBanner();renderCurrentView();}
   // Stamp the version/branch picked in the top bar into the run's metadata.
   // The App-version column on Test runs reads this; the facets dropdown
   // auto-fills with any value that has been used before.
@@ -2780,7 +3395,19 @@ function handleAction(action,node){
   else if(action==='type-more')loadTypeCasesPage(false);
   else if(action==='sched-new'){if(state.schedFormOpen){state.schedFormOpen=false;renderCurrentView();}else openScheduleForm();}
   else if(action==='sched-save')saveSchedule(node);
+  else if(action==='create-run-save'){state.createRunResult=null;saveCreateRun(node);}
   else if(action==='fixes-reload')loadFixProposals();
+  else if(action==='defect-log-reload')loadDefectLog();
+  else if(action==='defect-dashboard-reload')loadDefectDashboard();
+  else if(action==='defect-set-resolution')setDefectResolution(node);
+  else if(action==='defect-bulk-fix-test')bulkDefectResolution('fix_test_case');
+  else if(action==='defect-bulk-fix-app')bulkDefectResolution('fix_application');
+  else if(action==='defect-bulk-other')bulkDefectResolution('other');
+  else if(action==='insights-summary-reload')loadInsightsSummary();
+  else if(action==='save-insights-settings')saveInsightsSettings(node);
+  else if(action==='clear-anthropic-key'){try{localStorage.removeItem('te.anthropicKey');}catch{}toast('Anthropic key cleared from this browser');renderCurrentView();}
+  else if(action==='apply-rec')applyRecommendation(node);
+  else if(action==='dismiss-instructions'){const m=el('recInstructionsModal');if(m)m.remove();}
   else if(action==='fix-reject')fixAction('reject',node);
   else if(action==='sched-toggle')scheduleAction('toggle',node);
   else if(action==='sched-run')scheduleAction('run',node);
@@ -2791,6 +3418,7 @@ function handleAction(action,node){
   else if(action==='report-case'){state.reportForm={...state.reportForm,title:'',appScope:'current',kind:'case',caseText:node.dataset.key,caseKeys:[],runSel:'date_range',from:'',to:'',status:'all',details:true,evidence:true};state.report={data:null,loading:false,error:null,busy:''};location.hash='#/reports';}
   else if(action==='cancel-all-runs')cancelAllRuns(node);
   else if(action==='cancel-cycle')cancelCycleRun(node.dataset.id,node);
+  else if(action==='dismiss-cycle'){dismissCycle(node.dataset.id);state.cycleRun=null;renderCurrentView();}
   else if(action==='coverage-refresh'){state.coverage=null;loadCoverage();renderCurrentView();}
   else if(action==='deploy-main')deployMain(node);
   else if(action==='deploy-stage'){state.deployStage=state.deployStage===node.dataset.stage?null:node.dataset.stage;renderCurrentView();}
@@ -2907,6 +3535,21 @@ function showRetentionError(msg){
   if(!err)return;
   if(!msg){err.hidden=true;err.textContent='';return;}
   err.hidden=false;err.textContent=msg;
+}
+async function saveInsightsSettings(btn){
+  const err=m=>formError('insightsSettingsError',m);err('');
+  const hours=Number(el('setInsightsRefresh').value);
+  if(!Number.isInteger(hours)||hours<1||hours>72)return err('Auto-refresh must be between 1 and 72 hours.');
+  const key=el('setAnthropicKey').value.trim();
+  btn.disabled=true;
+  try{
+    try{localStorage.setItem('te.insightsRefreshHours',String(hours));}catch{}
+    if(key){try{localStorage.setItem('te.anthropicKey',key);}catch{}}
+    toast('Insights settings saved'+(key?' · API key stored locally':''));
+    scheduleInsightsAutoRefresh();
+    renderCurrentView();
+  }catch(e){err('Save failed: '+e.message);}
+  finally{btn.disabled=false;}
 }
 async function saveFixerSettings(btn){
   const err=m=>formError('fixerError',m);err('');
@@ -3192,8 +3835,19 @@ function deployStatusHtml(){
     const fill=(s.state==='active'&&s.pct!=null)?`<span class="seg-fill" style="width:${s.pct}%"></span>`:'';
     return `<button class="pstage pstage-${s.tone||'idle'} st-${s.state}${open?' open':''}" data-action="deploy-stage" data-stage="${s.key}" title="${esc(s.label)} — click for detail">${fill}<span class="pstage-body">${pulse}<b>${esc(s.name)}</b><span class="pstage-label">${esc(s.label)}</span></span></button>`;
   }).join('<span class="pstage-arrow">›</span>');
-  const detail=state.deployStage?deployStageDetail(d,state.deployStage,stages):'';
-  return `<div class="pbar-wrap"><div class="pbar">${segs}</div>${detail}</div>`;
+  // Always keep a detail panel visible: if the user hasn't picked a stage,
+  // auto-expand whichever one is active (Deploy / Run / Tear down) so the
+  // user doesn't have to click to see what is happening — the "tearing down"
+  // status, its log, and any error come up as a big tile instead of a small
+  // row in the segmented bar.
+  const active=stages.find(s=>s.state==='active')||stages.find(s=>s.state==='failed');
+  const openKey=state.deployStage||(active&&active.key)||null;
+  const detail=openKey?deployStageDetail(d,openKey,stages):'';
+  // The detail block is styled bigger when the stage is active so the current
+  // phase reads at a glance; errors and the log tail inside stay unchanged.
+  const open=openKey?stages.find(s=>s.key===openKey):null;
+  const bigCls=open&&(open.state==='active'||open.state==='failed')?' pbar-detail-big pbar-detail-'+(open.tone||'idle'):'';
+  return `<div class="pbar-wrap"><div class="pbar">${segs}</div>${detail?detail.replace('<div class="pbar-detail"','<div class="pbar-detail'+bigCls+'"'):''}</div>`;
 }
 // Pick up a deployment already in flight for the current environment (started this session, via
 // the API, or by the feedback loop) so the overview progress bar shows it and survives a refresh.
@@ -3219,8 +3873,15 @@ async function deployMain(btn){
   if(choice==='deploy_run_teardown_loop'){return startCycleRun(btn,{clean_start:false});}
   if(choice==='clean_cycle'){return startCycleRun(btn,{clean_start:true});}
   const body={environment_id:state.envId,application:state.appKey,mode:choice==='deploy_only'?'deploy_only':'deploy_and_run',teardown_after_run:choice==='deploy_run_teardown'};
+  const v=currentAppVersion();if(v)body.ref=v;
   if(btn)btn.disabled=true;
-  state.deployStage=null;state.deployRun=null;
+  // A fresh deploy supersedes the previous error state. Clear the retry/parked
+  // banner and any terminal cycle banner locally so the user doesn't see
+  // "Deploy to X is failing" (or "Cycle X failed") while the new attempt is
+  // queued; the live poll will restore anything that is still live server-side.
+  state.deployStage=null;state.deployRun=null;state.deployLoop=null;
+  if(state.cycleRun&&state.cycleRun.status!=='running')state.cycleRun=null;
+  renderBanner();
   try{
     const res=await postJson('/api/v1/deployments',body);
     state.deploy=res.data;
@@ -3234,14 +3895,19 @@ async function deployMain(btn){
 async function startCycleRun(btn,opts){
   const clean=!!(opts&&opts.clean_start);
   const inp=el('cycleIterations');
-  const iterations=Math.max(1,Math.min(100,Number(inp&&inp.value)||state.cycleIterations||3));
+  const iterations=Math.max(1,Math.min(100,Number(inp&&inp.value)||state.cycleIterations||1));
   state.cycleIterations=iterations;
   const prompt=clean
     ?'Clean cycle on '+envName()+': tear down whatever is there, prune Docker (stopped containers, dangling images, old build cache), then deploy–run–tear down '+iterations+' times. Start?'
     :'Start cycle: deploy, run, tear down — repeated '+iterations+' times on '+envName()+'?';
   if(!confirm(prompt))return;
   if(btn)btn.disabled=true;
-  state.deployStage=null;state.deployRun=null;
+  // Same reasoning as deployMain: a new cycle supersedes any stale deploy-loop
+  // banner and any terminal cycle banner. Reset locally; the live poll
+  // re-asserts the record if it is still live server-side.
+  state.deployStage=null;state.deployRun=null;state.deployLoop=null;
+  if(state.cycleRun&&state.cycleRun.status!=='running')state.cycleRun=null;
+  state.deploy=null;renderBanner();
   try{
     const res=await postJson('/api/v1/cycle-runs',{application:state.appKey,environment:state.envId,iterations,clean_start:clean});
     state.cycleRun=res.data;
@@ -3468,7 +4134,7 @@ function parseHash(){
   else if(v==='case'&&arg){state.view='case';state.caseId=arg;state.caseTab=parts[2]==='runs'?'runs':'details';}
   else if(v==='method'&&arg){state.view='method';state.methodName=arg;}
   else if(v==='tag'&&arg){state.view='tag';state.tagName=arg;}
-  else if(v==='home'||v==='history'||v==='runs-running'||v==='runs-all'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-remote-triggers'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='fixes'||v==='reports'||v==='insights'||v==='catalog-coverage'||v==='record-new')state.view=v;
+  else if(v==='home'||v==='history'||v==='runs-running'||v==='runs-all'||v==='builds'||v==='baseline'||v==='config-retention'||v==='config-timeouts'||v==='config-per-type-retention'||v==='config-circuit-breaker'||v==='config-auto-fix'||v==='config-insights'||v==='config-remote-triggers'||v==='config-apps'||v==='config-envs'||v==='config-infra'||v==='schedules'||v==='create-run'||v==='fixes'||v==='defect-log'||v==='defect-dashboard'||v==='reports'||v==='insights'||v==='catalog-coverage'||v==='record-new')state.view=v;
   else state.view='overview';
 }
 async function onRoute(){
@@ -3531,11 +4197,14 @@ el('headedCheck').onchange=()=>{state.headed=el('headedCheck').checked;try{local
 (function initAutoFix(){
   try{state.autoFix=localStorage.getItem('te.autoFix')==='1';}catch{}
   try{const n=parseInt(localStorage.getItem('te.autoFixMax')||'',10);if(Number.isFinite(n)&&n>=1&&n<=20)state.autoFixMax=n;}catch{}
+  // Legacy stored values (default used to be 2) carry over per-browser; normalise them to the
+  // new default of 1 so operators don't accidentally fan out two attempts without noticing.
+  if(state.autoFixMax==null||state.autoFixMax<1)state.autoFixMax=1;
 })();
-function persistAutoFix(){try{localStorage.setItem('te.autoFix',state.autoFix?'1':'0');localStorage.setItem('te.autoFixMax',String(state.autoFixMax||2));}catch{}}
-function autoFixPayload(){return state.autoFix?{enabled:true,max_attempts:state.autoFixMax||2}:null;}
+function persistAutoFix(){try{localStorage.setItem('te.autoFix',state.autoFix?'1':'0');localStorage.setItem('te.autoFixMax',String(state.autoFixMax||1));}catch{}}
+function autoFixPayload(){return state.autoFix?{enabled:true,max_attempts:state.autoFixMax||1}:null;}
 function autoFixControlsHtml(){
-  return `<label class="type-check" style="margin-left:6px;white-space:nowrap" title="On a failing case, open a fix proposal and let the fixer-agent patch the test; otherwise redeploy + rerun up to the cap."><input type="checkbox" id="ovAutoFix"${state.autoFix?' checked':''}> Auto-fix on failure</label> <input type="number" id="ovAutoFixMax" min="1" max="20" step="1" value="${state.autoFixMax||2}" style="width:60px"${state.autoFix?'':' disabled'}> <span class="muted small">attempts</span>`;
+  return `<label class="type-check" style="margin-left:6px;white-space:nowrap" title="On a failing case, open a fix proposal and let the fixer-agent patch the test; otherwise redeploy + rerun up to the cap."><input type="checkbox" id="ovAutoFix"${state.autoFix?' checked':''}> Auto-fix on failure</label> <input type="number" id="ovAutoFixMax" min="1" max="20" step="1" value="${state.autoFixMax||1}" style="width:60px"${state.autoFix?'':' disabled'}> <span class="muted small">attempts</span>`;
 }
 
 // Application version: top-bar input. Hydrates from localStorage (default "main"),
@@ -3603,9 +4272,33 @@ content.addEventListener('input',e=>{
 });
 content.addEventListener('change',e=>{
   if(e.target.id==='deployMode'){state.deployMode=e.target.value;renderCurrentView();return;}
+  if(e.target.id==='ovEnvSelect'){switchEnvironment(e.target.value);return;}
+  if(e.target.id==='ovVersionSelect'){
+    const v=(e.target.value||'main').trim()||'main';
+    state.appVersion=v;
+    const hidden=el('appVersionInput');if(hidden)hidden.value=v;
+    try{localStorage.setItem('te.appVersion',v);}catch{}
+    return;
+  }
   if(e.target.id==='ovAutoFix'){state.autoFix=!!e.target.checked;persistAutoFix();renderCurrentView();return;}
   if(e.target.id==='ovAutoFixMax'){const n=Number(e.target.value);if(Number.isFinite(n)&&n>=1&&n<=20){state.autoFixMax=Math.round(n);persistAutoFix();}return;}
-  if(e.target.id==='cycleIterations'){const n=Math.max(1,Math.min(100,Number(e.target.value)||3));state.cycleIterations=n;e.target.value=String(n);return;}
+  if(e.target.id==='cycleIterations'){const n=Math.max(1,Math.min(100,Number(e.target.value)||1));state.cycleIterations=n;e.target.value=String(n);return;}
+  // Defect-log selection: individual tick + "select all" header checkbox.
+  if(e.target.matches('[data-defect-pick]')){
+    const id=e.target.dataset.defectPick;
+    if(!state.defectLogSelected)state.defectLogSelected=new Set();
+    if(e.target.checked)state.defectLogSelected.add(id);else state.defectLogSelected.delete(id);
+    renderCurrentView();
+    return;
+  }
+  if(e.target.id==='defectPickAll'){
+    const on=e.target.checked;
+    if(!state.defectLogSelected)state.defectLogSelected=new Set();
+    if(on){for(const r of (state.defectLog?.rows||[]))state.defectLogSelected.add(r.id);}
+    else{state.defectLogSelected.clear();}
+    renderCurrentView();
+    return;
+  }
   if(e.target.closest('#infraPolicy')){readInfraPolicyForm();return;}
   const form=e.target.closest('[data-form]');
   if(form){

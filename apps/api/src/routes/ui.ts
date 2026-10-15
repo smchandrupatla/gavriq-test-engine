@@ -532,35 +532,85 @@ export async function uiRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { id: string } }>('/api/v1/ui/executions/:id', async (req, reply) => {
-    const { rows } = await query(
-      `SELECT e.id, e.key, e.name, e.status, e.trigger_source, e.test_suite_id, e.test_case_ids, e.worker_id,
-              e.environment_id, e.created_at, e.started_at, e.finished_at, e.requested_by, e.remarks, e.metadata,
-              env.name AS environment_name, env.key AS environment_key, s.name AS suite_name
-       FROM executions e
-       LEFT JOIN environments env ON env.id = e.environment_id
-       LEFT JOIN test_suites s ON s.id = e.test_suite_id
-       WHERE e.id::text = $1 OR e.key = $1`,
+    // Resolve the id to either a single execution or every execution in a
+    // run_group. Grouped lookup lets a UI link to a run (one row per
+    // metadata.run_group) open the aggregate view with cases from every worker.
+    const { rows: groupMembers } = await query(
+      `SELECT * FROM executions WHERE metadata->>'run_group' = $1 ORDER BY created_at`,
       [req.params.id]
     );
-    if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
-    const exec = rows[0];
-
+    let execs: any[];
+    if (groupMembers.length) {
+      execs = groupMembers;
+    } else {
+      const { rows: solo } = await query(
+        `SELECT * FROM executions WHERE id::text = $1 OR key = $1`,
+        [req.params.id]
+      );
+      if (!solo.length) return reply.status(404).send({ error: 'Execution not found' });
+      execs = solo;
+    }
+    // Hydrate environment + suite names for the first execution; the rest share them.
+    const first = execs[0];
+    const { rows: envRows } = await query(
+      `SELECT env.name AS environment_name, env.key AS environment_key, s.name AS suite_name
+         FROM executions e
+         LEFT JOIN environments env ON env.id = e.environment_id
+         LEFT JOIN test_suites s ON s.id = e.test_suite_id
+        WHERE e.id = $1`,
+      [first.id]
+    );
+    const chrome = envRows[0] || {};
+    // Union the planned case ids across every execution in the group so the
+    // run shows every case the operator queued, not just the first worker's slice.
+    const allCaseIds = Array.from(new Set(
+      (execs as any[]).flatMap((e: any) => (e.test_case_ids || [])).map(String)
+    ));
+    const execIds = (execs as any[]).map((e: any) => e.id);
+    // One result row per (test_case_id) across every execution in the group.
+    // DISTINCT ON picks the latest result (ORDER BY created_at DESC).
     const [results, cases] = await Promise.all([
       query(
-        `SELECT er.id, er.test_case_id, er.status, er.duration_ms, er.message, er.classification, er.remarks, er.verdict,
+        `SELECT DISTINCT ON (er.test_case_id)
+                er.id, er.test_case_id, er.status, er.duration_ms, er.message, er.classification, er.remarks, er.verdict,
                 er.started_at, COALESCE(er.finished_at, er.created_at) AS finished_at,
+                er.execution_id,
                 (SELECT count(*)::int FROM evidence ev WHERE ev.execution_result_id = er.id) AS evidence_count
          FROM execution_results er
-         WHERE er.execution_id = $1
-         ORDER BY er.created_at`,
-        [exec.id]
+         WHERE er.execution_id = ANY($1::uuid[])
+         ORDER BY er.test_case_id, er.created_at DESC`,
+        [execIds]
       ),
-      query(`SELECT id, key, name, execution_method FROM test_cases WHERE id = ANY($1::uuid[])`, [
-        exec.test_case_ids || [],
-      ]),
+      query(`SELECT id, key, name, execution_method FROM test_cases WHERE id = ANY($1::uuid[])`, [allCaseIds]),
     ]);
 
-    return reply.send({ data: { ...exec, results: results.rows, cases: cases.rows } });
+    // The "primary" execution carries the chrome (status + started/finished).
+    // For a run_group we aggregate the status across its members.
+    const anyActive = (execs as any[]).some((e: any) => ['queued','preparing','running','claiming'].includes(e.status));
+    const anyFailed = (execs as any[]).some((e: any) => ['failed','error','timed_out'].includes(e.status));
+    const allCancelled = (execs as any[]).every((e: any) => e.status === 'cancelled');
+    const groupStatus = anyActive ? 'running' : anyFailed ? 'failed' : allCancelled ? 'cancelled' : 'passed';
+    const minCreated = (execs as any[]).reduce((min: any, e: any) => !min || new Date(e.created_at) < new Date(min) ? e.created_at : min, null);
+    const minStarted = (execs as any[]).reduce((min: any, e: any) => e.started_at && (!min || new Date(e.started_at) < new Date(min)) ? e.started_at : min, null);
+    const maxFinished = anyActive ? null : (execs as any[]).reduce((max: any, e: any) => e.finished_at && (!max || new Date(e.finished_at) > new Date(max)) ? e.finished_at : max, null);
+    const workerIds = Array.from(new Set((execs as any[]).map((e: any) => e.worker_id).filter(Boolean)));
+
+    return reply.send({
+      data: {
+        ...first,
+        id: req.params.id, // keep the id the caller used (group id or exec id)
+        status: groupMembers.length ? groupStatus : first.status,
+        created_at: groupMembers.length ? minCreated : first.created_at,
+        started_at: groupMembers.length ? minStarted : first.started_at,
+        finished_at: groupMembers.length ? maxFinished : first.finished_at,
+        test_case_ids: allCaseIds,
+        worker_id: workerIds.length === 1 ? workerIds[0] : (workerIds.length > 1 ? `${workerIds.length} workers` : first.worker_id),
+        execution_count: execs.length,
+        ...chrome,
+        results: results.rows,
+        cases: cases.rows,
+      },
+    });
   });
 
   app.post<{ Body: { case_ids?: unknown; limit?: unknown; environment_id?: unknown; application_key?: unknown; all?: unknown } }>('/api/v1/ui/history', async (req, reply) => {
@@ -709,6 +759,134 @@ export async function uiRoutes(app: FastifyInstance) {
     });
   });
 
+  // Grouped run list: one row per metadata.run_group (an execution with no
+  // group id falls back to its own id, so a solo run still shows as a single
+  // row). Aggregates case-level counts across every execution in the group so
+  // the console shows the cumulative pass / fail / queued / running count even
+  // when two workers drained the same run.
+  app.get('/api/v1/ui/run-groups', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const envId = await resolveEnvironmentId(q.environment_id);
+    const status = typeof q.status === 'string' && STATUSES.has(q.status) ? q.status : null;
+    const trigger = typeof q.trigger_source === 'string' && q.trigger_source.trim() ? q.trigger_source.trim() : null;
+    const version = typeof q.application_version === 'string' && q.application_version.trim() ? q.application_version.trim() : null;
+    const from = parseSince(q.from);
+    const to = parseSince(q.to);
+    const limit = clampInt(q.limit, 50, 200);
+    const offset = Math.max(0, Math.floor(Number(q.offset) || 0));
+
+    const clauses = [`e.metadata->>'application_key' = $1`];
+    const params: unknown[] = [appKey];
+    if (envId) { params.push(envId); clauses.push(`e.environment_id = $${params.length}`); }
+    if (trigger) { params.push(trigger); clauses.push(`e.trigger_source = $${params.length}`); }
+    if (version) { params.push(version); clauses.push(`e.metadata->>'application_version' = $${params.length}`); }
+    if (from) { params.push(from); clauses.push(`e.created_at >= $${params.length}::timestamptz`); }
+    if (to) { params.push(to); clauses.push(`e.created_at <= $${params.length}::timestamptz`); }
+    const where = clauses.join(' AND ');
+
+    // Group-level status: running if any exec is active, else failed if any
+    // non-pass terminal, else cancelled if everyone cancelled, else passed.
+    // The groups CTE below reads from `exec` (no alias), so the FILTER
+    // predicates reference `status` directly — not `e.status`, which would
+    // break out of the exec CTE's scope.
+    const groupStatus = `CASE
+      WHEN count(*) FILTER (WHERE status IN ('queued','preparing','running')) > 0 THEN 'running'
+      WHEN count(*) FILTER (WHERE status IN ('failed','error','timed_out')) > 0 THEN 'failed'
+      WHEN count(*) FILTER (WHERE status = 'cancelled') = count(*) THEN 'cancelled'
+      ELSE 'passed'
+    END`;
+
+    // The main grouped SELECT: use COALESCE(run_group, id) as the group key
+    // so a solo execution still appears as one row. Case-level counts come
+    // from execution_results joined back to the group's execution ids.
+    const baseSelect = `WITH exec AS (
+      SELECT e.id, e.environment_id,
+             COALESCE(e.metadata->>'run_group', e.id::text) AS group_id,
+             COALESCE(e.name, e.key) AS name, e.key, e.status, e.trigger_source,
+             e.created_at, e.started_at, e.finished_at,
+             cardinality(e.test_case_ids)::int AS planned_cases,
+             e.metadata->>'application_key' AS application_key,
+             e.metadata->>'application_version' AS application_version
+        FROM executions e
+       WHERE ${where}
+    ),
+    groups AS (
+      SELECT group_id,
+             min(created_at) AS created_at,
+             min(started_at) AS started_at,
+             max(finished_at) AS finished_at,
+             count(*)::int AS executions,
+             max(application_key) AS application_key,
+             max(application_version) AS application_version,
+             max(trigger_source) AS trigger_source,
+             (array_agg(environment_id) FILTER (WHERE environment_id IS NOT NULL))[1] AS environment_id,
+             (array_agg(name ORDER BY created_at) FILTER (WHERE name IS NOT NULL))[1] AS name,
+             (array_agg(key ORDER BY created_at) FILTER (WHERE key IS NOT NULL))[1] AS key,
+             sum(planned_cases)::int AS planned_cases,
+             ${groupStatus} AS status
+        FROM exec
+       GROUP BY group_id
+    ),
+    results AS (
+      SELECT COALESCE(e.metadata->>'run_group', e.id::text) AS group_id,
+             count(*)::int AS done,
+             count(*) FILTER (WHERE er.status = 'passed')::int AS passed,
+             count(*) FILTER (WHERE er.status IN ('failed','error','timed_out'))::int AS failed,
+             count(*) FILTER (WHERE er.status NOT IN ('passed','failed','error','timed_out'))::int AS other
+        FROM execution_results er
+        JOIN executions e ON e.id = er.execution_id
+       WHERE e.metadata->>'application_key' = $1
+       GROUP BY group_id
+    )
+    SELECT g.group_id AS id, g.key, g.name, g.status, g.trigger_source,
+           g.environment_id, env.name AS environment_name,
+           g.created_at, g.started_at, g.finished_at,
+           g.executions,
+           g.planned_cases AS total,
+           COALESCE(r.done, 0) AS done,
+           COALESCE(r.passed, 0) AS passed,
+           COALESCE(r.failed, 0) AS failed,
+           COALESCE(r.other, 0) AS other,
+           GREATEST(0, g.planned_cases - COALESCE(r.done, 0)) AS queued,
+           COALESCE(app.name, g.application_key) AS application_name,
+           g.application_version
+      FROM groups g
+      LEFT JOIN results r ON r.group_id = g.group_id
+      LEFT JOIN environments env ON env.id = g.environment_id
+      LEFT JOIN applications app ON app.key = g.application_key`;
+
+    const whereFilter = status ? `WHERE g.status = $${params.length + 1}` : '';
+    if (status) params.push(status);
+    const sql = `${baseSelect}
+      ${whereFilter}
+      ORDER BY (g.status = 'running') DESC, g.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}`;
+    const countSql = `${baseSelect}
+      ${whereFilter}`;
+
+    const [rows, totalRows, facets] = await Promise.all([
+      query(sql, params),
+      query(`SELECT count(*)::int AS c FROM (${countSql}) t`, params),
+      query(
+        `SELECT array_agg(DISTINCT e.trigger_source) FILTER (WHERE e.trigger_source IS NOT NULL) AS triggers,
+                array_agg(DISTINCT e.metadata->>'application_version') FILTER (WHERE e.metadata ? 'application_version') AS versions
+         FROM executions e WHERE e.metadata->>'application_key' = $1`,
+        [appKey]
+      ),
+    ]);
+
+    return reply.send({
+      data: rows.rows,
+      total: totalRows.rows[0]?.c ?? 0,
+      limit, offset,
+      facets: {
+        triggers: facets.rows[0]?.triggers || [],
+        versions: facets.rows[0]?.versions || [],
+      },
+    });
+  });
+
   // Delete executions in bulk. Hard-delete: execution_results and remarks
   // cascade; evidence rows are set to NULL. Caller must send a non-empty
   // {ids: [uuid, ...]} body — refuses an empty list so an accidental
@@ -770,6 +948,203 @@ export async function uiRoutes(app: FastifyInstance) {
       data: {
         runs: builds.rows.map((r: any) => ({ ...r, duration_ms: Number(r.duration_ms) })),
         top_failing: top.rows,
+      },
+    });
+  });
+
+  // Holistic Quality Insights summary — a single cheap aggregation the console
+  // can show at the top of the Insights page. Covers:
+  //   - never-run cases
+  //   - top-passing / flaky cases
+  //   - average case duration
+  //   - execution duration + size histogram
+  //   - worker usage (max concurrent on the window)
+  //   - rules-based recommendations (actionable text)
+  app.get('/api/v1/ui/insights-summary', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    const appKey = q.application_key || 'sand-bench';
+    const windowDays = Math.min(90, Math.max(1, Number(q.window_days) || 30));
+
+    // Resolve the application id first — the executions table isn't joined
+    // directly to applications; executions are scoped either by metadata
+    // (application_key stamped on the run) or by their test case ids. We take
+    // the broad view: any execution_result whose case belongs to this app.
+    const appRow = await query<any>(`SELECT id FROM applications WHERE key = $1`, [appKey]);
+    const appId = appRow.rows[0]?.id;
+    if (!appId) return reply.send({ data: { window_days: windowDays, totals: {}, flakiest: [], longest: [], run_size_buckets: {}, recommendations: [] } });
+
+    const [caseAgg, executions, workers] = await Promise.all([
+      // Per-case aggregates over the window from execution_results.
+      query<any>(
+        `WITH last AS (
+           SELECT er.test_case_id,
+                  count(*)::int AS runs,
+                  count(*) FILTER (WHERE er.status = 'passed')::int AS passed,
+                  count(*) FILTER (WHERE er.status IN ('failed','error'))::int AS failed,
+                  avg(er.duration_ms)::bigint AS avg_duration_ms
+             FROM execution_results er
+             JOIN test_cases tc ON tc.id = er.test_case_id
+            WHERE tc.application_id = $1
+              AND er.created_at > now() - ($2::int * interval '1 day')
+            GROUP BY er.test_case_id
+         )
+         SELECT c.id, c.key, c.name,
+                COALESCE(l.runs,0)::int AS runs,
+                COALESCE(l.passed,0)::int AS passed,
+                COALESCE(l.failed,0)::int AS failed,
+                COALESCE(l.avg_duration_ms,0)::bigint AS avg_duration_ms
+           FROM test_cases c
+      LEFT JOIN last l ON l.test_case_id = c.id
+          WHERE c.application_id = $1`,
+        [appId, windowDays]
+      ),
+      // Per-run duration + case count — used for the "size of each test run" chart.
+      // Executions are scoped by their metadata.application_key OR by the fact
+      // that any of their test_case_ids belongs to this app's cases.
+      query<any>(
+        `SELECT ex.id, ex.key, ex.name, ex.status,
+                COALESCE(cardinality(ex.test_case_ids),0)::int AS cases,
+                CASE WHEN ex.started_at IS NULL THEN NULL
+                     ELSE EXTRACT(EPOCH FROM (COALESCE(ex.finished_at, now()) - ex.started_at)) * 1000
+                END AS duration_ms,
+                ex.started_at, ex.finished_at, ex.worker_id
+           FROM executions ex
+          WHERE (ex.metadata->>'application_key' = $1
+                 OR ex.test_case_ids && (SELECT COALESCE(array_agg(id),'{}'::uuid[]) FROM test_cases WHERE application_id = $2))
+            AND ex.created_at > now() - ($3::int * interval '1 day')
+          ORDER BY ex.started_at DESC NULLS LAST
+          LIMIT 500`,
+        [appKey, appId, windowDays]
+      ),
+      // Distinct workers that drained a run for this app over the window.
+      query<any>(
+        `SELECT count(DISTINCT ex.worker_id) FILTER (WHERE ex.worker_id IS NOT NULL)::int AS used_workers
+           FROM executions ex
+          WHERE (ex.metadata->>'application_key' = $1
+                 OR ex.test_case_ids && (SELECT COALESCE(array_agg(id),'{}'::uuid[]) FROM test_cases WHERE application_id = $2))
+            AND ex.created_at > now() - ($3::int * interval '1 day')`,
+        [appKey, appId, windowDays]
+      ),
+    ]);
+
+    const cases = caseAgg.rows;
+    const neverRun = cases.filter((c: any) => c.runs === 0).length;
+    const everRun = cases.length - neverRun;
+    const passRate = (c: any) => (c.runs > 0 ? c.passed / c.runs : 0);
+    const alwaysPass = cases.filter((c: any) => c.runs >= 3 && c.failed === 0).length;
+    const flaky = cases.filter((c: any) => c.runs >= 3 && c.passed > 0 && c.failed > 0).length;
+    const alwaysFail = cases.filter((c: any) => c.runs >= 3 && c.passed === 0 && c.failed > 0).length;
+    const totalRuns = cases.reduce((n: number, c: any) => n + c.runs, 0);
+    const totalFail = cases.reduce((n: number, c: any) => n + c.failed, 0);
+    const avgFailRate = totalRuns > 0 ? totalFail / totalRuns : 0;
+    const avgDurMs = everRun > 0
+      ? Math.round(cases.filter((c: any) => c.runs > 0).reduce((n: number, c: any) => n + Number(c.avg_duration_ms || 0), 0) / Math.max(1, everRun))
+      : 0;
+
+    const flakiest = cases
+      .filter((c: any) => c.runs >= 3)
+      .map((c: any) => ({ ...c, pass_rate: passRate(c), avg_duration_ms: Number(c.avg_duration_ms || 0) }))
+      .sort((a: any, b: any) => Math.abs(0.5 - a.pass_rate) - Math.abs(0.5 - b.pass_rate))
+      .slice(0, 10);
+    const longest = cases
+      .map((c: any) => ({ ...c, avg_duration_ms: Number(c.avg_duration_ms || 0) }))
+      .filter((c: any) => c.runs > 0)
+      .sort((a: any, b: any) => b.avg_duration_ms - a.avg_duration_ms)
+      .slice(0, 10);
+
+    // Per-run size histogram buckets: cases per run, grouped.
+    const runs = executions.rows.map((r: any) => ({ ...r, duration_ms: r.duration_ms == null ? null : Number(r.duration_ms) }));
+    const bucket = (n: number) => (n <= 1 ? '1' : n <= 5 ? '2-5' : n <= 25 ? '6-25' : n <= 100 ? '26-100' : '100+');
+    const runSizeBuckets: Record<string, number> = {};
+    for (const r of runs) runSizeBuckets[bucket(r.cases)] = (runSizeBuckets[bucket(r.cases)] || 0) + 1;
+
+    const workerCounts = workers.rows[0] || { used_workers: 0 };
+    workerCounts.distinct_workers = workerCounts.used_workers;
+
+    // Rules-based recommendations — actionable text plus a structured `apply`
+    // payload the client can act on when the operator agrees. Shape:
+    //   { kind: 'run-cases', case_ids, label }      queue a run for those cases
+    //   { kind: 'open-case', case_id }              deep-link to a case screen
+    //   { kind: 'open-fix-log' }                    open the fix log view
+    //   { kind: 'show-instructions', text }         show an instructions dialog
+    //   { kind: 'enable-auto-fix' }                 flip auto-fix on
+    const neverRunIds = cases.filter((c: any) => c.runs === 0).map((c: any) => c.id).slice(0, 500);
+    const flakyIds = flakiest.map((c: any) => c.id).slice(0, 50);
+    const alwaysFailIds = cases.filter((c: any) => c.runs >= 3 && c.passed === 0 && c.failed > 0).map((c: any) => c.id).slice(0, 50);
+    const longestFirst = longest[0];
+
+    const recs: Array<{ id: string; severity: string; title: string; action: string; detail: string; apply?: unknown }> = [];
+    if (neverRun > 0)
+      recs.push({
+        id: 'rec-never-run', severity: 'high',
+        title: `${neverRun} test case${neverRun === 1 ? '' : 's'} never ran in the last ${windowDays} days`,
+        action: 'Create a run for the never-run cases',
+        detail: 'Open Create run, pick scope "All", filter the catalogue to the never-run cases or run all cases on the environment.',
+        apply: { kind: 'run-cases', case_ids: neverRunIds, label: `${neverRun} never-run case${neverRun === 1 ? '' : 's'}` },
+      });
+    if (flaky >= 3)
+      recs.push({
+        id: 'rec-flaky', severity: 'medium',
+        title: `${flaky} flaky case${flaky === 1 ? '' : 's'} (sometimes pass, sometimes fail)`,
+        action: 'Rerun the flakiest cases to shake out intermittents',
+        detail: 'Flaky tests mask real regressions. Rerunning them generates more data to classify intermittent vs. real; the loop can then stabilise them with auto-fix.',
+        apply: { kind: 'run-cases', case_ids: flakyIds, label: `top ${flakyIds.length} flaky case${flakyIds.length === 1 ? '' : 's'}` },
+      });
+    if (alwaysFail >= 1)
+      recs.push({
+        id: 'rec-always-fail', severity: 'high',
+        title: `${alwaysFail} case${alwaysFail === 1 ? '' : 's'} fail on every recent run`,
+        action: 'Open the fix log and rerun the failing cases',
+        detail: 'A case that only fails produces noise. Fix the underlying defect or disable the case until a fix lands. Applying this reruns them with auto-fix on.',
+        apply: { kind: 'run-cases', case_ids: alwaysFailIds, label: `${alwaysFailIds.length} always-failing case${alwaysFailIds.length === 1 ? '' : 's'}`, auto_fix: { enabled: true, max_attempts: 2 } },
+      });
+    if (avgFailRate > 0.1)
+      recs.push({
+        id: 'rec-fail-rate', severity: 'medium',
+        title: `Average failure rate is ${(avgFailRate * 100).toFixed(1)}%`,
+        action: 'Enable the auto-fix loop so failing cases retry automatically',
+        detail: `More than 1 in 10 case results in the last ${windowDays} days failed. Turning auto-fix on makes a transient failure retry without a redeploy; a real defect triggers the fixer agent (or files a defect in production).`,
+        apply: { kind: 'enable-auto-fix' },
+      });
+    if (avgDurMs > 60_000 && longestFirst)
+      recs.push({
+        id: 'rec-slow-cases', severity: 'low',
+        title: `Average case duration is ${(avgDurMs / 1000).toFixed(1)}s`,
+        action: 'Open the slowest case to see where the time is spent',
+        detail: 'Slow cases eat worker time. The Longest-running list below opens the top one so you can look at step durations and consider trimming or splitting it.',
+        apply: { kind: 'open-case', case_id: longestFirst.id, label: longestFirst.name || longestFirst.key },
+      });
+    if (workerCounts.used_workers <= 1 && runs.length > 10)
+      recs.push({
+        id: 'rec-add-worker', severity: 'medium',
+        title: `Only ${workerCounts.used_workers} worker${workerCounts.used_workers === 1 ? '' : 's'} drained runs in the window`,
+        action: 'Start another worker to parallelise',
+        detail: 'A second worker on the same application roughly halves wall-clock time for a batch; the planner distributes runs across them.',
+        apply: { kind: 'show-instructions', title: 'Start another worker', text: 'On the host:\n\n  cd /path/to/gavriq-test-engine\n  docker compose -f docker-compose.yml up -d --scale test-engine-worker=2\n\nThe new worker will register and start claiming runs within ~30s. Check /api/v1/workers to confirm.' },
+      });
+    if (!recs.length)
+      recs.push({ id: 'rec-ok', severity: 'none', title: 'No urgent recommendations', action: '', detail: `Everything looks healthy over the last ${windowDays} days. Keep the auto-fix loop armed and the catalog groomed.` });
+
+    return reply.send({
+      data: {
+        window_days: windowDays,
+        totals: {
+          cases: cases.length,
+          never_run: neverRun,
+          ever_run: everRun,
+          always_pass: alwaysPass,
+          flaky,
+          always_fail: alwaysFail,
+          avg_fail_rate: avgFailRate,
+          avg_duration_ms: avgDurMs,
+          runs: runs.length,
+          max_workers: Number(workerCounts.used_workers || 0),
+          distinct_workers: Number(workerCounts.distinct_workers || 0),
+        },
+        flakiest,
+        longest,
+        run_size_buckets: runSizeBuckets,
+        recommendations: recs,
       },
     });
   });

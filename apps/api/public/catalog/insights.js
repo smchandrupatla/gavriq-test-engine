@@ -289,13 +289,19 @@ function renderInsightsView(){
   const q=qiState();
   if(q.app!==state.appKey){clearTimeout(q.timer);Object.assign(q,{app:state.appKey,list:null,ai:null,id:null,doc:null,error:null,busy:false,loading:false});}
   if(q.list===null&&!q.loading)qiLoad();
-  // The console re-renders the current view on every live poll; this view only changes when its own data does.
-  const sig=JSON.stringify([q.app,q.id,q.doc&&[q.doc.id,q.doc.status],q.list&&q.list.map(r=>[r.id,r.status]),q.busy,q.error,q.tab,q.ai,state.applications.length,(state.cases||[]).length]);
+  // Holistic summary rides at the top of the view — pre-existing versioned
+  // review stays below it. The summary's own signature is folded into the
+  // sig cache so a refresh of it re-renders this view.
+  const s=state.insightsSummary||{};
+  const sig=JSON.stringify([q.app,q.id,q.doc&&[q.doc.id,q.doc.status],q.list&&q.list.map(r=>[r.id,r.status]),q.busy,q.error,q.tab,q.ai,state.applications.length,(state.cases||[]).length,s.loadedAt||null,s.loading||false,s.error||null]);
   const host=el('content'),cur=host.firstElementChild;
   if(cur&&cur.dataset.qi===sig)return;
   const wrap=document.createElement('div');
-  wrap.dataset.qi=sig;wrap.innerHTML=qiHtml(q);
+  wrap.dataset.qi=sig;
+  const summaryHtml=(typeof insightsSummaryHtml==='function')?insightsSummaryHtml():'';
+  wrap.innerHTML=summaryHtml+qiHtml(q);
   host.replaceChildren(wrap);
+  if(typeof scheduleInsightsAutoRefresh==='function')scheduleInsightsAutoRefresh();
   qiDraw();
 }
 (function(){

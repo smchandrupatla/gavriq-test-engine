@@ -62,6 +62,18 @@ export const ENGINE_SUITES: SuiteDef[] = [
   { key: 'te-chaos', name: 'Engine graceful degradation', description: 'Duplicate, late and partial worker reports, error floods and read storms.', typeKey: 'chaos', category: 'qc' },
   { key: 'te-compliance', name: 'Engine compliance evidence', description: 'Audit events, exit criteria, safety policy and secrets by reference.', typeKey: 'compliance', category: 'qc' },
   { key: 'te-dr', name: 'Engine durability & recovery', description: 'Abandoned-run recovery, idempotent re-reports and multi-path read consistency.', typeKey: 'drRecovery', category: 'qc' },
+  // --------------------------------------------------------------------
+  // Commit gate + Release gate for the test engine itself (Oct 2026).
+  // Pattern mirrors Sand Bench's own CommitGate/ReleaseGate: a cheap set
+  // runs before any commit (shape, scope resolution, console render); a
+  // broader set gates a release (full end-to-end Create run, scheduling,
+  // defect-log reviewer flow). Separate in-container / out-container
+  // suites so CI can split them by workspace.
+  // --------------------------------------------------------------------
+  { key: 'te-commit-gate-in-container', name: 'Commit gate · in-container', description: 'Lightweight API shape checks that run inside the engine image before a commit lands. Covers the Create run scope resolver and the defect-log reviewer workflow.', typeKey: 'api', category: 'qa' },
+  { key: 'te-commit-gate-out-container', name: 'Commit gate · out-container', description: 'Browser-side Create run flow (types / suite / case / all) and the Overview chrome, executed by Playwright from the host before a commit lands.', typeKey: 'screen', category: 'qa' },
+  { key: 'te-release-gate-in-container', name: 'Release gate · in-container', description: 'Broader API + data-consistency checks that gate a release: run-group aggregation, run-planner, insights summary, defect-log bulk workflow, auto-fix handoff.', typeKey: 'integration', category: 'qa' },
+  { key: 'te-release-gate-out-container', name: 'Release gate · out-container', description: 'Full browser-side acceptance of the Create run flow + Overview chrome + Defect log reviewer bulk apply, executed by Playwright before a release goes out.', typeKey: 'usecase', category: 'qa' },
 ];
 
 export const ENGINE_CASES: CaseDef[] = [

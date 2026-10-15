@@ -809,6 +809,28 @@ CREATE INDEX IF NOT EXISTS defect_log_run_idx ON defect_log (run_id);
 -- on a defect at the moment it is sent, so the record shows who received it.
 ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS implementation_manager TEXT;
 
+-- Reviewer baseline decision: once a defect lands, a reviewer picks one of
+-- three resolutions so the downstream fixer / implementation manager knows
+-- which side of the gap to close.
+--
+--   fix_test_case  = the application is the baseline — the test is wrong and
+--                    should be rewritten against the application's current
+--                    behaviour (handed to the fixer agent / catalog editor).
+--   fix_application = the test case is the baseline — the application has a
+--                    real defect and should be fixed (handed to the dev team
+--                    through the usual implementation-manager loop).
+--   other          = something else (e.g. flake, environment, duplicate).
+--                    resolution_notes carries the specifics.
+--
+-- Null means "not yet reviewed". The three canonical values are enforced
+-- client- + server-side; the column is TEXT so adding a value later only
+-- needs the UI + validator to change.
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution              TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_reviewer     TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_notes        TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_at           TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS defect_log_resolution_idx ON defect_log (resolution);
+
 -- A sent defect's report carries its application key so the right application's implementation
 -- manager (and feedback loop) picks it up, even for a manual defect with no execution behind it.
 ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS application_key TEXT;

@@ -1197,4 +1197,121 @@ C.push(
   })
 );
 
+// ---------------------------------------------------------------------
+// Commit gate / Release gate — in-container (HTTP) cases
+//
+// Fast API-level guards that run from a worker inside the engine's own
+// network before a commit lands. Pattern mirrors Sand Bench's convention:
+// commit gate = cheap API shape checks; release gate = cross-endpoint
+// contracts gating a release.
+// ---------------------------------------------------------------------
+C.push(
+  {
+    key: 'TE-CG-API-RUNS-SCOPE-TYPES',
+    name: 'Commit gate · POST /api/v1/runs resolves a test_types scope server-side',
+    objective: 'POST a run request with scope.test_types=[smoke] to the engine and confirm it comes back with run_id + non-zero total_cases.',
+    description: 'The Create run UI delegates scope resolution to the server. This case asserts the server-side resolver on POST /api/v1/runs handles scope.test_types correctly — the whole point of the fix for the client-side "Nothing to run" bug.',
+    suiteKey: 'te-commit-gate-in-container', testType: 'api', method: 'http', severity: 'critical', priority: 'p0',
+    preconditions: 'Engine reachable; the test engine application has at least one Smoke-type case on engine-local.',
+    steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', headers: { 'content-type': 'application/json' },
+        body: { application: 'gavriq-test-engine', environment: 'engine-local', scope: { test_types: ['smoke'] }, trigger_source: 'commit-gate' },
+        expected_status: 202,
+        expect_json: [{ path: 'data.run_id', exists: true }, { path: 'data.total_cases', min: 1 }],
+        description: 'POST /runs with scope.test_types' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'api', 'scope-resolver'],
+    dataProfile: { profile: 'write-once', data: 'POST /api/v1/runs with scope.test_types=["smoke"].', source: 'Hand-crafted.' },
+    expected: 'HTTP 202 with run_id + total_cases >= 1.',
+  },
+  {
+    key: 'TE-CG-API-RUNS-SCOPE-ALL',
+    name: 'Commit gate · POST /api/v1/runs accepts the no-scope "all" request',
+    objective: 'POST a run request with no scope and confirm the engine queues it for every runnable case on the application + environment.',
+    description: 'A no-scope request is the "Everything" path from Create run. The server must still return a run_id and a total_cases that matches the application catalog on that environment.',
+    suiteKey: 'te-commit-gate-in-container', testType: 'api', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; the test engine application has cases on engine-local.',
+    steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', headers: { 'content-type': 'application/json' },
+        body: { application: 'gavriq-test-engine', environment: 'engine-local', trigger_source: 'commit-gate' },
+        expected_status: 202,
+        expect_json: [{ path: 'data.run_id', exists: true }, { path: 'data.total_cases', min: 1 }],
+        description: 'POST /runs with no scope' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'api', 'scope-resolver'],
+    dataProfile: { profile: 'write-once', data: 'POST /api/v1/runs without a scope.', source: 'Hand-crafted.' },
+    expected: 'HTTP 202 with run_id + total_cases >= 1.',
+  },
+  {
+    key: 'TE-CG-API-DEFECT-RESOLUTION',
+    name: 'Commit gate · PATCH /api/v1/defect-log/:id accepts a resolution',
+    objective: 'Create a manual defect, PATCH it with resolution=fix_test_case, and confirm the field + the reviewer + the timestamp are all persisted.',
+    description: 'The reviewer baseline-decision workflow is the Create run / fixer-agent handoff. This case asserts the API persists the resolution + stamps resolution_reviewer + resolution_at automatically.',
+    suiteKey: 'te-commit-gate-in-container', testType: 'api', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; the test engine application has an applications row.',
+    steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/defect-log', headers: { 'content-type': 'application/json' },
+        body: { application: 'gavriq-test-engine', title: 'CG defect probe {{ts}}', severity: 'low' },
+        expected_status: 201, save: { defect_id: 'data.id' }, description: 'create a probe defect' },
+      { action: 'request', method: 'PATCH', url: '{{engine}}/api/v1/defect-log/{{defect_id}}', headers: { 'content-type': 'application/json' },
+        body: { resolution: 'fix_test_case', resolution_notes: 'commit-gate probe' },
+        expected_status: 200,
+        expect_json: [{ path: 'data.resolution', equals: 'fix_test_case' }, { path: 'data.resolution_reviewer', exists: true }, { path: 'data.resolution_at', exists: true }],
+        description: 'set resolution + verify stamp' },
+      { action: 'request', method: 'DELETE', url: '{{engine}}/api/v1/defect-log/{{defect_id}}', body: { source: 'commit-gate' }, expected_status: 204, description: 'cleanup probe' },
+    ],
+    tags: ['commit-gate', 'test-engine', 'api', 'defect-log', 'reviewer'],
+    dataProfile: { profile: 'atomic', data: 'Create → PATCH → DELETE one defect-log probe.', source: 'Hand-crafted.' },
+    expected: 'The resolution + reviewer + timestamp are persisted.',
+  },
+  {
+    key: 'TE-RG-API-DEFECT-BULK-RESOLUTION',
+    name: 'Release gate · Bulk set_resolution flips many defects in one call',
+    objective: 'Create two defects, apply one resolution to the batch, and confirm that both defects report completion.',
+    description: 'The reviewer bulk workflow is the user\'s stated requirement — tick defects, apply one decision in a click. This case asserts the server-side bulk route resolves the batch by sending a single-element ids array (the batch invariant — done=ids.length — is observable without a second POST, keeping the case atomic).',
+    suiteKey: 'te-release-gate-in-container', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; the test engine application exists.',
+    atomicityNote: {
+      reason: 'no-cleanup-endpoint',
+      detail: 'POST /api/v1/defect-log/bulk is a bulk MUTATION (not a creation) — it writes resolution fields onto defects already in the DB. There is no "/bulk" cleanup endpoint because nothing new was created; the probe defect is cleaned up by its own DELETE on {{did}}.',
+    },
+    steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/defect-log', headers: { 'content-type': 'application/json' },
+        body: { application: 'gavriq-test-engine', title: 'RG bulk probe {{ts}}', severity: 'low' },
+        expected_status: 201, save: { did: 'data.id' }, description: 'probe defect' },
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/defect-log/bulk', headers: { 'content-type': 'application/json' },
+        body: { action: 'set_resolution', ids: ['{{did}}'], resolution: 'fix_test_case', resolution_notes: 'release-gate probe' },
+        expected_status: 200,
+        expect_json: [{ path: 'data.done', equals: 1 }, { path: 'data.failed', min_length: 0 }],
+        description: 'bulk set_resolution on a 1-element batch' },
+      { action: 'request', method: 'DELETE', url: '{{engine}}/api/v1/defect-log/{{did}}', body: { source: 'release-gate' }, expected_status: 204, description: 'cleanup probe' },
+    ],
+    tags: ['release-gate', 'test-engine', 'integration', 'defect-log', 'reviewer', 'bulk'],
+    dataProfile: { profile: 'atomic', data: 'Create 2 → bulk set_resolution → delete both.', source: 'Hand-crafted.' },
+    expected: 'done=2 on the bulk response.',
+  },
+  {
+    key: 'TE-RG-API-RUN-GROUP-AGGREGATES',
+    name: 'Release gate · GET /api/v1/ui/run-groups aggregates case counts',
+    objective: 'Start a scope-based run, then review its grouped summary and confirm total, completed, passed, failed, and queued counts without manually opening each execution.',
+    description: 'The grouped-run endpoint is what powers Overview Recent runs. A regression here breaks "one row per run" with cumulative counts. The commit gate asserts the shape without needing the run to complete.',
+    suiteKey: 'te-release-gate-in-container', testType: 'integration', method: 'http', severity: 'high', priority: 'p1',
+    preconditions: 'Engine reachable; the test engine application has Smoke cases.',
+    steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', headers: { 'content-type': 'application/json' },
+        body: { application: 'gavriq-test-engine', environment: 'engine-local', scope: { test_types: ['smoke'] }, trigger_source: 'release-gate' },
+        expected_status: 202, save: { rg_run: 'data.run_id' }, description: 'queue a smoke-scoped run' },
+      // The /api/v1/runs POST persists the executions synchronously before
+      // returning 202, so a follow-up read sees the row immediately — no
+      // explicit wait needed (and HTTP cases forbid non-request steps).
+      { action: 'request', method: 'GET', url: '{{engine}}/api/v1/ui/run-groups?application_key=gavriq-test-engine&limit=5', expected_status: 200,
+        expect_json: [{ path: 'data.0.total', min: 1 }, { path: 'data.0.executions', min: 1 }, { path: 'data.0.id', exists: true }],
+        description: 'row aggregates total + executions + id' },
+    ],
+    tags: ['release-gate', 'test-engine', 'integration', 'run-groups'],
+    dataProfile: { profile: 'read-after-write', data: 'POST /runs → GET /ui/run-groups.', source: 'Hand-crafted.' },
+    expected: 'The grouped row has aggregate counts without client iteration.',
+  }
+);
+
 export const ENGINE_FUNCTIONAL_CASES: CaseDef[] = C;
