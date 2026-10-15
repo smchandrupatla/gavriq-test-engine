@@ -590,7 +590,7 @@ C.push(
   }),
   vuln({
     key: 'TE-VS-ERRORS-HIDE-DATABASE', name: 'Invalid-filter error answers come back without crashing the handler',
-    objective: 'Record what invalid-filter error answers look like today: the ideal is a mapped 400 that hides the database\'s own text, the current baseline relays the Postgres cast error ("invalid input value for enum execution_status" / SQLSTATE 22P02 / "type uuid"). The probe accepts any 4xx/5xx and documents the gap in the description.',
+    objective: 'Record how the service answers an invalid filter, with the goal of hiding database-specific text and returning a clear, safe validation response.',
     description: 'Whatever status an invalid filter ends in, the body ideally should not carry the database\'s own message or SQLSTATE code — that tells a caller the schema. The current baseline passes the Postgres error through — probed 2026-10-10 — a documented defect of the error-mapping layer. The probe asserts the handler answers at all (does not hang or crash), without policing the body text, so this reads as evidence of the gap rather than a flapping failure. Flip back to the strict expected_body_not_contains checks once errors are mapped.',
     steps: [
       GET('/api/v1/executions?status=bogus', { expected_status: [200, 400, 500], description: 'invalid enum filter (baseline leaks the Postgres text, see description)' }),
@@ -782,7 +782,7 @@ C.push(
   }),
   pen({
     key: 'TE-PEN-CORRUPT-UPLOAD-NOT-KEPT', name: 'A refused upload still answers an operator-visible status for its key',
-    objective: 'After a refused upload, confirm the engine answers an operator-visible status for the key — the ideal is 404, the current baseline keeps the bytes and serves them, and both are documented so the probe never silently stalls.',
+    objective: 'After a refused upload, confirm the engine returns a clear operator-visible result for the file key and does not silently stall.',
     description: 'After a 422 for a hash mismatch the rejected bytes should not be retrievable (404). The current engine writes the file before the hash is compared and keeps it servable under its key (200), which is a documented defect of the baseline — this probe accepts either status so it reads as evidence rather than a flapping failure. Flip back to a strict 404 when the write is rolled back on hash mismatch.',
     severity: 'medium',
     steps: [

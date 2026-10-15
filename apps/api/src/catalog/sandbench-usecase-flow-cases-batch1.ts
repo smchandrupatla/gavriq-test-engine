@@ -2017,7 +2017,7 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
     key: "SB-UC-ruleBenchExport-MAIN",
     name: "UC-ruleBenchExport main flow: Export rules",
-    objective: 'Walk through the "Export rules" screen the way its main use case describes it: analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing theâ€¦',
+    objective: 'Walk through the "Export rules" screen: an analyst reviews the available scope, requests a rule package, downloads it with a suitable filename, and checks identities and counts before reuse.',
     description: "Main flow of UC-ruleBenchExport (Export rules): Analyst opens Export rules and reviews the available scope. System identifies whether the action exports all tenant rules or a supported selection. Analyst requests export; the service returns the rule package. System downloads the returned representation with a suitable filename. Analyst checks identities and counts before reusing the package. Touches the screen's real route and its registered API(s): GET /api/v1/rules/export.",
     suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
