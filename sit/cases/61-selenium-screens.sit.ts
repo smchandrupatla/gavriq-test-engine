@@ -15,7 +15,7 @@ test("Selenium screen inventory matches officialNav page ids", () => {
 for (const page of STATIC_PAGES) {
   test(`Selenium static page ${page.path} look-and-feel`, async (t) => {
     if (!(await seleniumReady())) { await recordSkip(`static-${page.path}`, "selenium down"); t.skip("Selenium Chrome is optional"); return; }
-    const run = await withBrowser(async (sess) => {
+    const run = await withBrowser(async (sess: any) => {
       await sess.go(`${ENV.webBase}${page.path}`);
       return { html: await sess.source(), shot: await saveShot(sess, `static-${page.path.replace(/\W+/g, "-") || "root"}`) };
     });
@@ -29,7 +29,7 @@ for (const pageId of officialPageIds()) {
   test(`Selenium screen ${pageId} opens from official nav`, async (t) => {
     if (!(await seleniumReady())) { await recordSkip(`screen-${pageId}`, "selenium down"); t.skip("Selenium Chrome is optional"); return; }
     const contract = contractFor(pageId);
-    const run = await withBrowser(async (sess) => {
+    const run = await withBrowser(async (sess: any) => {
       await enterConsole(sess);
       await clickLabel(sess, contract.family);
       await clickLabel(sess, contract.texts[0] || pageId);

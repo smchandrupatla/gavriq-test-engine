@@ -4,7 +4,7 @@ import { apiFetch } from '../lib/client.ts';
 import { regressionCases, useCases } from '../lib/use-cases.mjs';
 
 for (const uc of useCases()) {
-  const entry = regressionCases().find(row => row.useCaseId === uc.id && row.layer === 'backend');
+  const entry = regressionCases().find((row: { useCaseId: string; layer: string }) => row.useCaseId === uc.id && row.layer === 'backend');
   test(entry!.name, async () => {
     const response = await apiFetch(`/api/v1/use-cases/${encodeURIComponent(uc.page)}`);
     assert.equal(response.status, 200, `${uc.id}: readable authenticated detail`);

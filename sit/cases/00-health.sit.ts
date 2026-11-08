@@ -21,7 +21,7 @@ test("main application authenticates the SIT operator persona", async () => {
   const res = await apiFetch("/api/v1/session/me");
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.tenantSlug, ENV.tenantSlug);
+  assert.equal(body.tenant?.slug, ENV.tenantSlug);
   assert.ok(body.functionalPermissions.includes("runs:execute"), "operator persona must be able to execute runs");
 });
 

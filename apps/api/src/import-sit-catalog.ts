@@ -47,6 +47,13 @@ const CATEGORY: Record<string, { suite: string; type: string; method: string }> 
   '93-pentest-ui-xss-headers': { suite: 'sit-pentest', type: 'security', method: 'playwright' },
   '94-pentest-ui-inventory-sweep': { suite: 'sit-pentest', type: 'security', method: 'playwright' },
   '90-agents': { suite: 'sit-agents', type: 'integration', method: 'http' },
+  // Work items (Rule Bench, test runs): newly synced from sand-bench-enterprise
+  // (sync-sandbench-sit.mjs); the generic '${fileKey} / other / http' fallback below
+  // mislabeled these as non-Selenium when they were first picked up, since none of them
+  // had a CATEGORY entry yet.
+  '73-selenium-work-items': { suite: 'sit-selenium-work-items', type: 'ui', method: 'selenium' },
+  '73-selenium-work-items-cases': { suite: 'sit-selenium-work-items', type: 'ui', method: 'selenium' },
+  '73-selenium-work-items-runs-rules': { suite: 'sit-selenium-work-items', type: 'ui', method: 'selenium' },
 };
 
 /** Extract test() names from a .sit.ts source file */

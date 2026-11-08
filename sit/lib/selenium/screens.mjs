@@ -76,6 +76,7 @@ export const SCREEN_CONTRACTS = {
   configurationEnvironmentDefaults: { family: "Configuration", texts: ["Environment defaults"], controls: ["ON", "OFF"] },
   configurationNotifications: { family: "Configuration", texts: ["Notifications"], controls: ["ON", "OFF"] },
   configurationApiAccess: { family: "Configuration", texts: ["API access"], controls: ["ON", "OFF"] },
+  configurationMySessions: { family: "Configuration", texts: ["My sessions"], controls: [] },
   configurationDataRetention: { family: "Configuration", texts: ["Data retention"], controls: ["ON", "OFF"] },
   configurationUserRoles: { family: "Configuration", texts: ["User roles"], controls: ["ON", "OFF"] },
   configurationEventing: { family: "Configuration", texts: ["Eventing"], controls: ["ON", "OFF"] },
@@ -87,6 +88,21 @@ export const SCREEN_CONTRACTS = {
   featureIds: { family: "Configuration", texts: ["Feature IDs"], controls: ["Save"] },
   useCaseReview: { family: "Configuration", texts: ["Use-case review"], controls: ["Review all use cases"] },
   applicationEvents: { family: "Configuration", texts: ["Application Events"], controls: ["Filter events"] },
+  // Pages that open as standalone documents (app-nav.js DOCUMENTS) or native console pages; texts are the
+  // nav label and the page heading, controls are buttons the page itself renders.
+  msgSchemaConverter: { family: "Message Schemes", texts: ["Schema Converter", "Source definition"], controls: ["Inspect fields", "Convert"] },
+  dfNew: { family: "Data Feeders", texts: ["New feeder", "Save feeder"], controls: ["Save feeder", "Reshuffle"] },
+  dfAll: { family: "Data Feeders", texts: ["All feeders", "Data feeders"], controls: ["New feeder"] },
+  dfCurrentRuns: { family: "Data Feeders", texts: ["Current runs", "Monitor feeder runs"], controls: ["Past runs", "Refresh"] },
+  dfPastRuns: { family: "Data Feeders", texts: ["Past runs", "Review completed"], controls: ["Current runs", "Refresh"] },
+  configurationListBoxes: { family: "Configuration", texts: ["List boxes"], controls: ["Add item"] },
+  configurationImportSchemaLimits: { family: "Configuration", texts: ["Import schema limits"], controls: ["Save configuration"] },
+  configurationKafkaEndpoints: { family: "Configuration", texts: ["Kafka Endpoints"], controls: ["Test connection", "Send dummy"] },
+  externalSystemsKafka: { family: "Configuration", texts: ["Kafka System", "External systems"], controls: ["Test connection", "Send dummy"] },
+  externalSystemsMq: { family: "Configuration", texts: ["MQ System", "External systems"], controls: ["Test connection", "Send dummy"] },
+  externalSystemsFtp: { family: "Configuration", texts: ["FTP System", "External systems"], controls: ["Test connection", "Send dummy"] },
+  externalSystemsApi: { family: "Configuration", texts: ["API System", "External systems"], controls: ["Test connection", "Send dummy"] },
+  eventCatalog: { family: "Configuration", texts: ["Event Catalog", "Event template"], controls: ["Technical events"] },
 };
 
 export function contractFor(pageId) {

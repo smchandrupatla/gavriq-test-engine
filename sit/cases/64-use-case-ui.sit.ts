@@ -6,7 +6,7 @@ import { ENV } from '../lib/env.ts';
 import { regressionCases, useCases } from '../lib/use-cases.mjs';
 
 for (const uc of useCases()) {
-  const entry = regressionCases().find(row => row.useCaseId === uc.id && row.layer === 'frontend');
+  const entry = regressionCases().find((row: { useCaseId: string; layer: string }) => row.useCaseId === uc.id && row.layer === 'frontend');
   test(entry!.name, { timeout: 60000 }, async () => {
     const token = await authToken();
     const actual = await (await apiFetch(`/api/v1/use-cases/${encodeURIComponent(uc.page)}`)).json();
