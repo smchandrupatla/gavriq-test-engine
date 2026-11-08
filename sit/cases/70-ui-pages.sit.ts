@@ -76,7 +76,7 @@ test("the Message Designer → View saved definitions page renders its own real 
 });
 
 test("the Message Designer → Import schema page renders its own real page header", async () => {
-  await assertPage("Message Designer", "Import schema", "Import schema");
+  await assertPage("Message Schemes", "Import Scheme", "Import schema");
 });
 
 test("the Message Designer → Export template page renders its own real page header", async () => {
@@ -84,15 +84,15 @@ test("the Message Designer → Export template page renders its own real page he
 });
 
 test("the Datasets page renders its own real page header", async () => {
-  await assertPage("Datasets", undefined, "Datasets");
+  await assertPage("Datasets", "Saved datasets", "Saved datasets");
 });
 
 test("the Test Cases page renders its own real page header", async () => {
-  await assertPage("Test Cases", undefined, "Test Cases");
+  await assertPage("Test Cases", "Browse test cases", "Test cases");
 });
 
 test("the Test Suites page renders its own real page header", async () => {
-  await assertPage("Test Suites", undefined, "Test Suites");
+  await assertPage("Test Suites", "All test suites", "Test suites");
 });
 
 test("the Test Runs → Active runs page renders its own real page header", async () => {
@@ -104,7 +104,8 @@ test("the Test Runs → All test runs page renders its own real page header", as
 });
 
 test("the Test Runs → Run history page renders its own real page header", async () => {
-  await assertPage("Test Runs", "Run history", "Run history");
+  // Run history shares the All test runs document (apps/web/public/js/app-nav.js DOCUMENTS).
+  await assertPage("Test Runs", "Run history", "All test runs");
 });
 
 test("the Test Runs → New test run page renders its own real page header", async () => {
@@ -140,9 +141,10 @@ test("the Reports → Scheduled exports page renders its own real page header", 
 });
 
 test("the Configuration page renders its own real page header", async () => {
-  await assertPage("Configuration", undefined, "Configuration");
+  // Configuration is a group: its parent only expands, so open its first page.
+  await assertPage("Configuration", "Environment defaults", "Environment defaults");
 });
 
 test("the Naming conventions page renders its own real page header", async () => {
-  await assertPage("Naming conventions", undefined, "Naming conventions");
+  await assertPage("Configuration", "Naming conventions", "Naming conventions");
 });

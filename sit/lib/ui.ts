@@ -36,6 +36,8 @@ export async function openConsole(page: Page): Promise<void> {
   await page.goto(`${ENV.webBase}/`, { waitUntil: "networkidle", timeout: 30000 });
   const gate = page.locator("#gate");
   if (await gate.isVisible().catch(() => false)) {
+    await page.locator("#username").fill(ENV.username);
+    await page.locator("#password").fill(ENV.password);
     await page.locator("#login").click();
   }
   await page.waitForSelector("#gate", { state: "hidden", timeout: 20000 });

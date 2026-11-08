@@ -58,7 +58,18 @@ export async function withDriver<T>(fn: (driver: WebDriver) => Promise<T>): Prom
 // Sign in only if the gate is still showing, using the tenant/username it pre-fills itself.
 export async function openConsole(driver: WebDriver): Promise<void> {
   await driver.get(`${ENV.webBase}/`);
-  const gateShown = async () => {
+  // Some stacks sign in on load; others show the sign-in form. Give the automatic path a moment,
+  // then use the form with the SIT operator, so the case runs on either.
+  await driver.sleep(2000);
+  const gates = await driver.findElements(By.css("#gate:not(.hidden) #login"));
+  if (gates.length) {
+    for (const [id, text] of [["username", ENV.username], ["password", ENV.password]] as const) {
+      const fields = await driver.findElements(By.css(`#gate:not(.hidden) #${id}`));
+      if (fields.length) { await fields[0].clear(); await fields[0].sendKeys(text); }
+    }
+    await gates[0].click();
+  }
+  const gateShown = async (): Promise<boolean> => {
     const gates = await driver.findElements(By.id("gate"));
     if (!gates.length) return false;
     const cls = (await gates[0].getAttribute("class")) || "";
@@ -120,8 +131,15 @@ export async function openNav(driver: WebDriver, topLabel: string, subLabel?: st
 // Message Designer hero markup in ops-console-preview.js.
 export async function pageTitle(driver: WebDriver): Promise<string> {
   const els = await driver.findElements(By.css(".opsc-pagehead-title, .opsc-hero-title"));
-  if (!els.length) return "";
-  return ((await els[0].getText()) || "").trim();
+  if (els.length) return ((await els[0].getText()) || "").trim();
+  // Screens that moved to their own document (Saved datasets, Test cases, ...) title themselves
+  // with an <h1>. The console's own <h1> is the brand ("SAND BENCH"), which is not a page title.
+  const headings: WebElement[] = await driver.findElements(By.css("h1"));
+  for (const heading of headings) {
+    const t = ((await heading.getText()) || "").trim();
+    if (t && !/^sand bench$/i.test(t)) return t;
+  }
+  return "";
 }
 
 async function fieldContainer(driver: WebDriver, label: string): Promise<WebElement> {
