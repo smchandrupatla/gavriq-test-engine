@@ -75,5 +75,6 @@ test("E2E-46 live: a foreign tenant id does not resolve in this session", async 
 test("E2E-02 fixture files remain available for the import journey", () => {
   const valid = loadJson("r1.valid.json");
   assert.equal(valid.reportId, "00123");
-  assert.equal(valid.transaction.amount, 1000);
+  // transaction occurs 1..3, so the JSON instance carries it as an array (schemaBuilder).
+  assert.equal(valid.transaction[0].amount, 1000);
 });

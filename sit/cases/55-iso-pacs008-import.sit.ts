@@ -1,22 +1,23 @@
 /**
  * Post-deploy: validate + upload pacs.008.001.14 fixtures, verify job, then clear import rows.
- * Requires API (+ DB). Uses portal session (demo classification).
+ * Requires API (+ DB). Uses the normal password-protected session.
  */
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ENV } from "../lib/env.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const API = process.env.SIT_API_BASE || process.env.SBE_API_BASE || "http://127.0.0.1:8787";
 
 async function token() {
-  const res = await fetch(`${API}/api/v1/session/portal`, {
+  const res = await fetch(`${API}/api/v1/session/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tenantSlug: "acme-demo", username: "analyst.acme" }),
+    body: JSON.stringify({ username: ENV.username, password: ENV.password }),
   });
   const json = await res.json();
-  if (!res.ok || !json.token) throw new Error(`portal failed ${res.status}`);
+  if (!res.ok || !json.token) throw new Error(`session login failed ${res.status}`);
   return json.token as string;
 }
 
