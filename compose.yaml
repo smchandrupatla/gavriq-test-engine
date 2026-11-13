@@ -93,6 +93,15 @@ services:
       - type: bind
         source: ./apps/api/src/catalog
         target: /app/apps/api/src/catalog
+      # Exported Sand Bench sources, one folder per deployed commit (written by
+      # deploy/staging/deploy.mjs). The SIT importer reads the application team's
+      # suite of the deployed commit from here (import-sit-catalog.ts --env …).
+      - type: bind
+        source: ${SBE_SOURCES_DIR:-../sand-bench-staging/src}
+        target: /app/sbe-src
+        read_only: true
+        bind:
+          create_host_path: true
     healthcheck:
       test:
         [
@@ -138,6 +147,15 @@ services:
       SB_STAGING_POOL_PASSWORD: ${SB_STAGING_POOL_PASSWORD:-SandBench-Pool-Stage-01}
     volumes:
       - test-engine-evidence:/data/evidence
+      # The same exported sources: a SIT case runs the file of the commit deployed
+      # on its environment (apps/worker/src/runners/sit.ts sitSourceRoot). Mounted
+      # under /app so the files resolve their packages from the worker's node_modules.
+      - type: bind
+        source: ${SBE_SOURCES_DIR:-../sand-bench-staging/src}
+        target: /app/sbe-src
+        read_only: true
+        bind:
+          create_host_path: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Chromium, Firefox and WebKit all keep their render buffers in /dev/shm;

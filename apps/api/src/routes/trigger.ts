@@ -262,6 +262,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   const { rows: candidates } = await query(
     `SELECT tc.id, tc.key, tc.execution_method, tc.test_type::text AS test_type, tc.tags,
             tc.automation_status::text AS automation_status,
+            (tc.script LIKE 'sit/cases/%' OR tc.script LIKE '%.sit.ts%') IS TRUE AS is_sit,
             s.id AS suite_id, s.key AS suite_key, s.name AS suite_name
      FROM test_cases tc
      LEFT JOIN test_case_suites m ON m.test_case_id = tc.id
@@ -275,7 +276,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   const approved = new Set(strings(r.approved_categories) || []);
   const seen = new Set<string>();
   const excluded: Array<{ case_key: string; reason: string }> = [];
-  type Group = { suite_id: string | null; suite_key: string; suite_name: string; case_ids: string[] };
+  type Group = { suite_id: string | null; suite_key: string; suite_name: string; case_ids: string[]; sit?: boolean };
   const plan = new Map<string, Group>();
 
   for (const c of candidates) {
@@ -301,6 +302,7 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
     const suiteKey = c.suite_key || 'unassigned';
     const group: Group = plan.get(suiteKey) || { suite_id: c.suite_id ?? null, suite_key: suiteKey, suite_name: c.suite_name || 'Unassigned cases', case_ids: [] };
     group.case_ids.push(c.id);
+    if (c.is_sit) group.sit = true;
     plan.set(suiteKey, group);
   }
 
@@ -393,7 +395,11 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   };
 
   for (const g of groups) {
-    const shards = shardCountFor(g.case_ids.length);
+    // A SIT suite is never split: the worker runs each SIT file once for all of its
+    // cases in the execution, and SIT executions do not overlap on an environment
+    // anyway (executions.ts serialGroupOf), so parts would only repeat each file's
+    // sign-in and browser start once per part.
+    const shards = g.sit ? 1 : shardCountFor(g.case_ids.length);
     const chunkSize = Math.ceil(g.case_ids.length / shards);
     for (let i = 0; i < shards; i++) {
       const chunkIds = g.case_ids.slice(i * chunkSize, (i + 1) * chunkSize);

@@ -28,6 +28,22 @@ export interface SitRunInput {
   timeoutSeconds?: number;
   /** Aborted when the run is cancelled: the case's process tree and any browser it left open are killed. */
   signal?: AbortSignal;
+  /**
+   * Where `sit/cases/…` is read from. The application team's SIT suite belongs to a
+   * commit: run against a deployment, it must be the suite of the commit deployed
+   * there, not whatever copy this repository last synced. Set by the worker from
+   * the environment's recorded deployment (sitSourceRoot); when absent the copy
+   * bundled with the worker is used.
+   */
+  sourceRoot?: string;
+}
+
+/** One SIT file run once for several catalogue cases (each case = one test of the file). */
+export interface SitGroupInput extends Omit<SitRunInput, 'script'> {
+  /** `sit/cases/<file>.sit.ts` */
+  file: string;
+  /** The cases to answer: an id of the caller's choosing and the test name (absent = the whole file). */
+  tests: Array<{ id: string; name?: string }>;
 }
 
 export interface SitRunResult {
@@ -56,12 +72,30 @@ function parseScript(script: string): { fileRel: string; testName?: string } | n
   return { fileRel, testName };
 }
 
+/** Regex source for one test name, unanchored; `${...}` placeholders match any text. */
+function nameSource(testName: string): string {
+  return testName
+    .split(/\$\{[^}]*\}/)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.+');
+}
+
 /** Anchored regex for one test name; `${...}` placeholders match any text. */
 export function namePattern(testName: string): string {
-  const literal = testName
-    .split(/\$\{[^}]*\}/)
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  return `^${literal.join('.+')}$`;
+  return `^${nameSource(testName)}$`;
+}
+
+/**
+ * The SIT source of a deployed commit, when the worker has it: exported sources
+ * live under SIT_SOURCES_DIR (default `<worker root>/sbe-src`, where the compose
+ * file mounts the staging exports) in a folder named after the first twelve
+ * characters of the commit — the layout deploy/staging/deploy.mjs writes.
+ */
+export function sitSourceRoot(commit: unknown): string | undefined {
+  if (typeof commit !== 'string' || commit.length < 12) return undefined;
+  const base = process.env.SIT_SOURCES_DIR || path.join(root, 'sbe-src');
+  const dir = path.join(base, commit.slice(0, 12));
+  return existsSync(path.join(dir, 'sit', 'cases')) ? dir : undefined;
 }
 
 /**
@@ -121,9 +155,15 @@ async function seleniumUrl(): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * Does this case file drive a browser through the raw WebDriver helpers? Most
+ * files reach them through another helper in sit/lib/selenium (feeder-nav, flow,
+ * console, …) rather than importing webdriver.mjs themselves, so any import from
+ * that folder counts; without a driver URL those cases skip themselves.
+ */
 function usesRawWebDriver(abs: string): boolean {
   try {
-    return readFileSync(abs, 'utf8').includes('lib/selenium/webdriver.mjs');
+    return /lib\/selenium\/|SIT_SELENIUM_URL/.test(readFileSync(abs, 'utf8'));
   } catch {
     return false;
   }
@@ -132,6 +172,9 @@ function usesRawWebDriver(abs: string): boolean {
 function sitEnv(input: SitRunInput): NodeJS.ProcessEnv {
   const vars = input.vars || {};
   const env: NodeJS.ProcessEnv = { ...process.env };
+  // Set by node:test for the files it runs; inherited, it makes the SIT file's own
+  // `node --test` believe it is a nested run and skip every test.
+  delete env.NODE_TEST_CONTEXT;
   const set = (name: string, value: string | undefined) => {
     if (value !== undefined && value !== '') env[name] = value;
   };
@@ -140,11 +183,22 @@ function sitEnv(input: SitRunInput): NodeJS.ProcessEnv {
   set('SIT_API_BASE', vars.api);
   set('SIT_TESTHUB_BASE', vars.testhub);
   set('SIT_DBVIEWER_BASE', vars.dbviewer);
+  set('SIT_AURORA_BASE', vars.aurora);
+  // A few business end-to-end files read these older names for the same two targets.
+  set('SBE_API_BASE', vars.api);
+  set('SBE_GUI_BASE', vars.web || input.baseUrl);
+  set('WEB_BASE', vars.web || input.baseUrl);
   set('SIT_TENANT_SLUG', vars.tenant);
-  set('SIT_USERNAME', vars.username);
+  // The application team's suite is written for the administrator (its own default
+  // is admin): it creates the throwaway users and tenants its cases need. An
+  // environment that names an administrator runs the suite as that identity; one
+  // that does not (an older registration) keeps its single username.
+  const asAdmin = vars.admin_username !== undefined && vars.admin_username !== '';
+  set('SIT_USERNAME', asAdmin ? vars.admin_username : vars.username);
   // An empty password is meaningful (passwordless demo sign-in), so it is
   // forwarded as-is rather than dropped by set().
-  if (vars.password !== undefined && env.SIT_PASSWORD === undefined) env.SIT_PASSWORD = vars.password;
+  const password = asAdmin ? vars.admin_password : vars.password;
+  if (password !== undefined && env.SIT_PASSWORD === undefined) env.SIT_PASSWORD = password;
   // The worker image pins one Chrome/ChromeDriver pair for every runner.
   set('SIT_CHROME_BINARY', process.env.SIT_CHROME_BINARY || process.env.CHROME_BIN);
   set('SIT_CHROMEDRIVER_PATH', process.env.SIT_CHROMEDRIVER_PATH || process.env.CHROMEDRIVER_PATH);
@@ -218,11 +272,12 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
     };
   }
 
-  const abs = path.join(root, parsed.fileRel);
+  const base = input.sourceRoot || root;
+  const abs = path.join(base, parsed.fileRel);
   if (!existsSync(abs)) {
     return {
       status: 'failed',
-      message: `SIT file not found: ${parsed.fileRel}`,
+      message: `SIT file not found: ${parsed.fileRel}${input.sourceRoot ? ' in the suite of the deployed commit' : ''}`,
       duration_ms: Date.now() - start,
       classification: 'script_problem',
     };
@@ -250,7 +305,7 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
 
   return new Promise((resolve) => {
     const child = spawn(process.execPath, args, {
-      cwd: root,
+      cwd: base,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       // Own process group, so a timeout also takes down the browsers and
@@ -352,6 +407,212 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
       });
     });
   });
+}
+
+/** One reported test of a TAP stream, at any nesting depth. */
+export interface TapTest {
+  name: string;
+  ok: boolean;
+  skipped: boolean;
+  depth: number;
+  duration_ms?: number;
+  /** First line of the failure's `error:` field. */
+  error?: string;
+  /** The test's own lines of the stream (result line and its detail block). */
+  block: string;
+}
+
+/** Every `ok` / `not ok` line of a node:test TAP stream with its detail block. */
+export function parseTapTests(stdout: string): TapTest[] {
+  const lines = stdout.split(/\r?\n/);
+  const head = /^(\s*)(ok|not ok) \d+ - (.*)$/;
+  const tests: TapTest[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = head.exec(lines[i]!);
+    if (!m) continue;
+    let name = m[3]!;
+    let skipped = false;
+    const directive = /\s+# (SKIP|TODO)\b.*$/i.exec(name);
+    if (directive) {
+      skipped = /skip/i.test(directive[1]!);
+      name = name.slice(0, directive.index);
+    }
+    const block = [lines[i]!];
+    let duration: number | undefined;
+    let error: string | undefined;
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j]!;
+      if (head.test(line) || /^\s*# Subtest: /.test(line) || /^\s*1\.\.\d+/.test(line)) break;
+      block.push(line);
+      const d = /^\s+duration_ms: ([\d.]+)/.exec(line);
+      if (d) duration = Number(d[1]);
+      const e = /^\s+error: (.*)$/.exec(line);
+      if (e && error === undefined) error = /^[|>]/.test(e[1]!) ? (lines[j + 1] || '').trim() : e[1]!.replace(/^['"]|['"]$/g, '');
+      if (/^\s+\.\.\.\s*$/.test(line)) break;
+    }
+    tests.push({
+      // The reporter escapes "#" and "\" in a test name.
+      name: name.trim().replace(/\\([#\\])/g, '$1'),
+      ok: m[2] === 'ok',
+      skipped,
+      depth: Math.floor(m[1]!.length / 4),
+      duration_ms: duration,
+      error,
+      block: block.join('\n'),
+    });
+  }
+  return tests;
+}
+
+/**
+ * Run one SIT file ONCE and answer several catalogue cases from it — each case
+ * is one test of the file. The application team writes a file's tests to share
+ * one signed-in session (and one browser); run test by test, every case would
+ * sign in again and start its own browser, which is slow and, on an application
+ * that caps sessions per user, ends the sessions of the cases before it.
+ *
+ * Returns one result per requested id. A test the file does not have is a stale
+ * catalogue entry and fails as such; a file that never got as far as running its
+ * tests fails every case with the reason.
+ */
+export async function runSitGroup(input: SitGroupInput): Promise<Map<string, SitRunResult>> {
+  const start = Date.now();
+  const results = new Map<string, SitRunResult>();
+  const answerAll = (result: SitRunResult) => {
+    for (const t of input.tests) if (!results.has(t.id)) results.set(t.id, result);
+    return results;
+  };
+
+  const base = input.sourceRoot || root;
+  const abs = path.join(base, input.file);
+  if (!existsSync(abs)) {
+    return answerAll({
+      status: 'failed',
+      message: `SIT file not found: ${input.file}${input.sourceRoot ? ' in the suite of the deployed commit' : ''}`,
+      duration_ms: 0,
+      classification: 'script_problem',
+    });
+  }
+
+  const wholeFile = input.tests.some((t) => !t.name);
+  const names = [...new Set(input.tests.map((t) => t.name).filter((n): n is string => !!n))];
+  const extra = wholeFile || !names.length ? [] : ['--test-name-pattern', `^(?:${names.map(nameSource).join('|')})$`];
+  // Each test keeps its own budget; a whole file, like a parameterised name, is many tests.
+  const perTest = input.timeoutSeconds || 120;
+  const timeoutSeconds = Math.min(4 * 3600, perTest * Math.max(wholeFile ? 4 : 1, names.length));
+  const tsxBin = path.join(root, 'node_modules/tsx/dist/cli.mjs');
+  const args = existsSync(tsxBin)
+    ? [tsxBin, '--test', '--test-reporter=tap', ...extra, abs]
+    : ['--test', '--test-reporter=tap', '--experimental-strip-types', ...extra, abs];
+
+  const env = sitEnv({ ...input, script: input.file });
+  const sharedDriver = usesRawWebDriver(abs);
+  if (sharedDriver) {
+    const url = await seleniumUrl();
+    if (url) env.SIT_SELENIUM_URL = url;
+  }
+  if (!env.SIT_EVIDENCE_DIR && process.env.EVIDENCE_DIR) env.SIT_EVIDENCE_DIR = process.env.EVIDENCE_DIR;
+
+  const run = await new Promise<{ code: number | null; stdout: string; stderr: string; ended: 'exit' | 'timeout' | 'cancelled' | 'error'; error?: string }>((resolve) => {
+    const child = spawn(process.execPath, args, { cwd: base, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (ended: 'exit' | 'timeout' | 'cancelled' | 'error', code: number | null, error?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.signal?.removeEventListener('abort', onAbort);
+      resolve({ code, stdout, stderr, ended, error });
+    };
+    const stop = () => {
+      killTree(child.pid);
+      if (sharedDriver) recycleDriver();
+    };
+    const onAbort = () => { stop(); finish('cancelled', null); };
+    const timer = setTimeout(() => { stop(); finish('timeout', null); }, timeoutSeconds * 1000);
+    if (input.signal?.aborted) onAbort();
+    else input.signal?.addEventListener('abort', onAbort, { once: true });
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('error', (err) => finish('error', null, err.message));
+    child.on('close', (code) => {
+      if (sharedDriver && code !== 0 && !settled) recycleDriver();
+      finish('exit', code);
+    });
+  });
+
+  const tests = parseTapTests(run.stdout);
+  const elapsed = Date.now() - start;
+  const loadFailure = /ERR_MODULE_NOT_FOUND|Cannot find (module|package)|SyntaxError/.exec(run.stdout + run.stderr);
+  const cap = (text: string) => text.slice(0, MAX_OUTPUT);
+
+  for (const t of input.tests) {
+    const metrics = { file: input.file, test_name: t.name || null, exit_code: run.code, ran_with: input.tests.length };
+    const matched = t.name
+      ? tests.filter((x) => new RegExp(namePattern(t.name!)).test(x.name))
+      : tests.filter((x) => x.depth === 0);
+    if (!matched.length) {
+      if (run.ended === 'cancelled') {
+        results.set(t.id, { status: 'error', message: 'Run cancelled', duration_ms: elapsed, classification: 'unknown', metrics });
+      } else if (run.ended === 'timeout') {
+        results.set(t.id, { status: 'failed', message: `SIT timed out after ${timeoutSeconds}s before this test reported`, duration_ms: elapsed, classification: 'timeout', metrics, output: cap(run.stdout || run.stderr) });
+      } else if (run.ended === 'error') {
+        results.set(t.id, { status: 'error', message: run.error || 'could not start the SIT file', duration_ms: elapsed, classification: 'environment_problem', metrics });
+      } else if (!tests.length && run.code !== 0) {
+        results.set(t.id, {
+          status: 'failed',
+          message: (run.stderr.trim().slice(0, 400) || `the SIT file exited ${run.code} before running a test`).slice(0, 900),
+          duration_ms: elapsed,
+          classification: loadFailure ? 'script_problem' : 'environment_problem',
+          metrics,
+          output: cap(run.stdout || run.stderr),
+        });
+      } else {
+        results.set(t.id, {
+          status: 'failed',
+          message: t.name
+            ? `No test in ${input.file} is named "${t.name}" — the case file changed since it was imported`
+            : `${input.file} contains no tests`,
+          duration_ms: 0,
+          classification: 'script_problem',
+          metrics,
+        });
+      }
+      continue;
+    }
+    const failed = matched.filter((x) => !x.ok);
+    const ranOk = matched.filter((x) => x.ok && !x.skipped);
+    const text = matched.map((x) => x.block).join('\n');
+    const duration_ms = Math.round(matched.reduce((n, x) => n + (x.duration_ms || 0), 0));
+    const counts = { ...metrics, tests: matched.length, passed: ranOk.length, failed: failed.length, skipped: matched.length - ranOk.length - failed.length };
+    if (failed.length) {
+      results.set(t.id, {
+        status: 'failed',
+        message: failed.slice(0, 4).map((x) => (x.error ? `${x.name}: ${x.error}` : x.name)).join(' | ').slice(0, 900),
+        duration_ms,
+        classification: /fetch failed|ECONNREFUSED|ENOTFOUND|net::ERR/i.test(text) ? 'network_failure' : 'assertion_failure',
+        metrics: counts,
+        output: cap(text),
+      });
+    } else {
+      results.set(t.id, {
+        status: ranOk.length ? 'passed' : 'skipped',
+        message: matched.length === 1 ? matched[0]!.name : `${ranOk.length}/${matched.length} passed${counts.skipped ? `, ${counts.skipped} skipped` : ''}`,
+        duration_ms,
+        metrics: counts,
+        output: cap(text),
+      });
+    }
+  }
+  return results;
+}
+
+/** The SIT file and test a catalogue script names (`sit/cases/x.sit.ts::test name`), or null when it is not a SIT script. */
+export function sitTestOf(script?: string | null): { file: string; name?: string } | null {
+  if (!isSitScript(script)) return null;
+  const parsed = parseScript(String(script));
+  return parsed ? { file: parsed.fileRel, name: parsed.testName } : null;
 }
 
 export function isSitScript(script?: string | null): boolean {

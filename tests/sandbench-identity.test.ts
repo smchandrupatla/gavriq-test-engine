@@ -11,14 +11,14 @@ import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { applySandbenchIdentityRules, syntheticClientAddress } from '../apps/api/src/catalog/sandbench-identity.ts';
-import { SANDBENCH_ALL_CASES } from '../apps/api/src/catalog/sandbench-catalog.ts';
-import { withIdentityLane } from '../apps/worker/src/identity-lane.ts';
-import type { CaseDef } from '../apps/api/src/catalog/types.ts';
+import { applySandbenchIdentityRules, syntheticClientAddress } from '../apps/api/src/catalog/sandbench-identity.js';
+import { SANDBENCH_ALL_CASES } from '../apps/api/src/catalog/sandbench-catalog.js';
+import { withIdentityLane } from '../apps/worker/src/identity-lane.js';
+import type { CaseDef } from '../apps/api/src/catalog/types.js';
 
 const evidenceDir = mkdtempSync(path.join(tmpdir(), 'te-identity-'));
 process.env.EVIDENCE_DIR = evidenceDir;
-const { runHttp, clearSharedSessions } = await import('../apps/worker/src/runners/http.ts');
+const { runHttp, clearSharedSessions } = await import('../apps/worker/src/runners/http.js');
 
 function caseOf(partial: Partial<CaseDef>): CaseDef {
   return {

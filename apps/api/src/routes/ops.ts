@@ -89,6 +89,38 @@ export async function opsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * Register the application team's SIT suite of the commit deployed on an
+   * environment, one runnable case per test, and archive duplicate or stale SIT
+   * registrations (apps/api/src/import-sit-catalog.ts). Called by the staging
+   * deploy after it registers the environment. Same x-seed-token guard as the seed.
+   */
+  app.post<{ Body: { environment?: string; dry_run?: boolean } }>('/api/v1/ops/import-sit', async (req, reply) => {
+    const expected = process.env.SEED_TOKEN;
+    if (expected && String(req.headers['x-seed-token'] || '') !== expected) {
+      return reply.status(401).send({ error: 'invalid or missing x-seed-token' });
+    }
+    const environment = String(req.body?.environment || '');
+    if (!/^[\w.-]{1,80}$/.test(environment)) return reply.status(400).send({ error: 'environment (key) is required' });
+    try {
+      const { spawn } = await import('node:child_process');
+      const output = await new Promise<string>((resolve, reject) => {
+        const child = spawn('npx', ['tsx', 'apps/api/src/import-sit-catalog.ts', '--env', environment, ...(req.body?.dry_run ? ['--dry-run'] : [])], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: process.env,
+        });
+        let out = '';
+        let err = '';
+        child.stdout.on('data', (c) => { out += c; });
+        child.stderr.on('data', (c) => { err += c; });
+        child.on('exit', (code) => (code === 0 ? resolve(out) : reject(new Error((err || out).trim().split('\n').slice(-3).join(' ') || `import exit ${code}`))));
+      });
+      return reply.send({ data: { ok: true, summary: output.trim().split('\n').slice(-2) } });
+    } catch (err) {
+      return reply.status(500).send({ error: (err as Error).message });
+    }
+  });
+
+  /**
    * Trigger Sand Bench taxonomy seed (idempotent upsert).
    * Protect with SEED_TOKEN if set: header x-seed-token must match.
    */

@@ -29,14 +29,13 @@ function runName(caseNames: string[], suiteName: string | null, at: Date): strin
  *
  * Returns the lane, null when the environment has no pool (nothing to lease), or
  * 'none-free' when every lane is taken — the execution then stays queued instead
- * of doubling up on an identity. Assignment is serialised per environment so two
- * workers claiming at once cannot be handed the same lane.
+ * of doubling up on an identity. The caller (admitExecution) holds the
+ * environment's claim lock, so two workers claiming at once cannot be handed the
+ * same lane.
  */
-async function leaseIdentityLane(
-  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
-  environmentId: string | null | undefined
-): Promise<number | null | 'none-free'> {
-  if (!environmentId) return null;
+type ClaimClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+
+async function leaseIdentityLane(client: ClaimClient, environmentId: string): Promise<number | null | 'none-free'> {
   const { rows } = await client.query('SELECT config FROM environments WHERE id = $1', [environmentId]);
   const vars = (rows[0]?.config?.vars || {}) as Record<string, unknown>;
   const lanes = Object.keys(vars)
@@ -45,7 +44,6 @@ async function leaseIdentityLane(
     .map(Number)
     .sort((a, b) => a - b);
   if (!lanes.length) return null;
-  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`identity-lane:${environmentId}`]);
   const { rows: busy } = await client.query(
     `SELECT metadata->>'identity_lane' AS lane FROM executions
      WHERE environment_id = $1 AND status IN ('running','preparing') AND metadata ? 'identity_lane'`,
@@ -54,6 +52,52 @@ async function leaseIdentityLane(
   const taken = new Set(busy.map((r) => Number(r.lane)));
   const free = lanes.find((l) => !taken.has(l));
   return free === undefined ? 'none-free' : free;
+}
+
+/**
+ * Executions that must not overlap on one environment. The application team's
+ * SIT suite signs in as the administrator, file by file, and opens its own
+ * sessions as it goes; the application allows the administrator a handful of
+ * sessions and ends all of them on a sign-out. Two SIT files running at the same
+ * time therefore end each other's sessions mid-test — so an execution that holds
+ * SIT cases runs only while no other one does ("sit"). Everything else keeps
+ * running beside it on its own identity lane.
+ */
+async function serialGroupOf(client: ClaimClient, execution: { test_case_ids?: string[] | null }): Promise<string | null> {
+  const ids = execution.test_case_ids || [];
+  if (!ids.length) return null;
+  const { rows } = await client.query(
+    `SELECT 1 FROM test_cases WHERE id = ANY($1::uuid[]) AND (script LIKE 'sit/cases/%' OR script LIKE '%.sit.ts%') LIMIT 1`,
+    [ids]
+  );
+  return rows.length ? 'sit' : null;
+}
+
+/**
+ * May this queued execution start now? Answers with what it starts with (its
+ * identity lane, its serial group), or null when it has to wait: its serial
+ * group is busy on the environment, or no identity lane is free. Decided under
+ * a per-environment lock held to the end of the claim transaction.
+ */
+async function admitExecution(
+  client: ClaimClient,
+  execution: { environment_id?: string | null; test_case_ids?: string[] | null }
+): Promise<{ lane: number | null; serialGroup: string | null } | null> {
+  const environmentId = execution.environment_id;
+  if (!environmentId) return { lane: null, serialGroup: null };
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`claim:${environmentId}`]);
+  const serialGroup = await serialGroupOf(client, execution);
+  if (serialGroup) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM executions
+       WHERE environment_id = $1 AND status IN ('running','preparing') AND metadata->>'serial_group' = $2 LIMIT 1`,
+      [environmentId, serialGroup]
+    );
+    if (rows.length) return null;
+  }
+  const lane = await leaseIdentityLane(client, environmentId);
+  if (lane === 'none-free') return null;
+  return { lane, serialGroup };
 }
 
 export interface RunAllOutcome {
@@ -485,22 +529,35 @@ export async function executionRoutes(app: FastifyInstance) {
       );
 
       const row = await withTransaction(async (client) => {
-        // Oldest first. An execution whose environment has no identity lane free is
-        // passed over — it stays queued — so one for another environment can start.
+        // Oldest first. An execution that has to wait — no identity lane free on its
+        // environment, or its serial group busy there — is passed over and stays
+        // queued, so the next one that can start does.
+        // SIT executions that cannot start (another one is running on their
+        // environment) are left out here already, so a long line of them at the
+        // head of the queue does not hide the executions behind it that can.
         const { rows: candidates } = await client.query(
-          `SELECT * FROM executions
-           WHERE status = 'queued'
-           ORDER BY created_at
-           FOR UPDATE SKIP LOCKED
+          `SELECT q.* FROM executions q
+           WHERE q.status = 'queued'
+             AND NOT (
+               EXISTS (SELECT 1 FROM executions r
+                       WHERE r.environment_id = q.environment_id AND r.status IN ('running','preparing')
+                         AND r.metadata->>'serial_group' = 'sit')
+               AND EXISTS (SELECT 1 FROM test_cases tc
+                           WHERE tc.id = ANY(q.test_case_ids) AND (tc.script LIKE 'sit/cases/%' OR tc.script LIKE '%.sit.ts%'))
+             )
+           ORDER BY q.created_at
+           FOR UPDATE OF q SKIP LOCKED
            LIMIT 10`
         );
         let picked: any = null;
         let lane: number | null = null;
+        let serialGroup: string | null = null;
         for (const candidate of candidates) {
-          const leased = await leaseIdentityLane(client, candidate.environment_id);
-          if (leased === 'none-free') continue;
+          const admitted = await admitExecution(client, candidate);
+          if (!admitted) continue;
           picked = candidate;
-          lane = leased;
+          lane = admitted.lane;
+          serialGroup = admitted.serialGroup;
           break;
         }
         if (!picked) return null;
@@ -515,8 +572,9 @@ export async function executionRoutes(app: FastifyInstance) {
                     WHERE env.id = e.environment_id AND jsonb_typeof(env.config->'deployment') = 'object'
                   ), '{}'::jsonb) || e.metadata
                   || CASE WHEN $3::int IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('identity_lane', $3::int) END
+                  || CASE WHEN $4::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('serial_group', $4::text) END
            WHERE e.id = $1 RETURNING *`,
-          [picked.id, workerId, lane]
+          [picked.id, workerId, lane, serialGroup]
         );
         await client.query(
           `UPDATE workers SET last_heartbeat = now(), status = 'busy', current_load = current_load + 1
