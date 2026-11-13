@@ -12,6 +12,13 @@
  * independently fireable events; each is encoded as the closest honest
  * executable proxy against the live stack (documented per-case in `description`),
  * not a literal fault injection against the shared deployment.
+ *
+ * Exception (rebaseline of 2026-11-13, Sand Bench main a8d72039ae8e): UC-roles,
+ * UC-roleCreate and UC-userCreate are no longer read-only. Their old host page
+ * /admin.html was removed and their use-case documents now name create, update
+ * and delete routes, so those 15 cases create, exercise and remove their own
+ * role or user (see ROLE_CREATE_FLOW_CASES, ROLES_FLOW_CASES and
+ * USER_CREATE_FLOW_CASES below).
  */
 import type { CaseDef } from './types.js';
 
@@ -23,8 +30,9 @@ const API_LOGIN = {
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 
-// admin.acme carries admin:tenant / users:read / access-profiles:manage â€” needed
-// for the admin-only endpoints behind the Roles/Users screens (operator.acme gets 403).
+// Only the built-in administrator may call the administration routes behind the
+// users and roles screens (an operator gets 403 there). The sign-in is shared per
+// worker (sandbench-identity.ts); never sign the administrator out.
 const ADMIN_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
   body: { username: '{{admin_username}}', password: '{{admin_password}}' },
@@ -32,6 +40,472 @@ const ADMIN_LOGIN = {
   description: 'tenant admin login',
 };
 const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
+
+/* ------------------------------------------------------------------------ */
+/* UC-roleCreate, UC-roles, UC-userCreate                                    */
+/* ------------------------------------------------------------------------ */
+// Rebaselined 2026-11-13 against Sand Bench main a8d72039ae8e.
+//
+// These three use cases used to be checked by loading /admin.html. That page was
+// removed from the application on purpose (it answers 404; see the app's
+// docs/use-cases/UC-adminIdentities.md and apps/api/src/modules/consoleScreens.ts).
+// Users and roles are now administered on the User management screen
+// (/user-management.html: tabs "Users" / "User roles", dialogs "New user" /
+// "New role"), and each use case now names registered API routes (app.ts):
+//   GET, POST      /api/v1/admin/functional-access-profiles      200, administrator only
+//   PATCH, DELETE  /api/v1/admin/functional-access-profiles/:id  DELETE retires (status "deleted")
+//   GET            /api/v1/admin/data-access-profiles
+//   POST           /api/v1/admin/users                           200, invited member, no credential
+// So every flow below is exercised for real with a record the case creates and
+// removes itself. Removal goes through the tenant administration routes, the only
+// ones that really remove the record:
+//   DELETE /api/v1/admin/tenants/tenant_default/roles/:id             (hard delete)
+//   DELETE /api/v1/admin/tenants/tenant_default/users/:id + If-Match  (frees username and email)
+//
+// Three of these cases assert behaviour the use-case documents promise but this
+// build does not deliver (tagged known-defect; they stay red until it is fixed):
+//   SB-UC-roleCreate-EXC-1, SB-UC-roles-EXC-2: a duplicate role name answers 500, not 409.
+//   SB-UC-roles-EXC-1: DELETE of a role still assigned to a user answers 200, not 409.
+const USER_MANAGEMENT = '{{web}}/user-management.html';
+const ACCESS_PROFILES = '{{api}}/api/v1/admin/functional-access-profiles';
+const DATA_PROFILES = '{{api}}/api/v1/admin/data-access-profiles';
+const ADMIN_USERS = '{{api}}/api/v1/admin/users';
+const TENANT_ADMIN = '{{api}}/api/v1/admin/tenants/tenant_default';
+const ROLE_NAME = 'TE-UC-ROLE-{{ts}}-{{rand}}';
+const MEMBER_USERNAME = 'te.uc.member.{{ts}}.{{rand}}';
+const MEMBER_EMAIL = 'te.uc.member.{{ts}}.{{rand}}@example.invalid';
+const MEMBER_DISPLAY = 'TE UC member {{ts}}';
+const UC_FLOW = { suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http' } as const;
+const ADMIN_PRECONDITIONS = 'Sand Bench web and API reachable; the built-in administrator can sign in.';
+const ROLE_DATA = { profile: 'synthetic (case-owned)', data: 'One temporary role with a unique name; removed when the test ends.', source: 'generated per run' };
+const MEMBER_DATA = { profile: 'synthetic (case-owned)', data: 'One temporary user (made-up name, unique username and email); removed when the test ends.', source: 'generated per run' };
+
+const ADMIN_SIGN_IN = {
+  ...ADMIN_LOGIN,
+  text: 'Sign in to the application as the built-in administrator',
+  expected: 'The sign-in is accepted.',
+};
+
+function openUserManagement(fragment: string, offers: string) {
+  return {
+    action: 'request', method: 'GET', url: USER_MANAGEMENT, expected_status: 200, expected_body_contains: fragment,
+    text: 'Open the User management screen, where users and roles are administered',
+    expected: `The screen loads and offers ${offers}.`,
+    description: 'load the User management screen (successor of the removed /admin.html)',
+  };
+}
+
+function createRole(permissions: string[], more: Record<string, unknown> = {}, checks: unknown[] = []) {
+  return {
+    action: 'request', method: 'POST', url: ACCESS_PROFILES, headers: ADMIN_BEARER,
+    body: { name: ROLE_NAME, permissions, ...more },
+    expected_status: 200,
+    expect_json: [
+      { path: 'id', matches: '^fap_' }, { path: 'name', equals: ROLE_NAME }, { path: 'status', equals: 'active' },
+      ...permissions.map((p, i) => ({ path: `permissions.${i}`, equals: p })),
+      { path: 'permissions', min_length: permissions.length, max_length: permissions.length },
+      ...checks,
+    ],
+    save: { role_id: 'id' },
+    text: 'Create a temporary role with a unique name',
+    expected: 'The application confirms the new role as active, under the name and with exactly the permissions that were entered.',
+    testData: 'A role name carrying a unique stamp, and the permissions listed in the request.',
+    description: 'create a case-owned functional access profile',
+  };
+}
+
+function rolesListShows(match: Record<string, unknown>, text: string, expected: string) {
+  return {
+    action: 'request', method: 'GET', url: ACCESS_PROFILES, headers: ADMIN_BEARER, expected_status: 200,
+    expect_json: [{ path: 'data', some: match }], text, expected, description: 'list functional access profiles',
+  };
+}
+
+function createMember(more: Record<string, unknown> = {}) {
+  return {
+    action: 'request', method: 'POST', url: ADMIN_USERS, headers: ADMIN_BEARER,
+    body: { email: MEMBER_EMAIL, displayName: MEMBER_DISPLAY, username: MEMBER_USERNAME, ...more },
+    expected_status: 200,
+    expect_json: [
+      { path: 'id', matches: '^usr_' }, { path: 'membershipId', matches: '^mem_' },
+      { path: 'username', equals: MEMBER_USERNAME }, { path: 'email', equals: MEMBER_EMAIL }, { path: 'displayName', equals: MEMBER_DISPLAY },
+      { path: 'status', equals: 'invited' }, { path: 'etag', exists: true },
+    ],
+    save: { user_id: 'id', user_etag: 'etag', membership_id: 'membershipId' },
+    text: 'Add a temporary user with a unique username and email',
+    expected: 'The application confirms the new membership as invited and returns its identifier and its version.',
+    testData: 'A made-up person: display name, username and email carrying a unique stamp.',
+    description: 'create a case-owned invited member',
+  };
+}
+
+/** Remove a role this case created (hard delete) and verify it is gone. */
+function cleanupRole(idVar: string) {
+  return [
+    { ...ADMIN_LOGIN, skip_if_missing: [idVar], text: 'Sign in as the built-in administrator to tidy up', expected: 'The sign-in is accepted.', description: 'administrator sign-in for cleanup' },
+    { action: 'request', method: 'DELETE', url: `${TENANT_ADMIN}/roles/{{${idVar}}}`, headers: ADMIN_BEARER, skip_if_missing: [idVar], expected_status: [200, 404],
+      text: 'Remove the temporary role this test created', expected: 'The role is removed, or was already gone.', description: 'hard-delete the case-owned role through tenant administration' },
+    { action: 'request', method: 'GET', url: ACCESS_PROFILES, headers: ADMIN_BEARER, skip_if_missing: [idVar], expected_status: 200, expected_body_not_contains: `{{${idVar}}}`,
+      text: 'Check that the temporary role is no longer listed', expected: 'The list of roles no longer contains it.', description: 'verify the case-owned role is gone' },
+  ];
+}
+
+/** Remove a user this case created (needs the version it was created with) and verify it is gone. */
+function cleanupMember(idVar: string, etagVar: string) {
+  return [
+    { ...ADMIN_LOGIN, skip_if_missing: [idVar], text: 'Sign in as the built-in administrator to tidy up', expected: 'The sign-in is accepted.', description: 'administrator sign-in for cleanup' },
+    { action: 'request', method: 'DELETE', url: `${TENANT_ADMIN}/users/{{${idVar}}}`, headers: { ...ADMIN_BEARER, 'if-match': `{{${etagVar}}}` }, skip_if_missing: [idVar, etagVar], expected_status: [200, 404],
+      text: 'Remove the temporary user this test created', expected: 'The user is removed, or was already gone.', description: 'delete the case-owned member through tenant administration (If-Match)' },
+    { action: 'request', method: 'GET', url: ADMIN_USERS, headers: ADMIN_BEARER, skip_if_missing: [idVar], expected_status: 200, expected_body_not_contains: `{{${idVar}}}`,
+      text: 'Check that the temporary user is no longer listed', expected: 'The list of users no longer contains it.', description: 'verify the case-owned member is gone' },
+  ];
+}
+
+const DUPLICATE_ROLE_DEFECT = 'Observed on a8d72039ae8e (2026-11-13): the second POST answers 500 {"error":{"code":"internal","message":"Internal error"}}. createFunctionalAccessProfile (apps/api/src/modules/identity.ts) inserts without a name check, the UNIQUE (tenant_id, name) constraint of db/migrations/001_foundation.sql raises, and the error handler in apps/api/src/app.ts answers every non-application error with 500. This case asserts the documented refusal and stays red until the application is fixed.';
+
+/** The second create under a name that is already taken: the documented answer is a conflict. */
+const DUPLICATE_ROLE_REFUSED = {
+  action: 'request', method: 'POST', url: ACCESS_PROFILES, headers: ADMIN_BEARER, body: { name: ROLE_NAME, permissions: ['rules:read'] },
+  expected_status: 409, expect_json: [{ path: 'error.code', equals: 'conflict' }], save: { dup_role_id: 'id' },
+  text: 'Try to create a second role under the very same name',
+  expected: 'The application refuses: a role with that name already exists (conflict, 409).',
+  description: 'duplicate role name must be refused with 409 conflict (observed: 500 internal)',
+};
+
+const ROLE_CREATE_FLOW_CASES: CaseDef[] = [
+  {
+    key: 'SB-UC-roleCreate-MAIN',
+    name: 'UC-roleCreate main flow: Create user role',
+    objective: 'Walk through "Create user role" the way its main use case describes it: the administrator names a job function, enters the exact permissions it carries and an optional feature level, and submits. The application stores the role exactly as entered and shows it in the list of roles.',
+    description: 'Main flow of UC-roleCreate (Create user role): administrator names the job function, enters explicit permission keys and an optional feature level, submits; the system creates the profile. The role dialog lives on /user-management.html ("New role"); the old host page /admin.html was removed. POST /api/v1/admin/functional-access-profiles answers 200 with {id: "fap_...", name, permissions, explicit_deny, status: "active", feature_level, feature_mode}; GET on the same route lists it. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'high', priority: 'p1',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      openUserManagement('<h2 id="ta-role-title">New role</h2>', 'the "New role" dialog'),
+      ADMIN_SIGN_IN,
+      createRole(['rules:read', 'runs:execute'], { featureLevel: 2 }, [{ path: 'feature_level', equals: 2 }, { path: 'feature_mode', equals: 'use' }, { path: 'explicit_deny', max_length: 0 }]),
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME, status: 'active', 'permissions.0': 'rules:read', 'permissions.1': 'runs:execute' },
+        'Ask for the list of roles', 'The new role is listed as active with the two permissions that were entered.'),
+    ],
+    cleanupSteps: cleanupRole('role_id'),
+    tags: ['usecase', 'sand-bench', 'main-flow', 'roleCreate'],
+    dataProfile: { ...ROLE_DATA, data: 'One temporary role with a unique name, two permissions and feature level 2; removed when the test ends.' },
+    expected: 'The role is created exactly as entered, appears in the list of roles, and is removed again afterwards.',
+  },
+  {
+    key: 'SB-UC-roleCreate-ALT-1',
+    name: 'UC-roleCreate alt flow 1: An existing suitable role should be reused; overlap in permissions is not checked.',
+    objective: 'Check an alternative path of "Create user role": an existing suitable role should be reused rather than duplicated. The list of roles shows an existing role with the permissions it carries, so it can be found and reused; the application itself does not stop a second role with the same permissions under a different name.',
+    description: 'Alternate flow 1 of UC-roleCreate (Create user role): "An existing suitable role should be reused rather than duplicated; the create form does not check for semantic overlap, only exact name collision." GET /api/v1/admin/functional-access-profiles shows the existing role with its permissions; a second POST with identical permissions and a different name answers 200. Both roles are case-owned and removed. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createRole(['rules:read', 'datasets:read']),
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME, 'permissions.0': 'rules:read', 'permissions.1': 'datasets:read' },
+        'Ask for the list of roles, as an administrator would before adding another', 'The existing role is listed with the permissions it carries, so it can be reused.'),
+      { action: 'request', method: 'POST', url: ACCESS_PROFILES, headers: ADMIN_BEARER, body: { name: `${ROLE_NAME}-COPY`, permissions: ['rules:read', 'datasets:read'] },
+        expected_status: 200, expect_json: [{ path: 'id', matches: '^fap_' }, { path: 'name', equals: `${ROLE_NAME}-COPY` }, { path: 'status', equals: 'active' }], save: { role_copy_id: 'id' },
+        text: 'Create a second role with the same permissions under a different name',
+        expected: 'The application accepts it: only the name is compared, not what the role allows.',
+        description: 'same permissions, different name: accepted (no semantic-overlap check)' },
+    ],
+    cleanupSteps: [...cleanupRole('role_copy_id'), ...cleanupRole('role_id')],
+    atomicityNote: { reason: 'tests-interaction', detail: 'Two roles are created on purpose: the second, with the same permissions under another name, shows that only the name is compared when a role is created.' },
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'roleCreate'],
+    dataProfile: { ...ROLE_DATA, data: 'Two temporary roles with the same two permissions and different unique names; both removed when the test ends.' },
+    expected: 'The existing role can be found with its permissions, and a look-alike role under another name is accepted.',
+  },
+  {
+    key: 'SB-UC-roleCreate-ALT-2',
+    name: 'UC-roleCreate alt flow 2: Permission strings are stored as entered; there is no list of known permissions.',
+    objective: 'Check an alternative path of "Create user role": permission names are stored exactly as entered, because the application has no list of known permissions to check them against yet. A role created with a made-up permission name is accepted and shows that same name afterwards.',
+    description: 'Alternate flow 2 of UC-roleCreate (Create user role): "Permission strings are stored as entered; there is no server-side allow-list of known permission keys yet." POST /api/v1/admin/functional-access-profiles with a made-up permission answers 200 and echoes it; GET lists the role with that same string. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createRole(['te-made-up:{{ts}}{{rand}}']),
+      rolesListShows({ id: '{{role_id}}', 'permissions.0': 'te-made-up:{{ts}}{{rand}}' },
+        'Ask for the list of roles', 'The role is listed with the made-up permission name, letter for letter as it was entered.'),
+    ],
+    cleanupSteps: cleanupRole('role_id'),
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'roleCreate'],
+    dataProfile: { ...ROLE_DATA, data: 'One temporary role whose only permission is a made-up name carrying a unique stamp; removed when the test ends.' },
+    expected: 'The made-up permission name is accepted and stored unchanged.',
+  },
+  {
+    key: 'SB-UC-roleCreate-EXC-1',
+    name: 'UC-roleCreate exc flow 1: A duplicate name is refused instead of creating a second role.',
+    objective: 'Check that "Create user role" fails safely: a role name that already exists must be refused as a conflict, never accepted as a second role and never answered with an internal failure (currently a known defect: the application fails internally instead of refusing).',
+    description: `Exception flow 1 of UC-roleCreate (Create user role): "A duplicate name within the tenant returns 409 rather than silently creating a second profile." (also acceptance criterion AC-04). A second POST /api/v1/admin/functional-access-profiles with the same name must answer 409 conflict and leave the first role untouched. ${DUPLICATE_ROLE_DEFECT}`,
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createRole(['rules:read']),
+      DUPLICATE_ROLE_REFUSED,
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME, status: 'active' }, 'Ask for the list of roles', 'The first role is still listed, active and unchanged.'),
+    ],
+    cleanupSteps: [...cleanupRole('dup_role_id'), ...cleanupRole('role_id')],
+    atomicityNote: { reason: 'tests-interaction', detail: 'The same name is submitted twice on purpose: the second attempt is the duplicate that must be refused.' },
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'roleCreate', 'known-defect'],
+    dataProfile: { ...ROLE_DATA, data: 'One temporary role with a unique name, then a second attempt under the same name; removed when the test ends.' },
+    expected: 'The duplicate is refused as a conflict and the first role is unchanged.',
+  },
+  {
+    key: 'SB-UC-roleCreate-EXC-2',
+    name: 'UC-roleCreate exc flow 2: An empty name is rejected.',
+    objective: 'Check that "Create user role" fails safely: a role without a name is rejected with a clear explanation, and nothing is created.',
+    description: 'Exception flow 2 of UC-roleCreate (Create user role): "An empty name is rejected with 422." POST /api/v1/admin/functional-access-profiles with name "" answers 422 {error: {code: "validation_failed", message: "name is required"}}; the list then holds no role with an empty name. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      { action: 'request', method: 'POST', url: ACCESS_PROFILES, headers: ADMIN_BEARER, body: { name: '', permissions: ['rules:read'] },
+        expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'name is required' }], save: { stray_role_id: 'id' },
+        text: 'Try to create a role with an empty name',
+        expected: 'The application rejects it and says that a name is required (422).',
+        description: 'empty name is refused with 422 validation_failed' },
+      { action: 'request', method: 'GET', url: ACCESS_PROFILES, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 0 }], expected_body_not_contains: '"name":""',
+        text: 'Ask for the list of roles', expected: 'The list answers and holds no role without a name.', description: 'nothing was created by the refused request' },
+    ],
+    cleanupSteps: cleanupRole('stray_role_id'),
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'roleCreate'],
+    dataProfile: { profile: 'boundary', data: 'A role request whose name is empty; nothing is stored.', source: 'fixed' },
+    expected: 'The nameless role is rejected with a clear message and nothing is created.',
+  },
+];
+
+const ROLES_FLOW_CASES: CaseDef[] = [
+  {
+    key: 'SB-UC-roles-MAIN',
+    name: 'UC-roles main flow: User roles',
+    objective: 'Walk through "User roles" the way its main use case describes it: the administrator opens user and role administration, the application lists the real roles with the permissions each carries, and the administrator creates, edits and retires a role through the supported actions.',
+    description: 'Main flow of UC-roles (User roles): administrator opens supported access administration, the system lists the actual functional profiles, the administrator reviews them and creates, edits or deletes a profile through the registered CRUD routes. Screen: /user-management.html ("User roles" tab; the old /admin.html was removed). Routes: GET/POST /api/v1/admin/functional-access-profiles, PATCH and DELETE /api/v1/admin/functional-access-profiles/:id (DELETE answers {id, deleted: true}), GET /api/v1/admin/data-access-profiles. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'high', priority: 'p1',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      openUserManagement('aria-controls="panel-roles">User roles</button>', 'the "User roles" tab'),
+      ADMIN_SIGN_IN,
+      createRole(['rules:read']),
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME, status: 'active', 'permissions.0': 'rules:read' },
+        'Ask for the list of roles', 'The list shows the role as active with the permission it really carries.'),
+      { action: 'request', method: 'GET', url: DATA_PROFILES, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 0 }],
+        text: 'Ask for the list of data access profiles', expected: 'The application answers with the list (it may be empty).', description: 'list data access profiles' },
+      { action: 'request', method: 'PATCH', url: `${ACCESS_PROFILES}/{{role_id}}`, headers: ADMIN_BEARER, body: { permissions: ['rules:read', 'datasets:read'] },
+        expected_status: 200, expect_json: [{ path: 'id', equals: '{{role_id}}' }, { path: 'name', equals: ROLE_NAME }, { path: 'status', equals: 'active' }, { path: 'permissions.1', equals: 'datasets:read' }, { path: 'permissions', min_length: 2, max_length: 2 }],
+        text: 'Edit the role: give it a second permission', expected: 'The application confirms the role now carries both permissions.', description: 'update the case-owned profile' },
+      { action: 'request', method: 'DELETE', url: `${ACCESS_PROFILES}/{{role_id}}`, headers: ADMIN_BEARER,
+        expected_status: 200, expect_json: [{ path: 'id', equals: '{{role_id}}' }, { path: 'deleted', equals: true }],
+        text: 'Retire the role', expected: 'The application confirms the role was deleted.', description: 'delete (retire) the case-owned profile' },
+    ],
+    cleanupSteps: cleanupRole('role_id'),
+    tags: ['usecase', 'sand-bench', 'main-flow', 'roles'],
+    dataProfile: ROLE_DATA,
+    expected: 'The role is listed with its real permissions and can be created, edited and retired; nothing is left behind.',
+  },
+  {
+    key: 'SB-UC-roles-ALT-1',
+    name: 'UC-roles alt flow 1: Data access profiles are reviewed separately from functional permissions.',
+    objective: 'Check an alternative path of "User roles": data access profiles are reviewed separately from functional permissions. A role (a set of permitted actions) appears in the list of roles and never in the separate list of data access profiles.',
+    description: 'Alternate flow 1 of UC-roles (User roles): "Data access profiles are reviewed separately from functional permissions." A case-owned functional profile is listed by GET /api/v1/admin/functional-access-profiles and is absent from GET /api/v1/admin/data-access-profiles (a separate collection that still answers 200 with a data array). Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      openUserManagement('aria-controls="panel-roles">User roles</button>', 'the "User roles" tab'),
+      ADMIN_SIGN_IN,
+      createRole(['rules:read']),
+      { action: 'request', method: 'GET', url: DATA_PROFILES, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 0 }], expected_body_not_contains: '{{role_id}}',
+        text: 'Ask for the list of data access profiles', expected: 'The list answers and does not contain the role that was just created.', description: 'data access profiles are a separate collection' },
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME }, 'Ask for the list of roles', 'The role is listed here, with the other roles.'),
+    ],
+    cleanupSteps: cleanupRole('role_id'),
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'roles'],
+    dataProfile: ROLE_DATA,
+    expected: 'Roles and data access profiles are two separate lists.',
+  },
+  {
+    key: 'SB-UC-roles-ALT-2',
+    name: 'UC-roles alt flow 2: A historical User roles setting is not a role editor.',
+    objective: 'Check an alternative path of "User roles": the historical "User roles" settings page is not a role editor. It only points to the User management screen, which is where roles are edited, and the real lists of roles and data access profiles still answer for the administrator.',
+    description: 'Alternate flow 2 of UC-roles (User roles): "A historical User roles setting is not a role editor." /configuration-user-roles.html is a "moved" pointer to /user-management.html#roles with no form of its own; the role form (#ta-role-form) lives on /user-management.html. GET /api/v1/admin/functional-access-profiles and GET /api/v1/admin/data-access-profiles answer 200 with a data array for the administrator. Read-only. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      { action: 'request', method: 'GET', url: '{{web}}/configuration-user-roles.html', expected_status: 200, expected_body_contains: 'href="/user-management.html#roles"', expected_body_not_contains: '<form',
+        text: 'Open the historical "User roles" settings page', expected: 'The page loads, points to the User management screen and has no form of its own.', description: 'the historical page is only a pointer' },
+      { action: 'request', method: 'GET', url: USER_MANAGEMENT, expected_status: 200, expected_body_contains: '<form id="ta-role-form"',
+        text: 'Open the User management screen it points to', expected: 'The screen loads and holds the form for adding or editing a role.', description: 'the role editor lives on the User management screen' },
+      ADMIN_SIGN_IN,
+      { action: 'request', method: 'GET', url: ACCESS_PROFILES, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 0 }],
+        text: 'Ask for the list of roles', expected: 'The application answers with the list (it may be empty).', description: 'list functional access profiles' },
+      { action: 'request', method: 'GET', url: DATA_PROFILES, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 0 }],
+        text: 'Ask for the list of data access profiles', expected: 'The application answers with the list (it may be empty).', description: 'list data access profiles' },
+    ],
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'roles'],
+    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
+    expected: 'The historical page only points to User management; the real role lists answer.',
+  },
+  {
+    key: 'SB-UC-roles-EXC-1',
+    name: 'UC-roles exc flow 1: Deleting a role that is assigned to a user is refused.',
+    objective: 'Check that "User roles" fails safely: a role that is still assigned to a user must not be deleted. The request must be refused as a conflict, so the user is not left holding a role that no longer exists (currently a known defect: the application retires the role anyway).',
+    description: 'Exception flow 1 of UC-roles (User roles): "Deleting a role that has at least one active assignment is rejected with 409 rather than silently orphaning the assignment." (also acceptance criterion AC-03). A case-owned role is assigned to a case-owned invited member (POST /api/v1/admin/users with functionalProfileId); DELETE /api/v1/admin/functional-access-profiles/:id must then answer 409 conflict and the role must stay active. Observed on a8d72039ae8e (2026-11-13): 200 {"id":"fap_...","deleted":true} and the role is listed with status "deleted" while the assignment is still active. deleteFunctionalAccessProfile (apps/api/src/modules/identity.ts) never looks at access_assignments; only DELETE /api/v1/admin/tenants/:tenantId/roles/:roleId (deleteTenantRole, tenantAdmin.ts) refuses with 409. This case asserts the documented refusal and stays red until the application is fixed.',
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createRole(['rules:read']),
+      { ...createMember({ functionalProfileId: '{{role_id}}' }), text: 'Add a temporary user and give them that role', description: 'create a case-owned invited member holding the role' },
+      { action: 'request', method: 'DELETE', url: `${ACCESS_PROFILES}/{{role_id}}`, headers: ADMIN_BEARER,
+        expected_status: 409, expect_json: [{ path: 'error.code', equals: 'conflict' }],
+        text: 'Try to delete the role while the user still holds it',
+        expected: 'The application refuses: the role is still assigned to a user (conflict, 409).',
+        description: 'delete of an assigned role must be refused with 409 conflict (observed: 200 deleted)' },
+      rolesListShows({ id: '{{role_id}}', status: 'active' }, 'Ask for the list of roles', 'The role is still listed as active.'),
+    ],
+    cleanupSteps: [...cleanupMember('user_id', 'user_etag'), ...cleanupRole('role_id')],
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'roles', 'known-defect'],
+    dataProfile: { profile: 'synthetic (case-owned)', data: 'One temporary role and one temporary user who is given that role; both removed when the test ends.', source: 'generated per run' },
+    expected: 'The delete is refused as a conflict and the role stays active.',
+  },
+  {
+    key: 'SB-UC-roles-EXC-2',
+    name: 'UC-roles exc flow 2: A duplicate role name is refused.',
+    objective: 'Check that "User roles" fails safely: two roles cannot share a name. Creating a role under a name that is already in use must be refused as a conflict and leave the existing role as it was (currently a known defect: the application fails internally instead of refusing).',
+    description: `Exception flow 2 of UC-roles (User roles): "A duplicate role name within the tenant is rejected with 409." A second POST /api/v1/admin/functional-access-profiles with the same name must answer 409 conflict and leave the first role untouched. ${DUPLICATE_ROLE_DEFECT}`,
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createRole(['rules:read']),
+      DUPLICATE_ROLE_REFUSED,
+      rolesListShows({ id: '{{role_id}}', name: ROLE_NAME, status: 'active' }, 'Ask for the list of roles', 'The existing role is still listed, active and unchanged.'),
+    ],
+    cleanupSteps: [...cleanupRole('dup_role_id'), ...cleanupRole('role_id')],
+    atomicityNote: { reason: 'tests-interaction', detail: 'The same name is submitted twice on purpose: the second attempt is the duplicate that must be refused.' },
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'roles', 'known-defect'],
+    dataProfile: { ...ROLE_DATA, data: 'One temporary role with a unique name, then a second attempt under the same name; removed when the test ends.' },
+    expected: 'The duplicate name is refused as a conflict and the existing role is unchanged.',
+  },
+];
+
+const USER_CREATE_FLOW_CASES: CaseDef[] = [
+  {
+    key: 'SB-UC-userCreate-MAIN',
+    name: 'UC-userCreate main flow: Create new user',
+    objective: 'Walk through "Create new user" the way its main use case describes it: the administrator enters a person\'s name, username and email and submits. The application confirms the new membership as invited, with its own identifier and version, and shows the person in the list of users.',
+    description: 'Main flow of UC-userCreate (Create new user): administrator enters the intended identity, the system checks the required fields and existing username/email membership, the administrator submits, the system reports the confirmed membership (status invited). The user dialog lives on /user-management.html ("New user"); the old host page /admin.html was removed. POST /api/v1/admin/users answers 200 with {id: "usr_...", membershipId: "mem_...", email, displayName, username, status: "invited", etag}; GET /api/v1/admin/users lists the member. The case-owned member is removed through DELETE /api/v1/admin/tenants/tenant_default/users/:id with If-Match. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'high', priority: 'p1',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      openUserManagement('<h2 id="ta-user-title">New user</h2>', 'the "New user" dialog'),
+      ADMIN_SIGN_IN,
+      createMember(),
+      { action: 'request', method: 'GET', url: ADMIN_USERS, headers: ADMIN_BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{user_id}}', membership_id: '{{membership_id}}', username: MEMBER_USERNAME, email: MEMBER_EMAIL, display_name: MEMBER_DISPLAY, status: 'invited' } }],
+        text: 'Ask for the list of users', expected: 'The new person is listed as invited, with the name, username and email that were entered.', description: 'list users' },
+    ],
+    cleanupSteps: cleanupMember('user_id', 'user_etag'),
+    tags: ['usecase', 'sand-bench', 'main-flow', 'userCreate'],
+    dataProfile: MEMBER_DATA,
+    expected: 'The membership is confirmed as invited, the person appears in the list of users, and is removed again afterwards.',
+  },
+  {
+    key: 'SB-UC-userCreate-ALT-1',
+    name: 'UC-userCreate alt flow 1: A person is one identity attached to a membership, not a duplicate identity.',
+    objective: 'Check an alternative path of "Create new user": a person who already has an identity is attached to a new membership rather than given a second identity. On this single-organisation deployment the checkable part is that the application keeps the person and the membership as two separate records and reports both when a user is created.',
+    description: 'Alternate flow 1 of UC-userCreate (Create new user): "A person whose email already exists as a global user record is attached to a new tenant membership rather than a duplicate identity." Closest executable proxy: POST /api/v1/admin/users returns the identity (id "usr_...") and the membership (membershipId "mem_...") as two records, and GET /api/v1/admin/users lists the member with both. The cross-tenant half needs an email that exists with no membership in this tenant, i.e. a second tenant, and the application has no tenant delete route, so it cannot be exercised without leaving a tenant behind. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createMember(),
+      { action: 'request', method: 'GET', url: ADMIN_USERS, headers: ADMIN_BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{user_id}}', membership_id: '{{membership_id}}', username: MEMBER_USERNAME } }],
+        text: 'Ask for the list of users', expected: 'The person is listed once, with the identity and the membership that were reported at creation.', description: 'identity and membership are separate records' },
+    ],
+    cleanupSteps: cleanupMember('user_id', 'user_etag'),
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'userCreate'],
+    dataProfile: MEMBER_DATA,
+    expected: 'The person and the membership are reported as two separate records.',
+  },
+  {
+    key: 'SB-UC-userCreate-ALT-2',
+    name: 'UC-userCreate alt flow 2: No invitation email yet; the member is created invited with no credential.',
+    objective: 'Check an alternative path of "Create new user": there is no invitation email yet, so the new member is created as invited with no password. The list of users shows that no password is set, and nobody can sign in under that username.',
+    description: 'Alternate flow 2 of UC-userCreate (Create new user): "An invitation email flow is still not implemented; membership is created in invited status with no credential." GET /api/v1/admin/tenants/tenant_default/users lists the member with status "invited" and hasPassword false; POST /api/v1/session/login with that username answers 401 {error: {code: "unauthorized"}}. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'low', priority: 'p3',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createMember(),
+      { action: 'request', method: 'GET', url: `${TENANT_ADMIN}/users`, headers: ADMIN_BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{user_id}}', username: MEMBER_USERNAME, status: 'invited', hasPassword: false } }],
+        text: 'Ask for the detailed list of users', expected: 'The new person is listed as invited, with no password set.', description: 'tenant user list: invited, hasPassword false' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: MEMBER_USERNAME, password: 'Not-A-Real-Password-1!' },
+        expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }],
+        text: 'Try to sign in under the new username with a made-up password', expected: 'The sign-in is refused (401): the invited member has no password yet.', description: 'an invited member cannot sign in' },
+    ],
+    cleanupSteps: cleanupMember('user_id', 'user_etag'),
+    tags: ['usecase', 'sand-bench', 'alternate-flow', 'userCreate'],
+    dataProfile: MEMBER_DATA,
+    expected: 'The member exists as invited with no password, and cannot sign in.',
+  },
+  {
+    key: 'SB-UC-userCreate-EXC-1',
+    name: 'UC-userCreate exc flow 1: A role that does not exist is rejected, not silently ignored.',
+    objective: 'Check that "Create new user" fails safely: when the chosen role does not exist, the whole request is rejected with a clear explanation. The user is not created without the role.',
+    description: 'Exception flow 1 of UC-userCreate (Create new user): "A functionalProfileId that does not belong to the tenant is rejected with 422, not silently ignored." POST /api/v1/admin/users with an unknown functionalProfileId answers 422 {error: {code: "validation_failed", message: "functionalProfileId does not exist for this tenant"}} and GET /api/v1/admin/users does not list the username. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      { action: 'request', method: 'POST', url: ADMIN_USERS, headers: ADMIN_BEARER,
+        body: { email: MEMBER_EMAIL, displayName: MEMBER_DISPLAY, username: MEMBER_USERNAME, functionalProfileId: 'fap_te_no_such_role' },
+        expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'functionalProfileId does not exist for this tenant' }],
+        save: { stray_user_id: 'id', stray_user_etag: 'etag' },
+        text: 'Try to add a user with a role that does not exist', expected: 'The application rejects the request and says the role does not exist (422).', description: 'unknown functionalProfileId is refused with 422' },
+      { action: 'request', method: 'GET', url: ADMIN_USERS, headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true, min_length: 1 }], expected_body_not_contains: MEMBER_USERNAME,
+        text: 'Ask for the list of users', expected: 'The list answers and does not contain the rejected username.', description: 'nothing was created by the refused request' },
+    ],
+    cleanupSteps: cleanupMember('stray_user_id', 'stray_user_etag'),
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'userCreate'],
+    dataProfile: { profile: 'negative', data: 'A made-up person with a unique username and email, and a role identifier that does not exist; nothing is stored.', source: 'generated per run' },
+    expected: 'The request is rejected with a clear message and no user is created.',
+  },
+  {
+    key: 'SB-UC-userCreate-EXC-2',
+    name: 'UC-userCreate exc flow 2: A duplicate username or email is refused, not silently overwritten.',
+    objective: 'Check that "Create new user" fails safely: a username or an email that is already taken is refused as a conflict, and the existing user is left exactly as it was.',
+    description: 'Exception flow 2 of UC-userCreate (Create new user): "A duplicate username or email within the tenant returns 409, not a silent overwrite." After a case-owned member exists, POST /api/v1/admin/users with the same username (other email) and with the same email (other username) each answer 409 {error: {code: "conflict", message: "A user with this username or email already exists in this tenant"}}; GET /api/v1/admin/users still lists the first member unchanged. Verified 2026-11-13 on a8d72039ae8e.',
+    ...UC_FLOW, severity: 'medium', priority: 'p2',
+    preconditions: ADMIN_PRECONDITIONS,
+    steps: [
+      ADMIN_SIGN_IN,
+      createMember(),
+      { action: 'request', method: 'POST', url: ADMIN_USERS, headers: ADMIN_BEARER,
+        body: { email: `other.${MEMBER_EMAIL}`, displayName: 'TE UC duplicate username', username: MEMBER_USERNAME },
+        expected_status: 409, expect_json: [{ path: 'error.code', equals: 'conflict' }, { path: 'error.message', equals: 'A user with this username or email already exists in this tenant' }],
+        save: { dup_user_id: 'id', dup_user_etag: 'etag' },
+        text: 'Try to add another user under the same username', expected: 'The application refuses: the username is already taken (conflict, 409).', description: 'duplicate username is refused with 409' },
+      { action: 'request', method: 'POST', url: ADMIN_USERS, headers: ADMIN_BEARER,
+        body: { email: MEMBER_EMAIL, displayName: 'TE UC duplicate email', username: `other.${MEMBER_USERNAME}` },
+        expected_status: 409, expect_json: [{ path: 'error.code', equals: 'conflict' }, { path: 'error.message', equals: 'A user with this username or email already exists in this tenant' }],
+        save: { dup_email_user_id: 'id', dup_email_user_etag: 'etag' },
+        text: 'Try to add another user with the same email', expected: 'The application refuses: the email is already taken (conflict, 409).', description: 'duplicate email is refused with 409' },
+      { action: 'request', method: 'GET', url: ADMIN_USERS, headers: ADMIN_BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{user_id}}', username: MEMBER_USERNAME, email: MEMBER_EMAIL, display_name: MEMBER_DISPLAY, status: 'invited' } }],
+        text: 'Ask for the list of users', expected: 'The first user is still listed with the original name, username and email.', description: 'the existing member was not overwritten' },
+    ],
+    cleanupSteps: [...cleanupMember('dup_user_id', 'dup_user_etag'), ...cleanupMember('dup_email_user_id', 'dup_email_user_etag'), ...cleanupMember('user_id', 'user_etag')],
+    atomicityNote: { reason: 'tests-interaction', detail: 'The same username and the same email are submitted again on purpose: those attempts are the duplicates that must be refused.' },
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'userCreate'],
+    dataProfile: { ...MEMBER_DATA, data: 'One temporary user, then two more attempts reusing its username and its email; removed when the test ends.' },
+    expected: 'Both duplicates are refused as conflicts and the first user is unchanged.',
+  },
+];
 
 export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
   {
@@ -1779,161 +2253,8 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
     expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
   },
-  {
-    key: "SB-UC-roleCreate-MAIN",
-    name: "UC-roleCreate main flow: Create user role",
-    objective: 'Walk through the "Create user role" screen the way its main use case describes it: administrator names the job function. Administrator selects explicit supported permissions. Administrator reviews any separate feature slice. System validates the grouping through a confirmed provisioning contract. System confirms the created identity before it becomes assignable.',
-    description: "Main flow of UC-roleCreate (Create user role): Administrator names the job function. Administrator selects explicit supported permissions. Administrator reviews any separate feature slice. System validates the grouping through a confirmed provisioning contract. System confirms the created identity before it becomes assignable. Touches the screen's real route (no backing API is registered for this use case).",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","main-flow","roleCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; registered read APIs respond 200 with their documented shape.",
-  },
-  {
-    key: "SB-UC-roleCreate-ALT-1",
-    name: "UC-roleCreate alt flow 1: An existing suitable role should be reused rather than duplicated.",
-    objective: 'Check an alternative path of "Create user role": an existing suitable role should be reused rather than duplicated.',
-    description: "Alternate flow 1 of UC-roleCreate (Create user role): \"An existing suitable role should be reused rather than duplicated.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","roleCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roleCreate-ALT-2",
-    name: "UC-roleCreate alt flow 2: An incomplete role remains a proposal until provisioning exists.",
-    objective: 'Check an alternative path of "Create user role": an incomplete role remains a proposal until provisioning exists.',
-    description: "Alternate flow 2 of UC-roleCreate (Create user role): \"An incomplete role remains a proposal until provisioning exists.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","roleCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roleCreate-EXC-1",
-    name: "UC-roleCreate exc flow 1: Unknown permission strings must not become effective silently.",
-    objective: 'Check that "Create user role" fails safely: unknown permission strings must not become effective silently.',
-    description: "Exception flow 1 of UC-roleCreate (Create user role): \"Unknown permission strings must not become effective silently.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","roleCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roleCreate-EXC-2",
-    name: "UC-roleCreate exc flow 2: Duplicate name scope and role deletion policy remain decisions.",
-    objective: 'Check that "Create user role" fails safely: duplicate name scope and role deletion policy remain decisions.',
-    description: "Exception flow 2 of UC-roleCreate (Create user role): \"Duplicate name scope and role deletion policy remain decisions.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new role, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","roleCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roles-MAIN",
-    name: "UC-roles main flow: User roles",
-    objective: 'Walk through the "User roles" screen the way its main use case describes it: administrator opens supported access administration. System lists the actual functional profiles. Administrator reviews permitted operations and effective assignments. Administrator identifies a supported change path or records a missing capability.',
-    description: "Main flow of UC-roles (User roles): Administrator opens supported access administration. System lists the actual functional profiles. Administrator reviews permitted operations and effective assignments. Administrator identifies a supported change path or records a missing capability. Touches the screen's real route and its registered API(s): GET /api/v1/admin/functional-access-profiles, GET /api/v1/admin/data-access-profiles.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
-      ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
-    ],
-    tags: ["usecase","sand-bench","main-flow","roles"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; registered read APIs respond 200 with their documented shape.",
-  },
-  {
-    key: "SB-UC-roles-ALT-1",
-    name: "UC-roles alt flow 1: Data access profiles are reviewed separately from functional permissio",
-    objective: 'Check an alternative path of "User roles": data access profiles are reviewed separately from functional permissions.',
-    description: "Alternate flow 1 of UC-roles (User roles): \"Data access profiles are reviewed separately from functional permissions.\" Re-verifies the screen route and its backing read on this flow.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
-      ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","roles"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roles-ALT-2",
-    name: "UC-roles alt flow 2: A historical User roles setting is not a role editor.",
-    objective: 'Check an alternative path of "User roles": a historical User roles setting is not a role editor.',
-    description: "Alternate flow 2 of UC-roles (User roles): \"A historical User roles setting is not a role editor.\" Re-verifies the screen route and its backing read on this flow.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
-      ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","roles"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roles-EXC-1",
-    name: "UC-roles exc flow 1: Unregistered role CRUD is not claimed available.",
-    objective: 'Check that "User roles" fails safely: unregistered role create/edit/delete is not claimed available.',
-    description: "Exception flow 1 of UC-roles (User roles): \"Unregistered role CRUD is not claimed available.\" Re-verifies the screen route and its backing read on this flow.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
-      ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","roles"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-roles-EXC-2",
-    name: "UC-roles exc flow 2: Deleting an assigned role requires an agreed dependency policy.",
-    objective: 'Check that "User roles" fails safely: deleting an assigned role requires an agreed dependency policy.',
-    description: "Exception flow 2 of UC-roles (User roles): \"Deleting an assigned role requires an agreed dependency policy.\" Re-verifies the screen route and its backing read on this flow.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load screen' },
-      ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/functional-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/functional-access-profiles" },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/data-access-profiles', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: "/api/v1/admin/data-access-profiles" }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","roles"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
+  ...ROLE_CREATE_FLOW_CASES,
+  ...ROLES_FLOW_CASES,
   {
     key: "SB-UC-ruleBenchExisting-MAIN",
     name: "UC-ruleBenchExisting main flow: Existing rules",
@@ -2634,74 +2955,5 @@ export const SANDBENCH_USECASE_FLOW_CASES_BATCH1: CaseDef[] = [
     dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
     expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
   },
-  {
-    key: "SB-UC-userCreate-MAIN",
-    name: "UC-userCreate main flow: Create new user",
-    objective: 'Walk through the "Create new user" screen the way its main use case describes it: administrator enters the intended person identity. System checks required identity fields and existing membership under the agreed policy. Administrator reviews the intended tenant and assignments. Administrator explicitly submits through a supported provisioning path. System reports confirmed membership or a precise failure.',
-    description: "Main flow of UC-userCreate (Create new user): Administrator enters the intended person identity. System checks required identity fields and existing membership under the agreed policy. Administrator reviews the intended tenant and assignments. Administrator explicitly submits through a supported provisioning path. System reports confirmed membership or a precise failure. Touches the screen's real route (no backing API is registered for this use case).",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "high", priority: "p1",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","main-flow","userCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; registered read APIs respond 200 with their documented shape.",
-  },
-  {
-    key: "SB-UC-userCreate-ALT-1",
-    name: "UC-userCreate alt flow 1: An existing identity may need membership assignment rather than anothe",
-    objective: 'Check an alternative path of "Create new user": an existing identity may need membership assignment rather than another account.',
-    description: "Alternate flow 1 of UC-userCreate (Create new user): \"An existing identity may need membership assignment rather than another account.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","userCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-userCreate-ALT-2",
-    name: "UC-userCreate alt flow 2: An invitation-based flow is proposed until its endpoint and expiry rul",
-    objective: 'Check an alternative path of "Create new user": an invitation-based flow is proposed until its endpoint and expiry rules are defined.',
-    description: "Alternate flow 2 of UC-userCreate (Create new user): \"An invitation-based flow is proposed until its endpoint and expiry rules are defined.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "low", priority: "p3",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","alternate-flow","userCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-userCreate-EXC-1",
-    name: "UC-userCreate exc flow 1: An invalid role must not silently become the intended role.",
-    objective: 'Check that "Create new user" fails safely: an invalid role must not silently become the intended role.',
-    description: "Exception flow 1 of UC-userCreate (Create new user): \"An invalid role must not silently become the intended role.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","userCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  },
-  {
-    key: "SB-UC-userCreate-EXC-2",
-    name: "UC-userCreate exc flow 2: Duplicate identity behavior requires a confirmed scope before assignin",
-    objective: 'Check that "Create new user" fails safely: duplicate identity behavior requires a confirmed scope before assigning a specific response code.',
-    description: "Exception flow 2 of UC-userCreate (Create new user): \"Duplicate identity behavior requires a confirmed scope before assigning a specific response code.\" No backing API is registered for this use case; this flow is evidenced only by the plain navigation above.",
-    suiteKey: 'sb-usecase', testType: 'acceptance', method: "http", severity: "medium", priority: "p2",
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
-    steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/admin.html', expected_status: 200, expected_body_contains: '<title>Sand Bench', description: 'load host screen (modal: new user, within Identities)' }
-    ],
-    tags: ["usecase","sand-bench","exception-flow","userCreate"],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload; verifies navigation and read contracts only.', source: 'n/a' },
-    expected: "Screen route resolves; the flow's specific contract holds under the executable proxy described above.",
-  }
+  ...USER_CREATE_FLOW_CASES,
 ];
