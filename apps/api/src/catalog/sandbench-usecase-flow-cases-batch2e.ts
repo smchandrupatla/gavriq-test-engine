@@ -34,6 +34,32 @@ const ADMIN_LOGIN = {
 };
 const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
 
+const TENANT_USERS = '{{api}}/api/v1/admin/tenants/tenant_default/users';
+
+/**
+ * A temporary user owned by the case (the user list is shared by every case running at the
+ * same time, so a case never reads "the first user"). Created by the administrator with a
+ * unique per-run name; answers 201 with the user's id and version (etag).
+ */
+function createOwnUser(tag: string) {
+  const username = `te-uc-users-${tag}-{{ts}}-{{rand}}`;
+  return {
+    action: 'request', method: 'POST', url: TENANT_USERS, headers: ADMIN_BEARER,
+    body: { username, displayName: `TE use-case users ${tag} {{rand}}`, email: `${username}@example.invalid`, password: 'te-pw-{{rand}}-{{ts}}', securityQuestion: 'q', securityAnswer: 'a' },
+    expected_status: 201,
+    expect_json: [{ path: 'id', matches: '^usr_' }, { path: 'username', equals: username }, { path: 'status', equals: 'active' }, { path: 'roles', max_length: 0 }],
+    save: { own_user_id: 'id', own_user_etag: 'etag' },
+    description: 'create this case\'s own temporary user',
+  };
+}
+
+/** Delete the case's temporary user with the version returned at creation, then confirm it left the user list. */
+const cleanupOwnUser = [
+  { ...ADMIN_LOGIN, skip_if_missing: ['own_user_id'], description: 'admin login for cleanup' },
+  { action: 'request', method: 'DELETE', url: `${TENANT_USERS}/{{own_user_id}}`, headers: { ...ADMIN_BEARER, 'if-match': '{{own_user_etag}}' }, skip_if_missing: ['own_user_id', 'own_user_etag'], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }, { path: 'userId', equals: '{{own_user_id}}' }], description: 'delete the case-owned user (If-Match: the version returned at creation)' },
+  { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, skip_if_missing: ['own_user_id'], expected_status: 200, expected_body_not_contains: '{{own_user_id}}', description: 'verify the case-owned user is gone from the user list' },
+];
+
 const C: CaseDef[] = [];
 
 /* ------------------------------------------------------------------------ */
@@ -98,7 +124,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/use-cases/not-a-real-page-{{ts}}', headers: BEARER, expected_status: 404, description: 'unknown page key' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/use-cases/not-a-real-page-{{ts}}', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error', equals: 'use_case_not_found' }, { path: 'page', equals: 'not-a-real-page-{{ts}}' }, { path: 'goal', exists: false }], description: 'unknown page key' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'useCaseEditor'],
     dataProfile: { profile: 'negative', data: 'A fabricated page key.', source: 'n/a' },
@@ -134,7 +160,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/?page=useCaseReview', expected_status: 200, description: 'console shell loads (useCaseReview mounts client-side inside the React console)' },
+      { action: 'request', method: 'GET', url: '{{web}}/use-case-review.html', expected_status: 200, expected_body_contains: 'data-sbe-page="useCaseReview"', description: 'load the Use case review screen (its own page; the web tier redirects to its /v/<id> address, which is followed)' },
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/use-cases/review', headers: BEARER, expected_status: 200, expect_json: [{ path: 'reviewer', exists: true }, { path: 'mode', equals: 'deterministic-contract-review' }, { path: 'data', min_length: 1 }], description: 'run the deterministic review' },
     ],
@@ -151,7 +177,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/use-cases/review/overview', headers: BEARER, expected_status: 200, description: 'review a single named page' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/use-cases/review/overview', headers: BEARER, expected_status: 200, expect_json: [{ path: 'page', equals: 'overview' }, { path: 'id', equals: 'UC-overview' }, { path: 'status', exists: true }, { path: 'findings', min_length: 0 }, { path: 'checkedAt', exists: true }, { path: 'checkedBy', exists: true }], description: 'review a single named page' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'useCaseReview'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
@@ -182,7 +208,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/use-cases/review/not-a-real-page-{{ts}}', headers: BEARER, expected_status: 404, description: 'review of a nonexistent page' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/use-cases/review/not-a-real-page-{{ts}}', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error', equals: 'use_case_not_found' }, { path: 'page', equals: 'not-a-real-page-{{ts}}' }, { path: 'findings', exists: false }], description: 'review of a nonexistent page' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'useCaseReview'],
     dataProfile: { profile: 'negative', data: 'A fabricated page key.', source: 'n/a' },
@@ -214,19 +240,21 @@ C.push(
   {
     key: 'SB-UC-users-MAIN',
     name: 'UC-users main flow: Users',
-    objective: 'Walk through the "Users" screen the way its main use case describes it: administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access.',
-    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users and GET /api/v1/admin/users/:userId/effective-access. The user admin screen lives at /configuration-users.html (the old /admin.html retired when the console was reorganised); the route-shield 302s the request to a short-id URL, so [200, 302] both count as reachable.',
+    objective: 'Walk through the "Users" screen the way its main use case describes it: the administrator opens user administration, retrieves the users, selects one — a temporary user this test creates for itself — and retrieves that user\'s effective access, which is empty for a user with no roles.',
+    description: 'Main flow of UC-users (Users): administrator opens the supported user administration surface, retrieves tenant users, selects one, and retrieves its effective access. Touches GET /api/v1/admin/users (rows {id, email, display_name, status, username, etag, membership_id}) and GET /api/v1/admin/users/:userId/effective-access ({userId, functionalPermissions, explicitDenies, dataScopes, assignments, conflicts, evaluatedAt}). The selected user is one the case creates itself (POST /api/v1/admin/tenants/tenant_default/users, 201) and deletes in cleanup — the list is shared by every case running at the same time, so "the first user in the list" can be another case\'s temporary user. The user admin screen lives at /configuration-users.html (the web tier redirects it to its /v/<id> address).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
+    preconditions: 'Sand Bench web/api reachable; the built-in administrator can sign in.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/configuration-users.html', expected_status: [200, 302], description: 'load screen (route-shield may 302 to /v/<id>)' },
+      { action: 'request', method: 'GET', url: '{{web}}/configuration-users.html', expected_status: 200, expected_body_contains: 'data-sbe-page="configurationUsers"', description: 'load screen (the web tier redirects to the page\'s /v/<id> address, which is followed; the Users page answers there)' },
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { any_user_id: 'data.0.id' }, description: 'retrieve tenant users' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{any_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{any_user_id}}' }, { path: 'functionalPermissions', exists: true }], description: 'retrieve effective access for that user' },
+      createOwnUser('main'),
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', some: { id: '{{own_user_id}}', status: 'active', etag: '{{own_user_etag}}' } }], description: 'retrieve tenant users: the list includes this case\'s user' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{own_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{own_user_id}}' }, { path: 'functionalPermissions', max_length: 0 }, { path: 'explicitDenies', max_length: 0 }, { path: 'dataScopes', max_length: 0 }, { path: 'assignments', max_length: 0 }, { path: 'conflicts', max_length: 0 }, { path: 'evaluatedAt', exists: true }], description: 'retrieve effective access for that user: a user with no roles has no permissions, scopes or assignments' },
     ],
+    cleanupSteps: cleanupOwnUser,
     tags: ['usecase', 'sand-bench', 'main-flow', 'users'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: 'Effective access is retrieved for the exact selected user id.',
+    dataProfile: { profile: 'synthetic-named', data: 'One temporary user with a unique per-run name and no roles.', source: 'Created by this case through the administrator\'s user administration and deleted in cleanup.' },
+    expected: 'The user list includes the case\'s own user, and effective access is retrieved for exactly that user id with every access list empty.',
   },
   {
     key: 'SB-UC-users-ALT-1',
@@ -237,7 +265,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'users read' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }, { path: 'data.0.id', exists: true }, { path: 'data.0.username', exists: true }, { path: 'data.0.status', exists: true }, { path: 'data.0.etag', exists: true }], description: 'users read: a well-formed list of user rows (the built-in administrator is always a member)' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'users'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
@@ -246,19 +274,21 @@ C.push(
   {
     key: 'SB-UC-users-ALT-2',
     name: 'UC-users alt flow 2: Effective access may be inspected without changing assignments.',
-    objective: 'Check an alternative path of "Users": effective access may be inspected without changing assignments. Reading effective access twice for the same user returns the same assignment data both times — inspection alone never mutates it.',
-    description: 'Alternate flow 2 of UC-users (Users): "Effective access may be inspected without changing assignments." Reading effective access twice for the same user returns the same assignment data both times — inspection alone never mutates it.',
+    objective: 'Check an alternative path of "Users": effective access may be inspected without changing assignments. Reading the effective access of a temporary user twice gives the same answer both times, and afterwards the user record is still at the version it had when it was created — looking alone never changes it.',
+    description: 'Alternate flow 2 of UC-users (Users): "Effective access may be inspected without changing assignments." The case creates its own user (no roles), reads GET /api/v1/admin/users/:userId/effective-access twice — both answers carry the same user id and empty functionalPermissions/assignments — and then confirms in GET /api/v1/admin/users that the user\'s etag is still the one returned at creation, i.e. inspection wrote nothing.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
-    preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
+    preconditions: 'Sand Bench web/api reachable; the built-in administrator can sign in.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, save: { any_user_id: 'data.0.id' }, description: 'pick a user' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{any_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'functionalPermissions', exists: true }], description: 'first read' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{any_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'functionalPermissions', exists: true }], description: 'second read, unchanged' },
+      createOwnUser('alt2'),
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{own_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{own_user_id}}' }, { path: 'functionalPermissions', max_length: 0 }, { path: 'assignments', max_length: 0 }], description: 'first read' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/{{own_user_id}}/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: '{{own_user_id}}' }, { path: 'functionalPermissions', max_length: 0 }, { path: 'assignments', max_length: 0 }], description: 'second read, unchanged' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'data', some: { id: '{{own_user_id}}', status: 'active', etag: '{{own_user_etag}}' } }], description: 'the user record is still at its creation version: inspecting it changed nothing' },
     ],
+    cleanupSteps: cleanupOwnUser,
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'users'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: 'Both reads succeed identically; inspection alone never mutates assignments.',
+    dataProfile: { profile: 'synthetic-named', data: 'One temporary user with a unique per-run name and no roles.', source: 'Created by this case through the administrator\'s user administration and deleted in cleanup.' },
+    expected: 'Both reads succeed identically and the user\'s version is unchanged; inspection alone never mutates assignments.',
   },
   {
     key: 'SB-UC-users-EXC-1',
@@ -269,7 +299,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/users', headers: ADMIN_BEARER, expected_status: 404, description: 'the historical, unregistered path is genuinely absent' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/users', headers: ADMIN_BEARER, expected_status: 404, expect_json: [{ path: 'message', equals: 'Route GET:/api/v1/users not found' }, { path: 'data', exists: false }], description: 'the historical, unregistered path is genuinely absent' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'users'],
     dataProfile: { profile: 'negative', data: 'A plausible-looking but unregistered path.', source: 'n/a' },
@@ -284,7 +314,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/user_does_not_exist_00000000/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: 'user_does_not_exist_00000000' }, { path: 'functionalPermissions', min_length: 0 }, { path: 'assignments', min_length: 0 }], description: 'nonexistent user id: echoed back with empty access, never another real user' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users/user_does_not_exist_00000000/effective-access', headers: ADMIN_BEARER, expected_status: 200, expect_json: [{ path: 'userId', equals: 'user_does_not_exist_00000000' }, { path: 'functionalPermissions', max_length: 0 }, { path: 'explicitDenies', max_length: 0 }, { path: 'dataScopes', max_length: 0 }, { path: 'assignments', max_length: 0 }], description: 'nonexistent user id: echoed back with empty access, never another real user' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'users'],
     dataProfile: { profile: 'negative', data: 'A fabricated user id.', source: 'n/a' },
