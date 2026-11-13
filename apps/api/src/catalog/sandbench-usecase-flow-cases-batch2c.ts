@@ -164,11 +164,11 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/definitions/preview', headers: BEARER, body: { messageTypeCode: 'not.a.real.type.{{ts}}', count: 2 }, expected_status: [400, 404, 422], description: 'preview against an unknown type fails cleanly' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/definitions/preview', headers: BEARER, body: { messageTypeCode: 'not.a.real.type.{{ts}}', count: 2 }, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'Message type not found' }, { path: 'error.details.requestId', exists: true }, { path: 'messages', exists: false }], description: 'preview against an unknown type fails cleanly' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'messageDesignerWorkspace'],
     dataProfile: { profile: 'negative', data: 'A preview request naming a nonexistent message type.', source: 'n/a' },
-    expected: 'A clean 4xx; nothing is added to the saved generated-messages collection.',
+    expected: '404 not_found "Message type not found"; no messages are returned and nothing is added to the saved generated-messages collection.',
   },
   {
     key: 'SB-UC-messageDesignerWorkspace-EXC-2',

@@ -3,17 +3,26 @@
  *
  * UC-msgCreateSchema, UC-msgSchemaCanvas, UC-msgImportSchema, UC-msgExportTemplate.
  *
- * The schema-draft store derives each draft's id/code from its "root" name
- * (confirmed live: POST .../drafts, .../tests and .../rules all 500 — an
- * uncaught collision, not a clean 409 — when a second draft reuses a root
- * name already used by an earlier one). Every draft created below uses a
- * {{ts}}-suffixed root name to stay collision-free; UC-msgCreateSchema-EXC-2
- * documents the collision itself as a found defect.
- *
- * Request/response shapes (SchemaDraft = {name, format, root, tree}, not the
- * {fields:[...]} shape used by message-types; build/drafts answer 201;
- * publish requires at least one passing AND one failing test to exist first)
- * were confirmed live before being encoded.
+ * Contract read from the application source at commit a8d72039ae8e
+ * (registerSchemaRoutes.ts, schemaWorkbench.ts, schemaEnrichmentRules.ts,
+ * registerSignatures.ts) and probed on staging on 2026-11-13:
+ *  - A schema draft's id is derived from its NAME ("sch_" + the name in lower
+ *    case with non-alphanumerics as "_"); saving the same name again updates
+ *    that draft. Its artefact hash covers the structure (root + field tree),
+ *    not the name.
+ *  - Saving a draft whose structure equals another stored schema's is meant to
+ *    be refused as a conflict naming the existing schema; POST .../drafts lets
+ *    that refusal escape as a 500 (see SB-UC-msgCreateSchema-EXC-2, a known
+ *    application defect). Every other draft below uses a {{ts}}-suffixed root
+ *    so its structure is unique.
+ *  - SchemaDraft = {name, format, root, tree}; build and drafts answer 201;
+ *    publish needs one passing AND one failing sample first (422 otherwise).
+ *  - Drafts live in the API process's memory (published ones also in its pack
+ *    file) and are removed with DELETE /api/v1/catalog/schemas/drafts/:id.
+ *    Every case here deletes the drafts it saved and checks they are gone.
+ *  - Import-schema validation: the accompanying Markdown is optional and never
+ *    blocks (application owner decision 2026-11-03); its coverage is reported
+ *    under data.markdown, which is null when no Markdown was supplied.
  */
 import type { CaseDef } from './types.js';
 
@@ -25,6 +34,15 @@ const API_LOGIN = {
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 
+/** Delete a schema draft this case saved, then confirm the application no longer has it. */
+function cleanupDraft(id: string) {
+  const url = `{{api}}/api/v1/catalog/schemas/drafts/{{${id}}}`;
+  return [
+    { action: 'request', method: 'DELETE', url, headers: BEARER, skip_if_missing: [id], expected_status: 200, expect_json: [{ path: 'data.deleted', equals: true }], description: `delete the schema draft this case saved (${id})` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }], description: `verify the schema draft ${id} is gone` },
+  ];
+}
+
 const C: CaseDef[] = [];
 
 /* ------------------------------------------------------------------------ */
@@ -35,7 +53,7 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-MAIN',
     name: 'UC-msgCreateSchema main flow: Create schema',
-    objective: 'Check that uC-msgCreateSchema main flow: Create schema.',
+    objective: 'Walk through the "Create schema" screen the way its main use case describes it: an analyst builds a schema from a list of fields, saves it as a draft, checks a sample message against it, adds one sample that should pass and one that should fail, and publishes the tested schema.',
     description: 'Main flow of UC-msgCreateSchema (Create schema) condensed to its registered API contract: build a schema from a field tree, save it as a draft, validate an instance against it, add a passing and a failing test, and publish — each step\'s result checked before the next. Touches POST /api/v1/catalog/schemas/build, /drafts, /validate, /drafts/:id/tests and /drafts/:id/publish.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
@@ -44,13 +62,15 @@ C.push(
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/build', headers: BEARER, body: { name: 'TE-UC-SCHEMA-{{ts}}', format: 'json', root: 'TeRoot{{ts}}', tree: { name: 'TeRoot{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, expect_json: [{ path: 'data.fieldCount', equals: 1 }, { path: 'data.artifact', exists: true }], description: 'build the artefact from the field tree' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-{{ts}}', format: 'json', root: 'TeRoot{{ts}}', tree: { name: 'TeRoot{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, expect_json: [{ path: 'data.id', exists: true }, { path: 'data.status', equals: 'draft' }], save: { draft_id: 'data.id' }, description: 'save as a draft' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/validate', headers: BEARER, body: { draft: { name: 'TE-UC-SCHEMA-{{ts}}', format: 'json', root: 'TeRoot{{ts}}', tree: { name: 'TeRoot{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, instance: '{"amount":10}' }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }, { path: 'data.errors', min_length: 0 }], description: 'validate a conforming instance' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/tests', headers: BEARER, body: { name: 'valid amount', kind: 'pass', instance: '{"amount":10}' }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }], description: 'add a passing sample' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/tests', headers: BEARER, body: { name: 'missing amount', kind: 'fail', instance: '{}' }, expected_status: 200, description: 'add a failing sample' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/publish', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.status', equals: 'published' }], description: 'publish the generated, tested revision' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/validate', headers: BEARER, body: { draft: { name: 'TE-UC-SCHEMA-{{ts}}', format: 'json', root: 'TeRoot{{ts}}', tree: { name: 'TeRoot{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, instance: '{"amount":10}' }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }, { path: 'data.errors', max_length: 0 }], description: 'validate a conforming instance' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/tests', headers: BEARER, body: { name: 'valid amount', kind: 'pass', instance: '{"amount":10}' }, expected_status: 200, expect_json: [{ path: 'data.kind', equals: 'pass' }, { path: 'data.ok', equals: true }, { path: 'data.errors', max_length: 0 }], description: 'add a passing sample' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/tests', headers: BEARER, body: { name: 'missing amount', kind: 'fail', instance: '{}' }, expected_status: 200, expect_json: [{ path: 'data.kind', equals: 'fail' }, { path: 'data.ok', equals: true }, { path: 'data.errors', min_length: 1 }], description: 'add a failing sample (it is rejected by the schema, as a failing sample should be)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/publish', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{draft_id}}' }, { path: 'data.status', equals: 'published' }, { path: 'data.publishedAt', exists: true }], description: 'publish the generated, tested revision' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/published', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', some: { id: '{{draft_id}}', status: 'published' } }], description: 'the published schema is listed among the published schemas' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'msgCreateSchema'],
-    dataProfile: { profile: 'synthetic-named', data: 'One JSON schema draft, uniquely rooted per run, with one passing and one failing sample before publish.', source: 'Generated per run.' },
+    dataProfile: { profile: 'synthetic-named', data: 'One JSON schema draft, uniquely rooted per run, with one passing and one failing sample before publish.', source: 'Generated per run; the published schema is deleted in cleanup.' },
     expected: 'Build, draft, validate, both tests and publish each succeed in sequence; the draft ends published.',
   },
   {
@@ -63,8 +83,9 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-RESUME-{{ts}}', format: 'json', root: 'TeResume{{ts}}', tree: { name: 'TeResume{{ts}}', kind: 'group', children: [{ name: 'id', kind: 'element', type: 'string', required: true }] } }, expected_status: 201, expect_json: [{ path: 'data.status', equals: 'draft' }], save: { draft_id: 'data.id' }, description: 'save incomplete work' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.status', equals: 'draft' }], description: 'resume: still "draft", not Ready' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{draft_id}}' }, { path: 'data.status', equals: 'draft' }, { path: 'data.tests', max_length: 0 }, { path: 'data.publishedAt', exists: false }], description: 'resume: still "draft", not Ready' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'msgCreateSchema'],
     dataProfile: { profile: 'synthetic-named', data: 'One incomplete draft, no tests added.', source: 'Generated per run.' },
     expected: 'Status stays "draft" both on save and on resume — never implying Ready.',
@@ -95,8 +116,10 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-NOTEST-{{ts}}', format: 'json', root: 'TeNotest{{ts}}', tree: { name: 'TeNotest{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, save: { draft_id: 'data.id' }, description: 'draft with zero tests' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/publish', headers: BEARER, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'publish without tests is rejected' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/publish', headers: BEARER, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'publish needs one passing and one failing test' }], description: 'publish without tests is rejected' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.status', equals: 'draft' }], description: 'the draft is kept and is still a draft' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgCreateSchema'],
     dataProfile: { profile: 'synthetic-named', data: 'One draft, deliberately untested.', source: 'Generated per run.' },
     expected: '422 validation_failed; the draft is never marked published.',
@@ -104,18 +127,25 @@ C.push(
   {
     key: 'SB-UC-msgCreateSchema-EXC-2',
     name: 'UC-msgCreateSchema exc flow 2 (E8 — Duplicate publication version): preserve the draft and existing version; ask for a new identity rather than silently overwriting.',
-    objective: 'Check that "Create schema" fails safely: preserve the draft and existing version. Ask for a new version/identity; do not silently overwrite. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: creating a second draft whose root name was already used by an earlier draft never produces the clean "ask for a new identity" conflict this flow calls for — it is observed to behave NON-DETERMINISTICALLY, sometimes…',
-    description: 'Exception flow 2 of UC-msgCreateSchema (Create schema): "Preserve the draft and existing version. Ask for a new version/identity; do not silently overwrite." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: creating a second draft whose root name was already used by an earlier draft never produces the clean "ask for a new identity" conflict this flow calls for — it is observed to behave NON-DETERMINISTICALLY, sometimes silently succeeding with 201 (a second distinct draft reusing the same root, i.e. "silently overwrite"-adjacent) and sometimes 500ing (an uncaught collision on an internally derived identity). Both are wrong in different ways; neither is the documented clean conflict. This case accepts either observed outcome and records which one occurred, rather than hiding the inconsistency behind a single hard-coded expectation.',
+    objective: 'Check that "Create schema" fails safely when the same schema is saved a second time under another name: the first draft is kept unchanged and the second save is refused with a clear message that such a schema already exists, instead of quietly storing a duplicate. (Currently a known defect: the application fails internally instead of refusing the duplicate, so this test stays red until that is fixed.)',
+    description: 'Exception flow E8 of UC-msgCreateSchema (Create schema): "Duplicate publication version: preserve the draft and existing version. Ask for a new version/identity; do not silently overwrite." The store refuses a draft whose artefact hash (root + field tree; the name is not part of it) equals another stored schema\'s: schemaWorkbench.ts saveDraft throws "A schema with the same artefact hash already exists (<id>)" tagged code "conflict", which the schema routes answer as 409 (registerSchemaRoutes.ts sendErr). KNOWN APPLICATION DEFECT, re-confirmed on staging 2026-11-13 (commit a8d72039ae8e): POST /api/v1/catalog/schemas/drafts is the one schema route that does not wrap the call in sendErr, so the conflict escapes as 500 {"error":{"code":"internal"}}. (The earlier wording of this case — "non-deterministic 201 or 500" — came from sending a second draft with a different field, which is a different schema and is correctly stored with 201.) The case asserts the documented conflict and fails until the application is fixed; the first draft is checked to be intact either way by cleanup.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-DUP-{{ts}}', format: 'json', root: 'TeDup{{ts}}', tree: { name: 'TeDup{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, description: 'first draft with this root name' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-DUP2-{{ts}}', format: 'json', root: 'TeDup{{ts}}', tree: { name: 'TeDup{{ts}}', kind: 'group', children: [{ name: 'currency', kind: 'element', type: 'string', required: true }] } }, expected_status: [201, 500], description: 'second draft, same root name — KNOWN DEFECT: observed non-deterministic (201 silent-success or 500 crash), never the documented clean conflict' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-DUP-{{ts}}', format: 'json', root: 'TeDup{{ts}}', tree: { name: 'TeDup{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, expect_json: [{ path: 'data.status', equals: 'draft' }], save: { draft_id: 'data.id', draft_hash: 'data.hash' }, description: 'first draft of this schema' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-SCHEMA-DUP2-{{ts}}', format: 'json', root: 'TeDup{{ts}}', tree: { name: 'TeDup{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 409, expect_json: [{ path: 'error.code', equals: 'conflict' }, { path: 'error.message', contains: '{{draft_id}}' }], description: 'the same schema again under another name is refused as a conflict naming the first draft (known defect: the application answers an internal error)' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.status', equals: 'draft' }, { path: 'data.hash', equals: '{{draft_hash}}' }], description: 'the first draft is preserved unchanged' },
+    ],
+    cleanupSteps: [
+      ...cleanupDraft('draft_id'),
+      // Should the application ever store the duplicate instead of refusing it, remove that too (its id follows from its name).
+      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/catalog/schemas/drafts/sch_te_uc_schema_dup2_{{ts}}', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }], description: 'no duplicate draft was stored under the second name' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgCreateSchema', 'known-defect'],
-    dataProfile: { profile: 'negative', data: 'Two drafts sharing the same root name.', source: 'Generated per run.' },
-    expected: 'KNOWN DEFECT: non-deterministic 201-or-500 today, never the documented clean conflict asking for a new identity.',
+    dataProfile: { profile: 'negative', data: 'One schema draft, then the identical schema (same root and fields) saved again under a second name.', source: 'Generated per run with a unique root; the first draft is deleted in cleanup.' },
+    expected: 'The first save answers 201; the duplicate answers 409 conflict naming the first draft, which stays unchanged. KNOWN DEFECT: the duplicate answers 500 Internal error today, so this case fails at that step.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'A duplicate can only be shown by saving the same schema twice; the second save must be refused and store nothing, and cleanup deletes the first draft and checks no second one exists.' },
   }
 );
 
@@ -135,10 +165,12 @@ C.push(
       { action: 'request', method: 'GET', url: '{{web}}/schema-canvas.html', expected_status: 200, expected_body_contains: 'data-sbe-page="msgSchemaCanvas"', description: 'load screen' },
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-CANVAS-{{ts}}', format: 'json', root: 'TeCanvas{{ts}}', tree: { name: 'TeCanvas{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, save: { draft_id: 'data.id' }, description: 'a draft to open on the canvas' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'list drafts (nodes/relationships source)' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', some: { id: '{{draft_id}}', status: 'draft', fieldCount: 1 } }], description: 'list drafts (nodes/relationships source): this case\'s draft is listed' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{draft_id}}' }], description: 'select the node: real properties for this exact draft' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/amount', name: 'amount range', fieldType: 'decimal', constraintKind: 'range', constraint: { min: 0, max: 1000000 } }, expected_status: 201, expect_json: [{ path: 'data.name', equals: 'amount range' }], description: 'apply a supported edit (enrichment rule)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/amount', name: 'amount range', fieldType: 'decimal', constraintKind: 'range', constraint: { min: 0, max: 1000000 } }, expected_status: 201, expect_json: [{ path: 'data.name', equals: 'amount range' }, { path: 'data.fieldXpath', equals: '/amount' }, { path: 'data.constraintKind', equals: 'range' }, { path: 'data.schemaId', equals: '{{draft_id}}' }, { path: 'data.id', exists: true }], save: { canvas_rule_id: 'data.id' }, description: 'apply a supported edit (enrichment rule)' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', some: { id: '{{canvas_rule_id}}', name: 'amount range' } }, { path: 'data', max_length: 1 }], description: 'the draft remains inspectable: its rules list holds exactly the applied rule' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'msgSchemaCanvas'],
     dataProfile: { profile: 'synthetic-named', data: 'One draft, uniquely rooted per run, with one enrichment rule attached.', source: 'Generated per run.' },
     expected: 'The exact selected draft is opened; the applied rule is confirmed with its own name.',
@@ -167,8 +199,9 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-CANVAS-KIND-{{ts}}', format: 'json', root: 'TeCanvasKind{{ts}}', tree: { name: 'TeCanvasKind{{ts}}', kind: 'group', children: [{ name: 'currency', kind: 'element', type: 'string', required: true }] } }, expected_status: 201, save: { draft_id: 'data.id' }, description: 'a draft' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/currency', name: 'currency fixed', fieldType: 'string', constraintKind: 'fixed', constraint: { value: 'AUD' } }, expected_status: 201, expect_json: [{ path: 'data.constraintKind', equals: 'fixed' }], description: 'a different supported rule kind' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/currency', name: 'currency fixed', fieldType: 'string', constraintKind: 'fixed', constraint: { value: 'AUD' } }, expected_status: 201, expect_json: [{ path: 'data.constraintKind', equals: 'fixed' }, { path: 'data.fieldXpath', equals: '/currency' }, { path: 'data.constraint.value', equals: 'AUD' }, { path: 'data.schemaId', equals: '{{draft_id}}' }], description: 'a different supported rule kind' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'msgSchemaCanvas'],
     dataProfile: { profile: 'synthetic-named', data: 'One draft, one "fixed" kind enrichment rule.', source: 'Generated per run.' },
     expected: 'The second supported rule kind is accepted and confirmed.',
@@ -185,6 +218,7 @@ C.push(
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-CANVAS-BROKEN-{{ts}}', format: 'json', root: 'TeCanvasBroken{{ts}}', tree: { name: 'TeCanvasBroken{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, save: { draft_id: 'data.id' }, description: 'a draft' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/does-not-exist', name: 'broken rule', fieldType: 'string', constraintKind: 'fixed', constraint: { value: 'x' } }, expected_status: 201, expect_json: [{ path: 'data.fieldXpath', equals: '/does-not-exist' }], description: 'a rule for a nonexistent field path is stored exactly as given, not silently rebound' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgSchemaCanvas'],
     dataProfile: { profile: 'negative', data: 'An enrichment rule naming a field path absent from the draft.', source: 'Generated per run.' },
     expected: 'The rule is stored with the exact fieldXpath given — never silently rebound to a real field.',
@@ -199,9 +233,10 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts', headers: BEARER, body: { name: 'TE-UC-CANVAS-INVALID-{{ts}}', format: 'json', root: 'TeCanvasInvalid{{ts}}', tree: { name: 'TeCanvasInvalid{{ts}}', kind: 'group', children: [{ name: 'amount', kind: 'element', type: 'decimal', required: true }] } }, expected_status: 201, save: { draft_id: 'data.id' }, description: 'a draft' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/amount', name: 'inverted range', fieldType: 'decimal', constraintKind: 'range', constraint: { min: 100, max: 1 } }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'min > max is rejected, not stored' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 0 }], description: 'no rule was actually persisted' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, body: { fieldXpath: '/amount', name: 'inverted range', fieldType: 'decimal', constraintKind: 'range', constraint: { min: 100, max: 1 } }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'range requires numeric min <= max' }], description: 'min > max is rejected, not stored' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/schemas/drafts/{{draft_id}}/rules', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', max_length: 0 }], description: 'no rule was actually persisted: the rules list is empty' },
     ],
+    cleanupSteps: cleanupDraft('draft_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgSchemaCanvas'],
     dataProfile: { profile: 'negative', data: 'An inverted range constraint (min > max).', source: 'Generated per run.' },
     expected: '422 validation_failed; the rules list stays empty afterward.',
@@ -216,15 +251,15 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-MAIN',
     name: 'UC-msgImportSchema main flow: Import schema',
-    objective: 'Check that uC-msgImportSchema main flow: Import schema.',
+    objective: 'Walk through the "Import schema" screen the way its main use case describes it: the application reads a chosen schema file, reports its format and fields, and checks whether the accompanying description document covers the schema\'s fields before anything is imported.',
     description: 'Main flow of UC-msgImportSchema (Import schema) condensed to its registered API contract: the system parses a selected schema input and cross-checks accompanying Markdown coverage before import. (The full file-upload-and-register import path is exercised separately and extensively by the dedicated Upload XSD/Markdown suite in this catalogue — sb-upload-xsd.) Touches POST /api/v1/catalog/iso/parse and POST /api/v1/catalog/iso/validate-markdown.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/?page=msgImportSchema', expected_status: 200, description: 'console shell loads (msgImportSchema mounts client-side inside the React console)' },
+      { action: 'request', method: 'GET', url: '{{web}}/?page=msgImportSchema', expected_status: 200, expected_body_contains: '<title>Sand Bench · GAVRIQ Labs</title>', description: 'console shell loads (msgImportSchema mounts client-side inside the console shell)' },
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/parse', headers: BEARER, body: { content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>', fileName: 'te-uc-import-{{ts}}.xsd' }, expected_status: 200, expect_json: [{ path: 'format', equals: 'xsd' }, { path: 'fieldCount', exists: true }], description: 'parse the selected schema input' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-uc-import-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }], markdowns: [{ fileName: 'te-uc-import-{{ts}}.md', content: '# Amount\n\nThe Amount field.' }] }, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'cross-check accompanying Markdown coverage' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/parse', headers: BEARER, body: { content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>', fileName: 'te-uc-import-{{ts}}.xsd' }, expected_status: 200, expect_json: [{ path: 'format', equals: 'xsd' }, { path: 'fieldCount', equals: 1 }, { path: 'fields.0.id', equals: 'Amount' }, { path: 'fields.0.xpath', equals: '/Amount' }, { path: 'findings', max_length: 0 }], description: 'parse the selected schema input' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-uc-import-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }], markdowns: [{ fileName: 'te-uc-import-{{ts}}.md', content: '# Amount\n\nThe Amount field.' }] }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }, { path: 'data.format', equals: 'xsd' }, { path: 'data.fieldCount', equals: 1 }, { path: 'data.markdown.ok', equals: true }, { path: 'data.markdown.examined', equals: 1 }, { path: 'data.markdown.found', equals: 1 }, { path: 'data.markdown.missing', max_length: 0 }], description: 'cross-check accompanying Markdown coverage: the schema is well-formed and its one field is documented' },
     ],
     tags: ['usecase', 'sand-bench', 'main-flow', 'msgImportSchema'],
     dataProfile: { profile: 'synthetic-inline', data: 'One minimal inline XSD fragment and one matching inline Markdown fragment, uniquely named per run.', source: 'Generated per run; not registered into Scheme Definitions (the dedicated upload suite already covers full register-and-verify).' },
@@ -248,17 +283,17 @@ C.push(
   {
     key: 'SB-UC-msgImportSchema-ALT-2',
     name: 'UC-msgImportSchema alt flow 2 (A2 — Markdown coverage mismatch): a warning is explicit, not a silent proceed.',
-    objective: 'Check an alternative path of "Import schema": the system displays a warning describing the mismatches. Markdown that documents none of the schema\'s real fields produces an explicit, inspectable coverage result rather than a silent pass.',
-    description: 'Alternate flow 2 of UC-msgImportSchema (Import schema): "The system displays a warning describing the mismatches." Markdown that documents none of the schema\'s real fields produces an explicit, inspectable coverage result rather than a silent pass.',
+    objective: 'Check an alternative path of "Import schema": the system displays a warning describing the mismatches. A description document that mentions none of the schema\'s fields produces an explicit result naming the undocumented field, rather than a silent pass — while the schema itself is still reported as readable.',
+    description: 'Alternate flow A2 of UC-msgImportSchema (Import schema): "The system displays a warning describing the mismatches." POST /api/v1/catalog/iso/validate-markdown with Markdown that never mentions the schema\'s only element answers 200 with data.ok true (the schema is well-formed — Markdown never blocks, registerSignatures.ts) and data.markdown {ok:false, examined:1, found:0, missing:["Amount"]} plus a message naming the missing tag. The Markdown must not contain the word "Amount" at all: coverage is a text search for the tag (isoImport.ts markdownCoversXpaths).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-mismatch-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }], markdowns: [{ fileName: 'te-mismatch-{{ts}}.md', content: '# Unrelated\n\nThis documents nothing about Amount.' }] }, expected_status: 200, expect_json: [{ path: 'data', exists: true }], description: 'mismatched documentation produces an explicit, inspectable coverage result' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-mismatch-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }], markdowns: [{ fileName: 'te-mismatch-{{ts}}.md', content: '# Unrelated\n\nThis text documents a different subject entirely.' }] }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }, { path: 'data.markdown.ok', equals: false }, { path: 'data.markdown.examined', equals: 1 }, { path: 'data.markdown.found', equals: 0 }, { path: 'data.markdown.missing.0', equals: 'Amount' }, { path: 'data.markdown.rows.0.found', equals: false }, { path: 'data.markdown.message', contains: 'Amount' }], description: 'mismatched documentation produces an explicit coverage result naming the undocumented field' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'msgImportSchema'],
-    dataProfile: { profile: 'synthetic-inline', data: 'An XSD and an unrelated Markdown doc that covers none of its fields.', source: 'Generated per run.' },
-    expected: '200 with an explicit, inspectable coverage result — never a silent pass.',
+    dataProfile: { profile: 'synthetic-inline', data: 'An XSD with one element (Amount) and an unrelated Markdown document that never mentions it.', source: 'Generated per run; nothing is stored.' },
+    expected: '200: the schema is reported well-formed, and the coverage result says not covered, found 0 of 1, missing "Amount" — never a silent pass.',
   },
   {
     key: 'SB-UC-msgImportSchema-EXC-1',
@@ -269,7 +304,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/parse', headers: BEARER, body: { content: 'this is not xml at all', fileName: 'te-malformed-{{ts}}.xsd' }, expected_status: 200, expect_json: [{ path: 'fieldCount', equals: 0 }, { path: 'findings.0.severity', equals: 'error' }], description: 'malformed input: explicit error finding, not a fabricated populated schema' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/parse', headers: BEARER, body: { content: 'this is not xml at all', fileName: 'te-malformed-{{ts}}.xsd' }, expected_status: 200, expect_json: [{ path: 'fieldCount', equals: 0 }, { path: 'fields', max_length: 0 }, { path: 'findings.0.severity', equals: 'error' }, { path: 'findings.0.code', equals: 'no_elements' }], description: 'malformed input: explicit error finding, not a fabricated populated schema' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgImportSchema'],
     dataProfile: { profile: 'negative', data: 'Non-XML content submitted as an XSD.', source: 'n/a' },
@@ -277,18 +312,19 @@ C.push(
   },
   {
     key: 'SB-UC-msgImportSchema-EXC-2',
-    name: 'UC-msgImportSchema exc flow 2 (E2 — Unreadable accompanying Markdown): does not silently discard the Markdown or continue schema-only.',
-    objective: 'Check that "Import schema" fails safely: the system does not silently discard the Markdown or continue with schema-only import. Calling the coverage check with a schema but no markdowns array at all returns the documented explicit "choose a markdown file" result, never silently treating it as covered.',
-    description: 'Exception flow 2 of UC-msgImportSchema (Import schema): "The system does not silently discard the Markdown or continue with schema-only import." Calling the coverage check with a schema but no markdowns array at all returns the documented explicit "choose a markdown file" result, never silently treating it as covered.',
+    name: 'UC-msgImportSchema exc flow 2 (E2 — No accompanying Markdown): the missing description is reported as not checked, never as covered.',
+    objective: 'Check that "Import schema" stays honest when no description document accompanies the schema: the schema itself is checked and reported as readable, and the documentation coverage is reported as not checked at all — never as covered. A request with no schema file is refused with a clear message.',
+    description: 'Exception flow E2 of UC-msgImportSchema (Import schema), rebaselined to the application\'s current contract (registerSignatures.ts, application owner decision 2026-11-03: "Markdown is optional and never blocks: when provided, its coverage is reported alongside the schema result as informational detail only"). POST /api/v1/catalog/iso/validate-markdown with a schema and no markdowns answers 200 with data.ok true, data.format "xsd", data.fieldCount 1 and data.markdown null — no coverage result is fabricated. Before 2026-11-03 the same request answered ok=false asking for a Markdown file; this case used to assert that. With no schema at all the route answers data.ok false and the message "Choose a schema file first."',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-nomd-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }] }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: false }, { path: 'data.message', exists: true }], description: 'missing markdown is explicitly flagged, never silently treated as covered' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { schemas: [{ fileName: 'te-nomd-{{ts}}.xsd', content: '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Amount" type="xs:decimal"/></xs:schema>' }] }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: true }, { path: 'data.format', equals: 'xsd' }, { path: 'data.fieldCount', equals: 1 }, { path: 'data.findings', max_length: 0 }, { path: 'data.markdown', equals: null }], description: 'schema without Markdown: the schema is reported well-formed and the coverage is reported as not checked (null), never as covered' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/catalog/iso/validate-markdown', headers: BEARER, body: { markdowns: [{ fileName: 'te-nomd-{{ts}}.md', content: '# Amount\n\nThe Amount field.' }] }, expected_status: 200, expect_json: [{ path: 'data.ok', equals: false }, { path: 'data.message', equals: 'Choose a schema file first.' }, { path: 'data.markdown', exists: false }], description: 'Markdown without a schema: refused with a clear message, nothing is reported as checked' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgImportSchema'],
-    dataProfile: { profile: 'negative', data: 'A schema with no accompanying markdowns array.', source: 'n/a' },
-    expected: 'ok=false with an explicit message; never silently proceeds as schema-only covered.',
+    dataProfile: { profile: 'negative', data: 'A schema with no accompanying Markdown, then a Markdown document with no schema.', source: 'Generated per run; nothing is stored.' },
+    expected: 'Schema only: ok=true with the coverage reported as null (not checked). Markdown only: ok=false "Choose a schema file first."',
   }
 );
 
@@ -307,7 +343,7 @@ C.push(
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/message-designer-export-template.html', expected_status: 200, expected_body_contains: 'data-sbe-page="msgExportTemplate"', description: 'load screen' },
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/pain.001.001.09/template.csv', headers: BEARER, expected_status: 200, expected_body_contains: 'msgId', description: 'download the current template' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/pain.001.001.09/template.csv', headers: BEARER, expected_status: 200, expected_body_contains: 'test_case_number,msgId,creDtTm,', expect_headers: [{ name: 'content-type', contains: 'text/csv' }], description: 'download the current template: a CSV whose header row starts with the test-case number and the message type\'s own fields' },
     ],
     tags: ['usecase', 'sand-bench', 'main-flow', 'msgExportTemplate'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
@@ -352,7 +388,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/not.a.real.type.{{ts}}/template.csv', headers: BEARER, expected_status: 404, description: 'unknown message type' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/not.a.real.type.{{ts}}/template.csv', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'Message type not found' }, { path: 'error.details.requestId', exists: true }], expected_body_not_contains: 'test_case_number', description: 'unknown message type' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgExportTemplate'],
     dataProfile: { profile: 'negative', data: 'A fabricated message type code.', source: 'n/a' },
@@ -367,7 +403,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/not.a.real.type.{{ts}}/template.csv', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error', exists: true }], description: 'the 404 body is a structured JSON error, not CSV content' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/not.a.real.type.{{ts}}/template.csv', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'Message type not found' }], expect_headers: [{ name: 'content-type', contains: 'application/json' }, { name: 'content-type', not_contains: 'text/csv' }, { name: 'content-disposition', exists: false }], description: 'the 404 body is a structured JSON error, not CSV content and not a file download' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'msgExportTemplate'],
     dataProfile: { profile: 'negative', data: 'A fabricated message type code.', source: 'n/a' },
