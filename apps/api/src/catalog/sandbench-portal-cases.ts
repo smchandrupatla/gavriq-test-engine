@@ -15,7 +15,7 @@
  *
  * Suites + type_keys surface as new submenu items under Quality assurance.
  */
-import { CaseDef, SuiteDef, tagSource } from './types.ts';
+import { type CaseDef, type SuiteDef, tagSource } from './types.js';
 
 const FILE = 'apps/api/src/catalog/sandbench-portal-cases.ts';
 
@@ -164,7 +164,7 @@ C.push(
     preconditions: 'Portal up and testhub.ok true; portal pointed at staging testhub.',
     steps: [
       { action: 'request', method: 'POST', url: '{{kafkaPortal}}/app/send',
-        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-RT', payload: { echo: 'KAFKA-RT-{{rand}}-{{ts}}' } },
+        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-RT-{{rand}}-{{ts}}', payload: { echo: 'KAFKA-RT-{{rand}}-{{ts}}' } },
         expected_status: [200, 202], description: 'portal /app/send via testhub' },
       { action: 'request', method: 'GET', url: '{{kafkaPortal}}/app/log', expected_status: 200,
         expected_body_contains: 'KAFKA-RT-{{rand}}-{{ts}}',
@@ -184,10 +184,10 @@ C.push(
     preconditions: 'Kafka portal up and testhub reachable; recent activity log readable.',
     steps: [
       { action: 'request', method: 'POST', url: '{{kafkaPortal}}/app/send',
-        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-SEQ-A', payload: { echo: 'KAFKA-SEQ-A-{{rand}}-{{ts}}' } },
+        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-SEQ-A-{{rand}}-{{ts}}', payload: { echo: 'KAFKA-SEQ-A-{{rand}}-{{ts}}' } },
         expected_status: [200, 202], description: 'first send with key A' },
       { action: 'request', method: 'POST', url: '{{kafkaPortal}}/app/send',
-        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-SEQ-B', payload: { echo: 'KAFKA-SEQ-B-{{rand}}-{{ts}}' } },
+        body: { wire: 'testhub', topic: 'sandbench.out', key: 'KAFKA-SEQ-B-{{rand}}-{{ts}}', payload: { echo: 'KAFKA-SEQ-B-{{rand}}-{{ts}}' } },
         expected_status: [200, 202], description: 'second send with key B' },
       { action: 'request', method: 'GET', url: '{{kafkaPortal}}/app/log', expected_status: 200,
         expected_body_contains: 'KAFKA-SEQ-A-{{rand}}-{{ts}}',
@@ -427,7 +427,7 @@ C.push(
   {
     key: 'SB-MQ-PORTAL-UNKNOWN-ROUTE-404',
     name: 'MQ portal returns a clean 404 for unknown paths',
-    objective: 'Confirm the portal returns a proper 404 rather than a 500 or an opaque hang when a path is wrong.',
+    objective: 'Confirm the portal clearly reports that an unknown page cannot be found, so a wrong address does not crash the service.',
     description: 'GET {{mqPortal}}/does/not/exist returns 404.',
     suiteKey: 'sb-mq-portal', testType: 'integration', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'MQ portal up.',
@@ -555,7 +555,7 @@ C.push(
   {
     key: 'SB-FTP-PORTAL-FILE-NOT-FOUND-CLEAN-404',
     name: 'FTP portal returns a clean 404 for a missing file name',
-    objective: 'Confirm the file-fetch endpoint tells us the file is missing — a plain 404 — rather than 500, hang, or an empty 200.',
+    objective: 'Confirm the portal clearly reports when a requested file does not exist, so the operator can distinguish a missing file from a successful download.',
     description: 'GET {{ftpPortal}}/app/file?name=no-such-file-{{rand}}.txt returns a 4xx (404 expected) with a readable reason.',
     suiteKey: 'sb-ftp-portal', testType: 'integration', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'FTP portal up; FTP root mounted; the generated name is unlikely to exist on the shared volume.',
@@ -793,7 +793,7 @@ C.push(
   {
     key: 'SB-API-PORTAL-UNKNOWN-ROUTE-404',
     name: 'API portal returns a clean 404 for unknown paths',
-    objective: 'Confirm the portal does not crash or 500 on unmapped paths.',
+    objective: 'Confirm the portal clearly reports that an unknown page cannot be found, so a wrong address does not crash the service.',
     description: 'GET {{apiPortal}}/does/not/exist returns 404.',
     suiteKey: 'sb-api-portal', testType: 'integration', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'API portal up.',
@@ -841,6 +841,19 @@ for (const t of ISO_TYPES) {
     dataProfile: { profile: 'synthetic', data: `A disposable inbound body tagged with the ${t.code} code.`, source: 'generated at run time' },
     expected: `Inbound accepted; log reflects the tag for ${t.code}.`,
   });
+}
+
+// The portal send histories and API receive ledger expose no per-entry delete
+// operation. /app/clear only clears received inbox entries; it cannot undo a
+// send and must never be used to wipe unrelated records. Record the supported
+// lifecycle limitation explicitly instead of pretending these cases clean up.
+for (const c of C) {
+  const writesLedger = (c.steps || []).some((step: any) => step.method === 'POST' &&
+    /^\{\{(?:kafkaPortal|mqPortal|apiPortal)\}\}\/(?:app\/send|hook|inbound(?:\/|$))/.test(String(step.url)));
+  if (writesLedger) c.atomicityNote = {
+    reason: 'no-cleanup-endpoint',
+    detail: 'The standalone portal exposes no delete operation for its send history or API receive ledger. Per-run correlation values isolate verification, but these append-only history rows remain; this case does not claim complete baseline restoration.',
+  };
 }
 
 export const SANDBENCH_PORTAL_CASES: CaseDef[] = tagSource(FILE, C);

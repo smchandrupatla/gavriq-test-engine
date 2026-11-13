@@ -10,7 +10,9 @@
  * Run:  npx tsx scripts/audit-case-atomicity.mts
  */
 import { writeFileSync } from 'node:fs';
-import { SANDBENCH_CASES } from '../apps/api/src/catalog/sandbench-cases.ts';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { SANDBENCH_ALL_CASES as SANDBENCH_CASES } from '../apps/api/src/catalog/sandbench-catalog.js';
 import { ENGINE_CASES } from '../apps/api/src/catalog/engine-cases.ts';
 import type { CaseDef } from '../apps/api/src/catalog/types.ts';
 import { annotateAppendOnlyCases, autoAttachCleanups } from '../apps/api/src/catalog/user-pool.ts';
@@ -332,7 +334,10 @@ function isSubResource(url: string): boolean {
 
 // --- CLI entry point ------------------------------------------------------
 
-const ALL: CaseDef[] = [...(SANDBENCH_CASES as any), ...(ENGINE_CASES as any)];
+// Importing the audit for a test must not rewrite a generated document or
+// mutate a second, incomplete catalog as a side effect.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+const ALL: CaseDef[] = [...SANDBENCH_CASES, ...ENGINE_CASES];
 const findings = auditAllCases(ALL);
 const HTTP = ALL.filter((c) => c.method === 'http');
 
@@ -346,6 +351,7 @@ const totalCases = ALL.length;
 const casesWithFindings = new Set(findings.map((f) => f.key)).size;
 const httpFindings = findings.filter((f) => f.method === 'http').length;
 const uiFindings = findings.length - httpFindings;
+const declaredGaps = ALL.filter(c => ['no-cleanup-endpoint', 'pending-cleanup'].includes(c.atomicityNote?.reason || ''));
 
 const header = `# Atomic case audit — create→act→cleanup discipline
 
@@ -355,6 +361,9 @@ data, exercise it, and remove it so the environment ends in the state it
 started. **${totalCases}** test cases audited (${HTTP.length} HTTP, ${totalCases - HTTP.length} UI/other);
 **${casesWithFindings}** have one or more findings; **${findings.length}** findings in total
 (**${httpFindings}** HTTP, **${uiFindings}** UI/other).
+
+**${declaredGaps.length}** cases also declare a cleanup limitation below. An
+accepted exception is not evidence that the case restores its baseline.
 
 The HTTP audit is a hard CI gate (\`tests/engine-catalog.test.ts\` fails on any
 HTTP finding). The UI audit is a soft punch-list — flipping it to a hard gate
@@ -390,6 +399,9 @@ const sections = [...byCategory.entries()].sort((a, b) => b[1].length - a[1].len
 });
 
 const body = `${header}\n${sections.join('\n')}`;
-writeFileSync('docs/CASE-ATOMICITY-AUDIT.md', body);
-console.log(`[audit] wrote docs/CASE-ATOMICITY-AUDIT.md: ${findings.length} findings across ${casesWithFindings}/${totalCases} HTTP cases`);
+const limitations = declaredGaps.sort((a, b) => a.key.localeCompare(b.key))
+  .map(c => `- \`${c.key}\` (${c.atomicityNote!.reason}) — ${c.atomicityNote!.detail}`).join('\n');
+writeFileSync('docs/CASE-ATOMICITY-AUDIT.md', `${body}\n## Declared cleanup limitations (${declaredGaps.length})\n\n${limitations}\n`);
+console.log(`[audit] wrote docs/CASE-ATOMICITY-AUDIT.md: ${findings.length} findings across ${casesWithFindings}/${totalCases} cases; ${declaredGaps.length} declared cleanup limitations`);
 for (const [cat, list] of byCategory) console.log(`  - ${cat}: ${list.length}`);
+}

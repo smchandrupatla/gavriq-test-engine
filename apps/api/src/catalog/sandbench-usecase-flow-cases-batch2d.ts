@@ -1,15 +1,16 @@
 /**
  * Sand Bench use-case flow catalog — Batch 2d (naming, scheme definitions, active runs).
  *
- * UC-naming, UC-schemeDefinitions, UC-trActive. All read-mostly; the one
- * mutating call (POST /api/v1/naming/preview) is a side-effect-free preview,
- * confirmed live before being encoded. GET /api/v1/runs/:id/stream (SSE) is
+ * UC-naming, UC-schemeDefinitions, UC-trActive. Run-detail cases create and
+ * delete their own local runs; naming preview does not persist a fixture.
+ * GET /api/v1/runs/:id/stream (SSE) is
  * deliberately not exercised with a plain HTTP step — a long-lived
  * server-sent-events connection would hang the http runner's normal
  * request/response cycle, so UC-trActive's stream touch is covered by
  * confirming its sibling detail endpoint instead.
  */
 import type { CaseDef } from './types.js';
+import { cleanupRunFixture } from './sandbench-cleanup.js';
 
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
@@ -197,19 +198,27 @@ C.push(
 C.push(
   {
     key: 'SB-UC-trActive-MAIN',
-    name: 'UC-trActive main flow: Active runs',
-    objective: 'Walk through the "Active runs" screen the way its main use case describes it: operator opens Active runs, the system selects active-state runs from the collection, and opening one by ID retrieves that exact run\'s detail.',
-    description: 'Main flow of UC-trActive (Active runs): operator opens Active runs, the system selects active-state runs from the collection, and opening one by ID retrieves that exact run\'s detail. Touches GET /api/v1/runs and GET /api/v1/runs/:id.',
+    component: 'Active runs',
+    name: 'UC-trActive main flow: Open the specific run created by this test',
+    objective: 'Create a run, find that same run in the collection, and open its details using its saved reference, so another run cannot be substituted.',
+    description: 'Creates a local file-channel run and verifies its saved identity and status in GET /api/v1/runs and GET /api/v1/runs/:id. Cleanup deletes it and verifies absence. The local run completes immediately; this case does not claim active-state filtering coverage.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one run exists.',
+    preconditions: 'Sand Bench web/API reachable; operator can sign in; installed pacs.008.001.14 message type is available.',
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/test-runs-active.html', expected_status: 200, expected_body_contains: 'data-sbe-page="trActive"', description: 'load screen' },
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { any_run_id: 'data.0.id' }, description: 'list runs' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/{{any_run_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{any_run_id}}' }], description: 'open that exact run by id' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER,
+        body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'file', seed: 'active-main-{{rand}}-{{ts}}' },
+        expected_status: 202, save: { active_run_id: 'runId', active_run_status: 'status' },
+        expect_json: [{ path: 'runId', exists: true }, { path: 'status', exists: true }], description: 'create this case’s local run without sending to a shared portal' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs', headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{active_run_id}}', status: '{{active_run_status}}' } }], description: 'find this case’s run in the collection' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/{{active_run_id}}', headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'id', equals: '{{active_run_id}}' }, { path: 'status', equals: '{{active_run_status}}' }], description: 'open this exact run by its saved identifier' },
     ],
+    cleanupSteps: cleanupRunFixture('active_run_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'trActive'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
+    dataProfile: { profile: 'synthetic', data: 'One case-owned local file-channel run, removed after the check.', source: 'Created by this case.' },
     expected: 'The opened run detail id exactly matches the one requested, never a row-position substitute.',
   },
   {
@@ -244,18 +253,25 @@ C.push(
   },
   {
     key: 'SB-UC-trActive-EXC-1',
-    name: 'UC-trActive exc flow 1: A disconnected stream marks data stale rather than inventing progress.',
-    objective: 'Check that "Active runs" fails safely: a disconnected stream marks data stale rather than inventing progress. The stream endpoint itself is server-sent-events (not exercised directly here to avoid hanging a plain HTTP request on a long-lived connection); this case instead confirms the sibling run-detail read never fabricates progress fields that are not actually present on the row.',
-    description: 'Exception flow 1 of UC-trActive (Active runs): "A disconnected stream marks data stale rather than inventing progress." The stream endpoint itself is server-sent-events (not exercised directly here to avoid hanging a plain HTTP request on a long-lived connection); this case instead confirms the sibling run-detail read never fabricates progress fields that are not actually present on the row.',
+    component: 'Active runs',
+    name: 'UC-trActive exc flow 1: Run details preserve the recorded outcome',
+    objective: 'Create a run and confirm its saved details show the same identity and outcome returned when it was created, so the details do not substitute another run or invent a different result.',
+    description: 'Creates a local file-channel run, captures runId/status, and compares both values with GET /api/v1/runs/:id before verified deletion. This HTTP case does not test a disconnected event stream.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one run exists.',
+    preconditions: 'Sand Bench API reachable; operator can sign in; installed pacs.008.001.14 message type is available.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs', headers: BEARER, expected_status: 200, save: { any_run_id: 'data.0.id' }, description: 'pick a real run' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/{{any_run_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{any_run_id}}' }, { path: 'status', exists: true }], description: 'run detail carries its own real status, not an invented one' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER,
+        body: { messageTypeCode: 'pacs.008.001.14', count: 1, channel: 'file', seed: 'active-outcome-{{rand}}-{{ts}}' },
+        expected_status: 202, save: { active_run_id: 'runId', active_run_status: 'status' },
+        expect_json: [{ path: 'runId', exists: true }, { path: 'status', exists: true }], description: 'create this case’s local run and capture its real outcome' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/{{active_run_id}}', headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'id', equals: '{{active_run_id}}' }, { path: 'status', equals: '{{active_run_status}}' }], description: 'compare the saved identity and outcome with this run’s details' },
     ],
+    cleanupSteps: cleanupRunFixture('active_run_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'trActive'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
+    dataProfile: { profile: 'synthetic', data: 'One case-owned local file-channel run, removed after the check.', source: 'Created by this case.' },
+    knownWorkarounds: 'Disconnect handling requires a streaming browser test. This case verifies persisted run details only.',
     expected: 'The run detail\'s status field reflects the real stored row.',
   },
   {

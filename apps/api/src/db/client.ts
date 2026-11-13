@@ -50,6 +50,7 @@ export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
 
 export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  let poisoned = false;
   try {
     await client.query(`SET LOCAL search_path TO ${quoteIdent(PG_SCHEMA)}, public`);
     await client.query('BEGIN');
@@ -57,10 +58,20 @@ export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<
     await client.query('COMMIT');
     return result;
   } catch (err) {
-    await client.query('ROLLBACK');
+    poisoned = true;
+    // ROLLBACK itself can fail when the connection is already dead (the
+    // original error often means exactly that) — never let that mask the
+    // real error or skip releasing the client.
+    try { await client.query('ROLLBACK'); } catch { /* connection already broken; discarded below */ }
     throw err;
   } finally {
-    client.release();
+    // Passing the error tells pg-pool to destroy this physical connection
+    // instead of recycling it. Releasing a possibly-broken client as healthy
+    // (the old behavior here) let poisoned connections pile up in the pool
+    // under sustained concurrent load until every slot was unusable —
+    // surfacing as "Connection terminated due to connection timeout" once
+    // the pool was fully exhausted, often hours into a long run.
+    client.release(poisoned);
   }
 }
 

@@ -25,6 +25,8 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureStagingUserPool, STAGING_POOL_OPERATORS, STAGING_POOL_PASSWORD } from './user-pool.mjs';
+import { uniqueBuildServices } from './build-targets.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -93,6 +95,27 @@ function run(cmd, args, opts = {}) {
     throw new Error(`${cmd} ${args.slice(0, 4).join(' ')} … exited ${res.status}\n${(res.stderr || res.stdout || '').trim().slice(-2000)}`);
   }
   return (res.stdout || '').trim();
+}
+
+/**
+ * Environment for the verification steps that shell out to `bash`. On Windows a bare
+ * `bash` resolves to the WSL relay in System32, which fails with "execvpe(/bin/bash)
+ * failed" when the default distribution has no bash (Docker Desktop's does not) — the
+ * login-page check and the commit gate then fail for a reason that has nothing to do
+ * with the deployment. Git for Windows ships a real bash next to git; put it first.
+ */
+function shellEnv() {
+  if (process.platform !== 'win32') return process.env;
+  const candidates = [];
+  try {
+    const git = run('where', ['git']).split(/\r?\n/)[0];
+    if (git) candidates.push(path.resolve(path.dirname(git), '../bin'), path.resolve(path.dirname(git), '../usr/bin'));
+  } catch { /* fall through to the default install location */ }
+  candidates.push('C:\\Program Files\\Git\\bin');
+  const dir = candidates.find((d) => existsSync(path.join(d, 'bash.exe')));
+  if (!dir) return process.env;
+  const key = Object.keys(process.env).find((k) => k.toLowerCase() === 'path') || 'Path';
+  return { ...process.env, [key]: `${dir}${path.delimiter}${process.env[key] || ''}` };
 }
 
 function option(args, name, fallback) {
@@ -276,7 +299,7 @@ async function verify(sourceDir) {
     : path.join(repo, 'scripts/deploy/check-login-page.sh');
   if (existsSync(loginCheck)) {
     try {
-      run('bash', [loginCheck, '--tries', '30', `${host}:${ports.web}`]);
+      run('bash', [loginCheck.replace(/\\/g, '/'), '--tries', '30', `${host}:${ports.web}`], { env: shellEnv() });
       checks.push({ name: 'login page', url: `${host}:${ports.web}/`, ok: true, detail: 'ops-console-preview.js parses, Portal defined, every <script src> resolves' });
       console.log(`[staging] ok   ${'login page'.padEnd(13)} ops-console-preview.js parses, Portal defined, every <script src> resolves  ${host}:${ports.web}/`);
     } catch (err) {
@@ -298,7 +321,7 @@ async function verify(sourceDir) {
       // route the gate through the shell on Windows. DEP0190 is a warning here, not a
       // security issue — the args list is a fixed string from this script.
       const isWin = process.platform === 'win32';
-      run(isWin ? 'npm.cmd' : 'npm', ['run', 'gate:commit'], { cwd: repo, shell: isWin });
+      run(isWin ? 'npm.cmd' : 'npm', ['run', 'gate:commit'], { cwd: repo, shell: isWin, env: shellEnv() });
       checks.push({ name: 'commit gate', url: '', ok: true, detail: 'fast unit tier passed' });
       console.log(`[staging] ok   ${'commit gate'.padEnd(13)} fast unit tier passed`);
     } catch (err) {
@@ -327,6 +350,9 @@ async function seed() {
   if (!login.ok || !token) throw new Error(`baseline seed: demo sign-in returned HTTP ${login.status}`);
   const auth = { authorization: `Bearer ${token}` };
 
+  // A pre-existing schema must not bypass installation of the login pool.
+  await ensureStagingUserPool(api, { password: 'password' });
+
   const upload = await post(`${api}/api/v1/catalog/iso/uploads`, { xsdFileName: fileName, xsdContent: content, confirm: true, proceed: 'xsd-only' }, auth);
   if (upload.status !== 202 && upload.status !== 409) throw new Error(`baseline seed: ISO upload returned HTTP ${upload.status}: ${(await upload.text()).slice(0, 300)}`);
   console.log(`[staging] baseline ISO catalogue: ${fileName} ${upload.status === 202 ? 'imported' : 'already present'}`);
@@ -341,63 +367,6 @@ async function seed() {
   if (!committed.ok) throw new Error(`baseline seed: schema commit returned HTTP ${committed.status}: ${(await committed.text()).slice(0, 300)}`);
   console.log(`[staging] baseline schema registry: ${fileName} committed`);
 
-  await seedUserPool(api);
-}
-
-/**
- * Seed the parallel-safe user pool (see docs/USER-POOL.md): N operator slots
- * and M admin slots, each a distinct user so parallel cases get distinct
- * sessions. Sand Bench removed role/permission checks, so every created
- * user holds every permission — no role assignment step is needed.
- *
- * Pool size must match POOL_SIZE / ADMIN_POOL_SIZE in
- * apps/api/src/catalog/user-pool.ts. All pool users share the same demo
- * password (demo-only; never valid in production): the password the
- * staging stack ships with.
- */
-const POOL_SIZE = 8;
-const ADMIN_POOL_SIZE = 2;
-const POOL_PASSWORD = 'password';
-
-async function seedUserPool(api) {
-  // The create-user endpoint lives under /admin — log in as admin for the seed
-  // regardless of whether role checks are enforced on the current build.
-  const adminLogin = await fetch(`${api}/api/v1/session/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: POOL_PASSWORD }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!adminLogin.ok) throw new Error(`user-pool seed: admin login returned HTTP ${adminLogin.status}`);
-  const { token: adminToken } = await adminLogin.json().catch(() => ({}));
-  if (!adminToken) throw new Error('user-pool seed: admin login returned no token');
-  const auth = { authorization: `Bearer ${adminToken}` };
-  const post = (url, body) =>
-    fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
-
-  const users = [];
-  for (let i = 0; i < POOL_SIZE; i++) users.push({ username: `pool.op${i}`, kind: 'operator' });
-  for (let i = 0; i < ADMIN_POOL_SIZE; i++) users.push({ username: `pool.adm${i}`, kind: 'admin' });
-
-  let created = 0; let present = 0;
-  for (const u of users) {
-    const body = {
-      username: u.username,
-      displayName: `Pool ${u.kind} ${u.username}`,
-      email: `${u.username}@example.invalid`,
-      password: POOL_PASSWORD,
-      securityQuestion: 'pool',
-      securityAnswer: 'pool',
-    };
-    const res = await post(`${api}/api/v1/admin/tenants/tenant_default/users`, body);
-    const text = await res.text();
-    if (res.status === 201) { created++; continue; }
-    // The create endpoint returns 409 (or sometimes 422 with a uniqueness error)
-    // when the username is already present — repeating the seed is safe.
-    if (res.status === 409 || (res.status === 422 && /unique|exists|duplicate/i.test(text))) { present++; continue; }
-    throw new Error(`user-pool seed: ${u.username} returned HTTP ${res.status}: ${text.slice(0, 300)}`);
-  }
-  console.log(`[staging] user pool: ${created} created, ${present} already present (${POOL_SIZE} operators + ${ADMIN_POOL_SIZE} admins)`);
 }
 
 /**
@@ -434,43 +403,34 @@ async function register(state) {
         dbviewer: `${host}:${ports.dbviewer}`,
         engine,
         tenant: 'default',
-        username: 'operator',
-        password: 'password',
+        // Identity lanes (docs/USER-POOL.md): the engine gives every running execution
+        // its own lane and the worker resolves {{username}}/{{password}} to that lane's
+        // pool operator, seeded by ensureStagingUserPool() in seed() above. The plain
+        // username/password below are only what an execution without a lane falls back
+        // to (lane 0's operator). Resolver order (apps/worker/src/worker.ts): secret_env
+        // wins over vars when the worker has that variable set — the values here are the
+        // documented staging-only defaults, used by a worker that does not.
+        username: 'pool.op0',
+        password: STAGING_POOL_PASSWORD,
+        // The one administrator-equivalent account of the application; cases that need
+        // it share a single session per worker (catalog/sandbench-identity.ts).
         admin_username: 'admin',
         admin_password: 'password',
-        // Parallel-safe user pool (see docs/USER-POOL.md): seeded by seedUserPool()
-        // above; each pool slot maps to a distinct Sand Bench user, so parallel
-        // cases get distinct sessions. Resolver order (apps/worker/src/worker.ts):
-        // secret_env wins over vars when both set the same key — vars here are the
-        // actual usernames; secret_env below resolves the shared password at run time.
-        pool_user_0: 'pool.op0',
-        pool_user_1: 'pool.op1',
-        pool_user_2: 'pool.op2',
-        pool_user_3: 'pool.op3',
-        pool_user_4: 'pool.op4',
-        pool_user_5: 'pool.op5',
-        pool_user_6: 'pool.op6',
-        pool_user_7: 'pool.op7',
-        pool_admin_0: 'pool.adm0',
-        pool_admin_1: 'pool.adm1',
+        ...Object.fromEntries(Array.from({ length: STAGING_POOL_OPERATORS }, (_, i) => [`pool_user_${i}`, `pool.op${i}`])),
+        ...Object.fromEntries(Array.from({ length: STAGING_POOL_OPERATORS }, (_, i) => [`pool_pass_${i}`, STAGING_POOL_PASSWORD])),
+        // Retired: pool administrators were ordinary users (see user-pool.mjs). null removes
+        // the keys an earlier registration wrote; a first registration has nothing to remove.
+        ...(existing.ok ? { pool_admin_0: null, pool_admin_1: null, pool_adminpass_0: null, pool_adminpass_1: null } : {}),
         kafkaPortal: 'http://127.0.0.1:8095',
         mqPortal: 'http://127.0.0.1:8092',
         ftpPortal: 'http://127.0.0.1:18102',
         apiPortal: 'http://127.0.0.1:8093',
       },
       secret_env: {
-        password: 'SB_STAGING_PASSWORD',
+        password: 'SB_STAGING_POOL_PASSWORD',
         admin_password: 'SB_STAGING_PASSWORD',
-        pool_pass_0: 'SB_STAGING_PASSWORD',
-        pool_pass_1: 'SB_STAGING_PASSWORD',
-        pool_pass_2: 'SB_STAGING_PASSWORD',
-        pool_pass_3: 'SB_STAGING_PASSWORD',
-        pool_pass_4: 'SB_STAGING_PASSWORD',
-        pool_pass_5: 'SB_STAGING_PASSWORD',
-        pool_pass_6: 'SB_STAGING_PASSWORD',
-        pool_pass_7: 'SB_STAGING_PASSWORD',
-        pool_adminpass_0: 'SB_STAGING_PASSWORD',
-        pool_adminpass_1: 'SB_STAGING_PASSWORD',
+        ...Object.fromEntries(Array.from({ length: STAGING_POOL_OPERATORS }, (_, i) => [`pool_pass_${i}`, 'SB_STAGING_POOL_PASSWORD'])),
+        ...(existing.ok ? { pool_adminpass_0: null, pool_adminpass_1: null } : {}),
       },
       // Managed by the engine's infrastructure lifecycle (apps/api/src/infra.ts): the infra agent
       // deploys and tears this stack down with this script. Hours set in the console are kept.
@@ -509,7 +469,8 @@ async function main() {
     ensureSecrets();
     const src = exportSource(option(args, 'ref', 'main'));
     console.log(`[staging] deploying ${src.tag} "${src.subject}"`);
-    compose(src, ['build', ...SERVICES]);
+    const composeConfig = JSON.parse(compose(src, ['config', '--format', 'json'], { inherit: false }));
+    compose(src, ['build', ...uniqueBuildServices(SERVICES, composeConfig)]);
     compose(src, ['up', '-d', '--wait', '--wait-timeout', '300', ...SERVICES]);
     const healthy = await verify(src.dir);
     const state = { ref: src.ref, commit: src.commit, tag: src.tag, version: `${src.version}-staging`, subject: src.subject, source: src.dir, deployed_at: new Date().toISOString(), healthy };

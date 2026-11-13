@@ -377,31 +377,56 @@ export async function queueRun(r: RunRequest, actorId?: string | null): Promise<
   const stamp = humanDateTime(new Date());
   const scheduleName = typeof (callerMeta as any).schedule_name === 'string' ? String((callerMeta as any).schedule_name) : null;
 
+  // A single execution can only ever be claimed by one worker, so a suite
+  // large enough to outrun one worker's concurrency otherwise pins all of its
+  // cases to that one worker no matter how many more are scaled up for this
+  // exact plan (see queueWorkerScale below). Split such a suite's case ids
+  // across several same-suite executions — claimed independently, aggregated
+  // the same way multi-suite runs already are (summarize() sums across every
+  // execution in the run_group; nothing keys by suite_key) — so the workers
+  // the planner asked for actually run the suite in parallel.
+  const MIN_SHARD_SIZE = 25;
+  const shardCountFor = (caseCount: number): number => {
+    if (caseCount <= MIN_SHARD_SIZE) return 1;
+    const bySize = Math.ceil(caseCount / MIN_SHARD_SIZE);
+    return Math.max(1, Math.min(bySize, runPlan.target_workers));
+  };
+
   for (const g of groups) {
-    const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
-    const what = scheduleName ? (groups.length > 1 ? `${scheduleName} · ${g.suite_name}` : scheduleName) : g.suite_name;
-    const { rows } = await query(
-      `INSERT INTO executions (
-         key, name, requested_by, test_suite_id, test_case_ids, environment_id,
-         execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$8,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
-       RETURNING id, key, name, status, created_at`,
-      [
-        key, requestedBy, g.suite_id, g.case_ids, environment.id, source,
-        JSON.stringify({
-          ...callerMeta,
-          run_group: runId,
-          suite_key: g.suite_key,
-          application_key: application.key,
-          environment_key: environment.key,
-          trigger: { reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : null, scope },
-          sla_plan: runPlan,
-          sla_run_started_at: new Date().toISOString(),
-        }),
-        `${what} — ${stamp}`,
-      ]
-    );
-    created.push({ ...rows[0], suite_key: g.suite_key, cases: g.case_ids.length });
+    const shards = shardCountFor(g.case_ids.length);
+    const chunkSize = Math.ceil(g.case_ids.length / shards);
+    for (let i = 0; i < shards; i++) {
+      const chunkIds = g.case_ids.slice(i * chunkSize, (i + 1) * chunkSize);
+      if (!chunkIds.length) continue;
+      const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+      const shardSuffix = shards > 1 ? ` (part ${i + 1}/${shards})` : '';
+      const what = scheduleName
+        ? (groups.length > 1 ? `${scheduleName} · ${g.suite_name}${shardSuffix}` : `${scheduleName}${shardSuffix}`)
+        : `${g.suite_name}${shardSuffix}`;
+      const { rows } = await query(
+        `INSERT INTO executions (
+           key, name, requested_by, test_suite_id, test_case_ids, environment_id,
+           execution_location, status, trigger_source, metadata
+         ) VALUES ($1,$8,$2,$3,$4,$5,'out_of_container','queued',$6,$7::jsonb)
+         RETURNING id, key, name, status, created_at`,
+        [
+          key, requestedBy, g.suite_id, chunkIds, environment.id, source,
+          JSON.stringify({
+            ...callerMeta,
+            run_group: runId,
+            suite_key: g.suite_key,
+            application_key: application.key,
+            environment_key: environment.key,
+            trigger: { reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : null, scope },
+            sla_plan: runPlan,
+            sla_run_started_at: new Date().toISOString(),
+            ...(shards > 1 ? { shard: { index: i + 1, of: shards } } : {}),
+          }),
+          `${what} — ${stamp}`,
+        ]
+      );
+      created.push({ ...rows[0], suite_key: g.suite_key, cases: chunkIds.length });
+    }
   }
 
   // Auto-fix loop opt-in: start a per-run loop that reruns failing cases up to a

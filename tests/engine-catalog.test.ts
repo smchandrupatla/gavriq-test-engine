@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from '../apps/api/src/catalog/engine-cases.ts';
-import { SANDBENCH_CASES } from '../apps/api/src/catalog/sandbench-cases.ts';
+import { SANDBENCH_ALL_CASES as SANDBENCH_CASES } from '../apps/api/src/catalog/sandbench-catalog.js';
 import { ARTEFACT, FIXTURES, ISOLATED } from '../apps/api/src/catalog/engine-case-kit.ts';
 import { TYPE_TO_ENUM } from '../apps/api/src/catalog/types.ts';
 

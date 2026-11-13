@@ -26,6 +26,12 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://sitconsole:sitconsole@sit-console-db:5432/sitconsole
+      # Postgres pool size (apps/api/src/db/client.ts). Must stay comfortably
+      # above WORKER_SCALE_MAX below it or scaling the worker pool exhausts
+      # the pool and every worker heartbeat/poll starts failing with
+      # "timeout exceeded when trying to connect" (observed with 20 workers
+      # against the old default of 10).
+      DB_POOL_MAX: ${DB_POOL_MAX:-50}
       PORT: "8787"
       HOST: "0.0.0.0"
       API_INTERNAL_PORT: "18787"
@@ -127,6 +133,9 @@ services:
       SB_DEMO_PASSWORD: ${SB_DEMO_PASSWORD:-password}
       SB_DEMO_ADMIN_PASSWORD: ${SB_DEMO_ADMIN_PASSWORD:-password}
       SB_STAGING_PASSWORD: ${SB_STAGING_PASSWORD:-password}
+      # Password of the staging operator pool (pool.op0…): one identity per identity
+      # lane, set by deploy/staging/user-pool.mjs. Fictional, staging only.
+      SB_STAGING_POOL_PASSWORD: ${SB_STAGING_POOL_PASSWORD:-SandBench-Pool-Stage-01}
     volumes:
       - test-engine-evidence:/data/evidence
     extra_hosts:

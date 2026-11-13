@@ -582,6 +582,7 @@ function jsonCheck(e: Step): string {
   const field = `"${String(e.path).replace(/^data\./, '')}"`;
   if (e.equals !== undefined) return `${field} is ${plainValue(e.equals)}`;
   if (e.contains !== undefined) return `${field} mentions ${plainValue(e.contains)}`;
+  if (e.some !== undefined) return `${field} includes an entry matching all the required details`;
   if (e.matches !== undefined) return `${field} has the expected format`;
   if (e.min_length !== undefined && e.max_length !== undefined) return `${field} has between ${e.min_length} and ${e.max_length} entries`;
   if (e.min_length !== undefined) return e.min_length === 1 ? `${field} is not empty` : `${field} has at least ${e.min_length} entries`;
@@ -667,6 +668,7 @@ function requestText(step: Step): string {
 function requestTestData(step: Step): string | undefined {
   const parts: string[] = [];
   if (step.body_raw !== undefined) parts.push(`A deliberately malformed body: ${JSON.stringify(String(step.body_raw)).slice(0, 90)}`);
+  else if (step.body_json !== undefined) parts.push('The original values captured earlier in this test.');
   else if (step.body !== undefined) parts.push(cap(plainBody(step.body)));
   const headers = step.headers || {};
   for (const [k, v] of Object.entries(headers)) {
@@ -990,7 +992,7 @@ export const JARGON: Array<[RegExp, string]> = [
   [/\{\{/, 'a {{placeholder}}'],
   [/\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+[\/{]/, 'an HTTP verb with a route'],
   [/\/api\/v\d/, 'an API route'],
-  [/\bexpect_json\b|\bexpected_status\b|\bbody_raw\b|\bexpected_body_contains\b/, 'a runner field name'],
+  [/\bexpect_json\b|\bexpected_status\b|\bbody_raw\b|\bbody_json\b|\bexpected_body_contains\b/, 'a runner field name'],
   [/\bjsonb\b/i, 'JSONB'],
   [/(?<![\d,.])\b[45]\d\d\b(?! (?:ms|s|rows|cases|messages|requests|bytes|entries|chars|characters|px|KB|MB))/, 'a bare status code'],
   [/[#.][a-z][\w-]*\[|^#[\w-]+$|\s#[\w-]+(?:\s|$)/, 'a CSS selector'],

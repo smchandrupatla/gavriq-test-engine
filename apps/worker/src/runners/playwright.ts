@@ -18,9 +18,13 @@ export interface PlaywrightStep {
   selector?: string;
   value?: string;
   expected?: string;
+  /** Explicit sign-in credential; preferred over the legacy expected field. */
+  password?: string;
   /** What an assertion matches against; falls back to expected. */
   must_contain?: string;
   timeout_ms?: number;
+  /** DOM attachment is appropriate for non-rendered elements such as stylesheets. */
+  state?: 'attached' | 'visible' | 'hidden' | 'detached';
   description?: string;
   /** Plain-language wording of the step, as the Test cases screen shows it. */
   text?: string;
@@ -40,6 +44,13 @@ export interface PlaywrightRunInput {
   headless?: boolean;
   /** Aborted when the run is cancelled: the browser is closed at once instead of finishing the case. */
   signal?: AbortSignal;
+  /**
+   * Headers the browser adds to every request of this case (validation_rules.
+   * extra_http_headers). Used to give a case that fails a sign-in on purpose a
+   * client address of its own, so the refusal is not counted against the address
+   * every other case signs in from.
+   */
+  extraHttpHeaders?: Record<string, string>;
 }
 
 export interface PlaywrightRunResult {
@@ -252,8 +263,12 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
     if (input.signal?.aborted) throw new Error('Run cancelled');
     browser = await getPooledBrowser(resolved, { headless: input.headless ?? true });
     if (input.signal?.aborted) throw new Error('Run cancelled');
+    const extraHTTPHeaders = input.extraHttpHeaders && Object.keys(input.extraHttpHeaders).length
+      ? Object.fromEntries(Object.entries(input.extraHttpHeaders).map(([k, v]) => [k, substitute(String(v), vars)]))
+      : undefined;
     context = await browser.newContext({
       viewport: input.viewport || { width: 1280, height: 800 },
+      ...(extraHTTPHeaders ? { extraHTTPHeaders } : {}),
     });
     page = await context.newPage();
     page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
@@ -428,11 +443,14 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               // first {{VAR}} out and use its resolved value. Fall back to the whole
               // substituted string for cases that pass the password raw.
               const password = (() => {
-                if (typeof step.password === 'string') return substitute(step.password, vars);
-                if (typeof step.expected === 'string') {
-                  const m = step.expected.match(/\{\{\s*([\w.-]+)\s*\}\}/);
+                // Read the original template. `step.expected` was already
+                // substituted above, so its placeholder (and the boundary
+                // between the password and its human wording) is gone.
+                if (typeof raw.password === 'string') return substitute(raw.password, vars);
+                if (typeof raw.expected === 'string') {
+                  const m = raw.expected.match(/\{\{\s*([\w.-]+)\s*\}\}/);
                   if (m) return vars[m[1]] ?? substitute(`{{${m[1]}}}`, vars);
-                  return substitute(step.expected, vars);
+                  return substitute(raw.expected, vars);
                 }
                 return vars.password || '';
               })();
@@ -443,10 +461,10 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
                 // page, re-create the context with the storage state, re-open
                 // the page. Playwright does not support hot-swapping storage
                 // on an existing context.
-                const vp = context!.viewport() || { width: 1280, height: 800 };
+                const vp = page!.viewportSize() || input.viewport || { width: 1280, height: 800 };
                 await page!.close().catch(() => undefined);
                 await context!.close().catch(() => undefined);
-                context = await browser!.newContext({ viewport: vp, storageState: cached });
+                context = await browser!.newContext({ viewport: vp, storageState: cached, ...(extraHTTPHeaders ? { extraHTTPHeaders } : {}) });
                 page = await context.newPage();
                 page.setDefaultTimeout((input.timeoutSeconds || 30) * 1000);
                 const cachedGateTimeout = Math.max(30000, step.timeout_ms || 30000);
@@ -471,7 +489,37 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
                 await page!.locator('#gate #username').fill(username);
                 await page!.locator('#gate #password').fill(password);
                 await page!.locator('#gate #login').click();
-                await page!.locator('#gate').waitFor({ state: 'hidden', timeout: gateTimeout });
+                // Sand Bench's demo seed always sets mustChangePassword true
+                // (sand-bench-enterprise tests/demo-seed-file.test.ts) so the
+                // app shows a forced-password-change card INSIDE #gate instead
+                // of hiding it (apps/web/public/js/live-bind.js
+                // showForcedPasswordChange). Complete that card once so #gate
+                // can actually close.
+                const forcedCard = page!.locator('#gate #forced-password-card');
+                await Promise.race([
+                  page!.locator('#gate').waitFor({ state: 'hidden', timeout: gateTimeout }),
+                  forcedCard.waitFor({ state: 'visible', timeout: gateTimeout }),
+                ]);
+                if (await forcedCard.isVisible().catch(() => false)) {
+                  const newPassword = `${password}-Reset1!`.padEnd(12, '0');
+                  await page!.locator('#forced-new-password').fill(newPassword);
+                  await page!.locator('#forced-confirm-password').fill(newPassword);
+                  await page!.locator('#forced-password-submit').click();
+                  try {
+                    await page!.locator('#gate').waitFor({ state: 'hidden', timeout: gateTimeout });
+                  } catch {
+                    // Another worker's concurrent change already cleared the flag
+                    // for this identity (the server answers the loser's
+                    // change-password call with a conflict) — reload and sign in
+                    // again now that the account no longer requires a change.
+                    await page!.goto(substitute('{{web}}/', vars), { waitUntil: 'load', timeout: gateTimeout });
+                    await page!.locator('#gate #login').waitFor({ timeout: gateTimeout });
+                    await page!.locator('#gate #username').fill(username);
+                    await page!.locator('#gate #password').fill(password);
+                    await page!.locator('#gate #login').click();
+                    await page!.locator('#gate').waitFor({ state: 'hidden', timeout: gateTimeout });
+                  }
+                }
                 try {
                   const state = await context!.storageState();
                   sessionCache.set(sessionKey, state);

@@ -15,6 +15,8 @@
  * usernames) so a deployment with different credentials can override them
  * via config.vars / config.secret_env without a catalog change.
  */
+import { cleanupRunFixture } from './sandbench-cleanup.js';
+
 export const POOL_SIZE = 8;
 export const ADMIN_POOL_SIZE = 2;
 
@@ -183,7 +185,7 @@ const AUTO_CLEANUP_PATTERNS: Array<{
   {
     method: 'POST',
     urlRegex: /\/api\/v1\/runs$/,
-    idPath: 'id',
+    idPath: 'runId',
     saveAsPrefix: 'auto_run_id',
     cleanupMethod: 'DELETE',
     cleanupUrl: (v) => `{{api}}/api/v1/runs/{{${v}}}`,
@@ -246,14 +248,13 @@ const AUTO_CLEANUP_PATTERNS: Array<{
 export function autoAttachCleanups<T extends { key: string; method: string; steps?: unknown[]; cleanupSteps?: unknown[]; atomicityNote?: unknown }>(cases: T[]): T[] {
   for (const c of cases) {
     if (c.method !== 'http') continue;
-    if ((c as any).atomicityNote) continue; // the author owns cleanup for this case
     const steps = ((c.steps || []) as any[]).slice(); // local copy so step replacements don't affect other arrays
     (c as any).steps = steps;
     const bearer = steps.find((s) => s?.headers && typeof s.headers.authorization === 'string')?.headers;
     const existingCleanup = ((c as any).cleanupSteps || []) as any[];
     const newCleanups: any[] = [];
     for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
-      const s = steps[stepIdx];
+      let s = steps[stepIdx];
       if (!s || s.action !== 'request') continue;
       const method = String(s.method || 'GET').toUpperCase();
       const url = String(s.url || '');
@@ -263,6 +264,13 @@ export function autoAttachCleanups<T extends { key: string; method: string; step
       if (!only2xx) continue;
       for (const pat of AUTO_CLEANUP_PATTERNS) {
         if (method !== pat.method || !pat.urlRegex.test(path)) continue;
+        if (c.atomicityNote && path !== '/api/v1/runs') continue; // preserve author-owned cleanup for other resources
+        if (path === '/api/v1/runs' && s.save) {
+          // Sand Bench returns runId, not id. Keep authored variable names so
+          // later steps still address the record created by this case.
+          s = { ...s, save: Object.fromEntries(Object.entries(s.save).map(([key, value]) => [key, value === 'id' ? 'runId' : value])) };
+          steps[stepIdx] = s;
+        }
         // Pick the var name that will hold the created id — reuse the
         // author's save if present (matching this pattern's idPath), else
         // inject one.
@@ -289,6 +297,10 @@ export function autoAttachCleanups<T extends { key: string; method: string; step
           return (dMethod === 'DELETE' || (dMethod === 'POST' && /\/(drain|cancel|archive|discard|withdraw)$/.test(dUrl))) && dUrl.includes(`{{${idVar}}}`);
         });
         if (alreadyCleaned) break;
+        if (path === '/api/v1/runs') {
+          newCleanups.push(...cleanupRunFixture(idVar, s.headers?.authorization || bearer?.authorization));
+          break;
+        }
         const base = (url.match(/^\{\{([^}]+)\}\}/)?.[1]) || 'api';
         const cleanupStep: Record<string, unknown> = {
           action: 'request',
@@ -320,6 +332,8 @@ export function annotateAppendOnlyCases<T extends { key: string; method: string;
       if (!s || s.action !== 'request') return false;
       const m = String(s.method || 'GET').toUpperCase();
       if (m === 'GET') return false;
+      const statuses = Array.isArray(s.expected_status) ? s.expected_status : [s.expected_status ?? 200];
+      if (!statuses.some((status: number) => status >= 200 && status < 300)) return false;
       const url = String(s.url || '').replace(/^\{\{[^}]+\}\}/, '').split('?')[0];
       return APPEND_ONLY_WRITE_PATHS.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
     });

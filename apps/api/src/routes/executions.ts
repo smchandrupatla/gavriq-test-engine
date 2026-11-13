@@ -14,6 +14,48 @@ function runName(caseNames: string[], suiteName: string | null, at: Date): strin
   return `Run — ${stamp}`;
 }
 
+/**
+ * Identity lanes — one signed-in identity per running execution.
+ *
+ * An application that ends every session of a user on sign-out, or caps how many
+ * sessions a user may hold, cannot have two cases running at the same time under
+ * one user: the first to sign out (or the sixth to sign in) ends the other's
+ * session mid-test. An environment that lists a pool of identities in its
+ * config.vars (`pool_user_0` … `pool_user_N`) therefore gets a LANE per running
+ * execution: the lowest pool index no other running execution on that environment
+ * holds. It is stored as `metadata.identity_lane`; the worker resolves
+ * {{username}} / {{password}} to that pool entry for every case of the execution
+ * (apps/worker/src/worker.ts). The lane is free again when the execution ends.
+ *
+ * Returns the lane, null when the environment has no pool (nothing to lease), or
+ * 'none-free' when every lane is taken — the execution then stays queued instead
+ * of doubling up on an identity. Assignment is serialised per environment so two
+ * workers claiming at once cannot be handed the same lane.
+ */
+async function leaseIdentityLane(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> },
+  environmentId: string | null | undefined
+): Promise<number | null | 'none-free'> {
+  if (!environmentId) return null;
+  const { rows } = await client.query('SELECT config FROM environments WHERE id = $1', [environmentId]);
+  const vars = (rows[0]?.config?.vars || {}) as Record<string, unknown>;
+  const lanes = Object.keys(vars)
+    .map((name) => /^pool_user_(\d+)$/.exec(name)?.[1])
+    .filter((n): n is string => n !== undefined)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (!lanes.length) return null;
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`identity-lane:${environmentId}`]);
+  const { rows: busy } = await client.query(
+    `SELECT metadata->>'identity_lane' AS lane FROM executions
+     WHERE environment_id = $1 AND status IN ('running','preparing') AND metadata ? 'identity_lane'`,
+    [environmentId]
+  );
+  const taken = new Set(busy.map((r) => Number(r.lane)));
+  const free = lanes.find((l) => !taken.has(l));
+  return free === undefined ? 'none-free' : free;
+}
+
 export interface RunAllOutcome {
   status: number;
   body: Record<string, any>;
@@ -443,14 +485,25 @@ export async function executionRoutes(app: FastifyInstance) {
       );
 
       const row = await withTransaction(async (client) => {
-        const { rows } = await client.query(
+        // Oldest first. An execution whose environment has no identity lane free is
+        // passed over — it stays queued — so one for another environment can start.
+        const { rows: candidates } = await client.query(
           `SELECT * FROM executions
            WHERE status = 'queued'
            ORDER BY created_at
            FOR UPDATE SKIP LOCKED
-           LIMIT 1`
+           LIMIT 10`
         );
-        if (!rows[0]) return null;
+        let picked: any = null;
+        let lane: number | null = null;
+        for (const candidate of candidates) {
+          const leased = await leaseIdentityLane(client, candidate.environment_id);
+          if (leased === 'none-free') continue;
+          picked = candidate;
+          lane = leased;
+          break;
+        }
+        if (!picked) return null;
         // The run records the build it is about to test: the commit registered on the
         // environment (config.deployment) at the moment a worker starts. A build the
         // caller passed in metadata.build (a deploy pipeline knows best) is kept.
@@ -461,8 +514,9 @@ export async function executionRoutes(app: FastifyInstance) {
                     FROM environments env
                     WHERE env.id = e.environment_id AND jsonb_typeof(env.config->'deployment') = 'object'
                   ), '{}'::jsonb) || e.metadata
+                  || CASE WHEN $3::int IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('identity_lane', $3::int) END
            WHERE e.id = $1 RETURNING *`,
-          [rows[0].id, workerId]
+          [picked.id, workerId, lane]
         );
         await client.query(
           `UPDATE workers SET last_heartbeat = now(), status = 'busy', current_load = current_load + 1
