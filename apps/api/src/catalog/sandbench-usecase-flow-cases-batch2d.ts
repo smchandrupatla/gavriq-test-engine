@@ -120,7 +120,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled; at least one schema imported.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/?page=schemeDefinitions', expected_status: 200, description: 'console shell loads (schemeDefinitions is rendered client-side inside the React console; its own mount is not independently server-verifiable)' },
+      { action: 'request', method: 'GET', url: '{{web}}/?page=schemeDefinitions', expected_status: 200, expected_body_contains: '<title>Sand Bench · GAVRIQ Labs</title>', description: 'console shell loads (schemeDefinitions is rendered client-side inside the React console; its own mount is not independently server-verifiable)' },
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/designer-types', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }, { path: 'data.0.family', exists: true }, { path: 'data.0.fieldCount', exists: true }], description: 'list schemas with family/fields' },
     ],
@@ -168,7 +168,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/iso/uploads/upl_does_not_exist_00000000/files/xsd', headers: BEARER, expected_status: 404, description: 'nonexistent upload file' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/catalog/iso/uploads/upl_does_not_exist_00000000/files/xsd', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'File not found' }, { path: 'error.details.requestId', exists: true }], description: 'nonexistent upload file' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'schemeDefinitions'],
     dataProfile: { profile: 'negative', data: 'A fabricated upload id.', source: 'n/a' },
@@ -283,7 +283,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/run_does_not_exist_00000000', headers: BEARER, expected_status: 404, description: 'nonexistent run id' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/run_does_not_exist_00000000', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'Run not found' }, { path: 'error.details.requestId', exists: true }], description: 'nonexistent run id' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'trActive'],
     dataProfile: { profile: 'negative', data: 'A fabricated run id.', source: 'n/a' },
