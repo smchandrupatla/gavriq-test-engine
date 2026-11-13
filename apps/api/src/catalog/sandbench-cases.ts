@@ -22,6 +22,15 @@
  * {{tenant}}. Cases below updated to match; the identical API_LOGIN /
  * CONSOLE_SIGNIN helpers still duplicated in the sandbench-usecase-flow-cases
  * batch files are a known follow-up, not yet updated.
+ *
+ * 2026-11-13: rebaselined against Sand Bench main a8d72039ae8e. What changed
+ * for the cases in this file: the error envelope carries the request id under
+ * error.details.requestId; only the built-in administrator is
+ * administrator-equivalent (an operator gets 403 on administration routes);
+ * a non-JSON content type is refused with 415; deleting a user needs If-Match
+ * (cleanupThrowawayUser below); browsers get the session token in an HttpOnly
+ * cookie plus a display token; the console mounts after sign-in and renders
+ * the Overview hero, which is no longer baked into the static shell.
  */
 import { tagSource, type CaseDef, type SuiteDef, type TypeMeta } from './types.js';
 import { describeTarget } from './plain-language.js';
@@ -736,14 +745,13 @@ function staticScreen(key: string, page: string, title: string, mustText: string
  * "hidden" class — the console's own bootstrap signal, the same one the SIT
  * suite waits on.
  */
-// On this pinned Sand Bench commit the console shell (OpsConsolePortal) is
-// a React bundle served at /vendor/opsConsolePortal.js — the staging build
-// returns 404 for it, so the sidebar + nav never mount, and the client falls
-// back to an empty console-root. Tests that need the sidebar assert on the
-// mount SIGNAL (gate hides) rather than on sidebar nodes that this build
-// cannot paint. The missing bundle is logged as a Sand Bench defect, not a
-// test error; when the deployment ships opsConsolePortal.js the sidebar
-// assertions should be re-enabled through CONSOLE_SIGNIN_WITH_SIDEBAR.
+// Console sign-in through the real gate form. The gate hiding is the mount
+// SIGNAL every bind script listens for. On the mid-October baseline the console
+// bundle did not mount on staging, so cases stopped at that signal; on
+// a8d72039ae8e (rebaselined 2026-11-13) the console does mount after sign-in
+// (#console-root renders the Overview hero <h1> and aside.opsc-sidebar) —
+// SB-SCR-CONSOLE-MOUNT asserts that; cases that only need a session keep
+// using this helper as it is.
 const CONSOLE_SIGNIN = [
   { action: 'navigate', value: '{{web}}/', description: 'open console' },
   { action: 'wait_for', selector: '#gate #login', timeout_ms: 15000, description: 'sign-in gate shown' },
@@ -767,36 +775,38 @@ C.push(
   {
     key: 'SB-SCR-CONSOLE-MOUNT',
     name: 'Operator signs in and the console shell mounts',
-    objective: 'Open the console in a real browser, sign in as the demo operator, and confirm the sign-in gate hides — the console-mount signal every bind script listens for.',
-    description: 'Open {{web}}/, sign in through the real gate form as the demo operator, and confirm the mount signal (#gate gains "hidden") plus a #console-root present. The React sidebar bundle (/vendor/opsConsolePortal.js) is missing from the pinned staging build so the sidebar nav does not render — that is a known Sand Bench deployment defect tracked separately, not a test error.',
+    objective: 'Open the console in a real browser, sign in as the demo operator, and confirm the sign-in gate goes away and the console itself appears: the Overview headline "Good rules survive bad data." and the main menu down the side.',
+    description: 'Open {{web}}/, sign in through the real gate form as the demo operator, and confirm the mount signal (#gate gains "hidden") AND the mounted console: #console-root renders the Overview hero <h1> "Good rules survive bad data." (apps/web/public/js/preview-parts/part-00.js overview.hero.title) and the primary sidebar (aside.opsc-sidebar, aria-label "Primary"). On the mid-October baseline the console bundle did not mount on staging, so this case could only check the gate; on a8d72039ae8e the console mounts — verified live 2026-11-13 in chromium.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'playwright', severity: 'critical', priority: 'p0',
     preconditions: 'Web + API containers up; demo operator identity enabled.',
     steps: [
       ...CONSOLE_SIGNIN,
-      // The wait_for_hidden on #gate in CONSOLE_SIGNIN already proves the mount
-      // signal fired. One more cheap belt-and-braces check: the <body> is still
-      // mounted after sign-in (any catastrophic nav-away would fail this).
-      { action: 'assert_selector_count_min', selector: 'body', value: '1', description: 'body still present after sign-in' },
+      { action: 'wait_for', selector: '#console-root h1', timeout_ms: 20000, description: 'the Overview headline is rendered inside the console' },
+      { action: 'assert_selector_text', selector: '#console-root h1', expected: 'Good rules survive bad data.', description: 'the Overview headline reads "Good rules survive bad data."' },
+      { action: 'assert_selector_count_min', selector: 'aside.opsc-sidebar', value: '1', description: 'the main menu (primary sidebar) is rendered' },
     ],
     timeoutSeconds: 60,
     tags: ['screen', 'sand-bench', 'playwright', 'console'],
     dataProfile: SIGNIN_DATA,
-    expected: 'Gate hides after sign-in and the page is still mounted.',
+    expected: 'Gate hides after sign-in; the console shows the Overview headline "Good rules survive bad data." and the primary sidebar.',
   },
   {
     key: 'SB-SCR-OVERVIEW-HERO',
-    name: 'Overview page carries its hero copy in the static shell',
-    objective: 'Confirm the Overview page carries "Good rules survive bad data." somewhere in the HTML — the product\'s hero copy, baked into the shell so a React-portal-off build still delivers it.',
-    description: 'GET {{web}}/ must return 200 and the body must contain "Good rules survive bad data." — the hero copy of the Overview page. The copy is baked into the static shell (around the sign-in subtitle in this build), independent of whether the React portal successfully mounts.',
+    name: 'Overview hero copy is delivered with the console',
+    objective: 'Confirm the web console still delivers the Overview page\'s headline "Good rules survive bad data.": the home page loads the console program, and the console program carries the headline.',
+    description: 'On a8d72039ae8e the hero copy is no longer baked into the static shell (GET {{web}}/ now carries only the sign-in gate and an empty #console-root); the Overview hero is rendered after sign-in by the console bundle. The delivery chain is checked link by link: GET {{web}}/ must return 200 with the #console-root mount point and a script reference to /js/preview-loader.js; GET {{web}}/js/preview-loader.js must return 200 and name the built bundle /js/ops-console-preview.js; GET {{web}}/js/ops-console-preview.js must return 200 as JavaScript and contain the Overview hero title "Good rules survive bad data." (source: apps/web/public/js/preview-parts/part-00.js overview.hero.title). The rendered headline after sign-in is checked in a real browser by SB-SCR-CONSOLE-MOUNT. Verified live 2026-11-13.',
     suiteKey: 'sb-screen', testType: 'ui', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Web container up and serving the shell.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/', expected_status: 200, expected_body_contains: 'Good rules survive bad data.', description: 'hero copy baked into the HTML shell' },
+      { action: 'request', method: 'GET', url: '{{web}}/', expected_status: 200, expected_body_contains: '/js/preview-loader.js', expect_headers: [{ name: 'content-type', contains: 'text/html' }], description: 'the home page loads the console loader' },
+      { action: 'request', method: 'GET', url: '{{web}}/', expected_status: 200, expected_body_contains: 'id="console-root"', description: 'the home page has the place the console is drawn into' },
+      { action: 'request', method: 'GET', url: '{{web}}/js/preview-loader.js', expected_status: 200, expected_body_contains: '/js/ops-console-preview.js', description: 'the console loader names the console program' },
+      { action: 'request', method: 'GET', url: '{{web}}/js/ops-console-preview.js', expected_status: 200, expected_body_contains: 'Good rules survive bad data.', expect_headers: [{ name: 'content-type', contains: 'javascript' }], description: 'the console program carries the Overview headline' },
     ],
     timeoutSeconds: 30,
     tags: ['screen', 'sand-bench', 'playwright', 'console'],
-    dataProfile: { profile: 'none (read-only)', data: 'No input data; the shell is read as an anonymous visitor.', source: 'n/a' },
-    expected: 'The hero copy "Good rules survive bad data." is present in the HTML.',
+    dataProfile: { profile: 'none (read-only)', data: 'No input data; the shell and the console program are read as an anonymous visitor.', source: 'n/a' },
+    expected: 'The home page loads the console loader, the loader names the console program, and the console program contains "Good rules survive bad data.".',
   },
   {
     key: 'SB-SCR-NAV-SECTIONS',
@@ -922,15 +932,19 @@ C.push(
   },
   {
     key: 'SB-UC-FOUNDATION-COMPANION-HONEST',
-    name: 'Optional foundation-catalog companion is absent on the pinned baseline',
-    objective: 'Confirm the optional Foundation Catalog companion is honestly absent on the pinned baseline: no route pretends to be fine when the companion was never registered.',
-    description: 'GET {{api}}/api/v1/foundation/status is not a registered route on the pinned Sand Bench baseline (verified live on sand-bench-staging), so the API answers a clean 404 — the honest self-description for an optional companion that was never registered, as opposed to a silent 500 or a misleading 200 "ok" from a stub.',
+    name: 'Optional foundation-catalog companion reports its availability honestly',
+    objective: 'Confirm the application says honestly whether the optional Foundation Catalog companion can be reached: it is marked as optional, the answer comes with a reason in words, the companion\'s pattern list says the same thing, and the application keeps working either way.',
+    description: 'GET {{api}}/api/v1/foundation/status is a registered route on a8d72039ae8e (apps/api/src/modules/registerFoundationCatalog.ts; on the mid-October baseline it was not registered and answered 404). It must answer 200 with optional=true, source="foundation-catalog", a configured flag, an available flag and a reason in words — exactly one of: "Foundation catalog is reachable." (the companion answered), a sentence ending "Sand Bench is still running." plus the cause (configured but unreachable, late or answering an error), or "Foundation catalog is optional and not enabled.". GET {{api}}/api/v1/foundation/patterns must then report the same available flag and still answer 200 with a data list — never a 500 because an optional companion is away. Verified live 2026-11-13 on sand-bench-staging: available=false, configured=true, reason "Foundation catalog is unreachable. Sand Bench is still running. (fetch failed)"; patterns {"data":[],"available":false,…}.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'API up.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/foundation/status', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error', equals: 'Not Found' }], description: 'foundation status is not registered' }],
+    preconditions: 'API up. The Foundation Catalog companion may or may not be running — both are valid.',
+    steps: [
+      API_LOGIN,
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/foundation/status', headers: BEARER, expected_status: 200, expect_json: [{ path: 'optional', equals: true }, { path: 'source', equals: 'foundation-catalog' }, { path: 'configured', exists: true }, { path: 'available', exists: true }, { path: 'reason', matches: '^Foundation catalog (is reachable\\.$|is optional and not enabled\\.$|.*Sand Bench is still running\\.)' }], save: { foundationAvailable: 'available' }, description: 'foundation status says whether the optional companion is reachable, with a reason' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/foundation/patterns', headers: BEARER, expected_status: 200, expect_json: [{ path: 'available', equals: '{{foundationAvailable}}' }, { path: 'source', equals: 'foundation-catalog' }, { path: 'data', exists: true }], description: 'the companion\'s pattern list reports the same availability and still answers' },
+    ],
     tags: ['usecase', 'sand-bench', 'foundation', 'optional-companion'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: '404 with a clean Not Found body — never a 500 or a misleading 200.',
+    expected: '200 from both routes: optional=true with a reason in words, the same available flag on the status and on the pattern list — never a 500.',
   },
   {
     key: 'SB-UC-SESSION-FEATURES-PROFILE',
@@ -1045,15 +1059,15 @@ C.push(
   },
   {
     key: 'SB-REG-ERROR-ENVELOPE',
-    name: 'Error envelope keeps code + requestId shape',
-    objective: 'Guard that a refused request is answered with the standard error envelope (an error code and a request id), never a raw error dump.',
-    description: 'An unauthenticated request to a protected route ({{api}}/api/v1/message-types) must return the standard error envelope: HTTP 401 with error.code and error.requestId, never a raw stack or bare string. Verified live: {"error":{"code":"unauthorized",...,"requestId":"req-…"}}.',
+    name: 'Error envelope keeps code + message + request id shape',
+    objective: 'Guard that a refused request is answered with the standard error envelope (an error code, a message and a request id), never a raw error dump.',
+    description: 'An unauthenticated request to a protected route ({{api}}/api/v1/message-types) must return the standard error envelope built by envelope() in apps/api/src/app.ts: HTTP 401 with error.code, error.message and the request id under error.details.requestId (the id moved from error.requestId into error.details), never a raw stack or bare string. Verified live 2026-11-13 on a8d72039ae8e: {"error":{"code":"unauthorized","message":"Authentication required","details":{"requestId":"req-…"}}}.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.requestId', exists: true }], description: 'error envelope' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Authentication required' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'error envelope' }],
     tags: ['regression', 'sand-bench', 'contract', 'errors'],
     dataProfile: { profile: 'negative', data: 'Request deliberately sent without an authorization header.', source: 'n/a' },
-    expected: '401 envelope with error.code="unauthorized" and a requestId.',
+    expected: '401 envelope with error.code="unauthorized", error.message="Authentication required" and error.details.requestId.',
   },
   {
     key: 'SB-REG-CHANNELS-STABLE',
@@ -1190,7 +1204,7 @@ C.push(
       // Create one dataset so the shape probe has a row to look at (staging starts empty).
       // message_type_code is accepted but may persist as null in this build — we check the
       // key is PRESENT on the row (shape contract), not that it is non-null.
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER, body: { name: 'te-regression-shape-{{rand}}', message_type_code: 'pacs.008.001.14', description: 'Regression probe' }, expected_status: [200, 201], save: { probeDatasetId: 'id', probeDatasetEtag: 'etag' }, description: 'seed one dataset so the shape probe has a row' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER, body: { name: 'te-regression-shape-{{rand}}', message_type_code: 'pacs.008.001.14', description: 'Regression probe' }, expected_status: 200, save: { probeDatasetId: 'id', probeDatasetEtag: 'etag' }, description: 'seed one dataset so the shape probe has a row' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets', headers: BEARER, expected_status: 200,
         expected_body_contains: 'message_type_code',
         expect_json: [{ path: 'data.0.id', exists: true }, { path: 'data.0.name', exists: true }, { path: 'data.0.row_count', exists: true }, { path: 'data.0.status', exists: true }],
@@ -1208,13 +1222,13 @@ C.push(
     key: 'SB-REG-ERROR-ENVELOPE-CONSISTENT-ACROSS-ROUTES',
     name: 'Error envelope shape is identical across unrelated protected routes',
     objective: 'Guard that three unrelated protected pages, each asked without signing in, refuse with exactly the same error shape, proving one shared sign-in check.',
-    description: 'Three unrelated protected routes (message-types, datasets, audit), each hit without a token, must all return the exact same envelope shape (error.code="unauthorized", error.requestId present) — proving the auth guard is one shared middleware, not three divergent implementations.',
+    description: 'Three unrelated protected routes (message-types, datasets, audit), each hit without a token, must all return the exact same envelope (error.code="unauthorized", error.message="Authentication required", request id under error.details.requestId) — proving the auth guard is one shared deny-by-default hook (apps/api/src/app.ts preHandler), not three divergent implementations.',
     suiteKey: 'sb-regression', testType: 'regression', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.requestId', exists: true }], description: 'message-types tokenless' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.requestId', exists: true }], description: 'datasets tokenless' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.requestId', exists: true }], description: 'audit tokenless' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Authentication required' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'message-types tokenless' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Authentication required' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'datasets tokenless' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Authentication required' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'audit tokenless' },
     ],
     tags: ['regression', 'sand-bench', 'contract', 'errors'],
     dataProfile: { profile: 'negative', data: 'Three unauthenticated GETs to unrelated protected routes.', source: 'n/a' },
@@ -1800,7 +1814,7 @@ C.push(
   perfCase({
     key: 'SB-PERF-DBVIEWER-ROWS-SCAN', name: 'DB viewer paginated read (large page) latency benchmark',
     urlVar: '{{dbviewer}}/api/rows?table=audit_events&page_size=500', requests: 20, concurrency: 3, p95: 3500, errPct: 5,
-    description: 'Benchmark of the DB viewer paginated read with a large page_size — the scan-path profile. Guards against a regression where the row serialiser or JSON encoder dominates response time as the page grows.',
+    description: 'Benchmark of the DB viewer paginated read with a large page_size — the scan-path profile. The request asks for 500 rows; the viewer serves its largest page, 100 rows (apps/dbviewer/server.mjs readTable caps page_size at 100), so this measures the biggest page the viewer ever returns. Guards against a regression where the row serialiser or JSON encoder dominates response time as the page grows.',
   }),
 
   // ----- Breaking point: 50-way concurrency on /health -------------------
@@ -2147,10 +2161,10 @@ C.push(
     key: 'SB-NF-MALFORMED-JSON',
     name: 'Malformed JSON body fails cleanly (400, enveloped)',
     objective: 'Send a broken request body to the sign-in and check it is rejected cleanly with an error envelope, never a crash or a hang.',
-    description: 'POST a syntactically broken JSON body ("{not json") to the login route: the API must answer 400 with its error envelope (requestId present), never a 500 or a hang. Verified live: 400 with envelope.',
+    description: 'POST a syntactically broken JSON body ("{not json") to the login route: the API must answer 400 with its error envelope (error.code, error.message and the request id under error.details.requestId), never a 500 or a hang. Verified live 2026-11-13 on a8d72039ae8e: 400 {"error":{"code":…,"message":…,"details":{"requestId":"req-…"}}}.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body_raw: '{not json', expected_status: 400, expected_body_contains: 'requestId', description: 'malformed JSON' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body_raw: '{not json', expected_status: 400, expect_json: [{ path: 'error.code', exists: true }, { path: 'error.message', exists: true }, { path: 'error.details.requestId', matches: '^req-' }], description: 'malformed JSON' }],
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'malformed', data: 'Raw body "{not json" (invalid JSON, 9 bytes).', source: 'Hand-crafted invalid input.' },
     expected: '400 with error envelope.',
@@ -2174,10 +2188,10 @@ C.push(
     description: 'DELETE {{api}}/health must be rejected with a clean 4xx (404/405 — verified live: 404), never a 500.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'DELETE', url: '{{api}}/health', expected_status: [404, 405], description: 'DELETE /health' }],
+    steps: [{ action: 'request', method: 'DELETE', url: '{{api}}/health', expected_status: 404, description: 'DELETE /health' }],
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'negative', data: 'No body; wrong HTTP verb.', source: 'n/a' },
-    expected: '404 or 405, no 500.',
+    expected: '404 — the route does not exist for that verb; no 500.',
   },
   {
     key: 'SB-NF-LARGE-PAYLOAD',
@@ -2190,14 +2204,14 @@ C.push(
       {
         action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app',
         body: { channel: 'api', systemId: 'te_nf', systemName: 'TE oversized probe', payload: { MsgId: 'TE-NF-BIG-{{ts}}', blob: 'B'.repeat(120_000) } },
-        expected_status: [202, 400, 413], description: '120KB payload',
+        expected_status: 202, expect_json: [{ path: 'forwarded', equals: true }, { path: 'status', equals: 202 }], description: '120KB payload',
       },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'still healthy' },
     ],
     timeoutSeconds: 45,
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'oversized', data: 'Single JSON payload with a 120,000-byte filler field.', source: 'Generated per run.' },
-    expected: 'Clean accept-or-reject; health 200 afterwards.',
+    expected: '202 forwarded=true (the 120 KB message is accepted); health 200 afterwards.',
     atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app (the test-hub simulator): if accepted, the message lands in the inbound-events append-only audit log, which exposes no delete route. The event-log row is harmless (per-run unique MsgId) but is not scrubbed.' },
   },
   {
@@ -2214,15 +2228,15 @@ C.push(
   },
   {
     key: 'SB-NF-UNSUPPORTED-CONTENT-TYPE',
-    name: 'Non-JSON content-type on a JSON route fails cleanly',
-    objective: 'Send the sign-in request as plain text instead of structured data and confirm it is refused with a clean validation message.',
-    description: 'POST to login with Content-Type: text/plain (body not parsed as JSON) must still return a clean validation envelope (verified live: 422 validation_failed), never a 500 from an unhandled parse path.',
+    name: 'Non-JSON content-type on a JSON route is refused as an unsupported format',
+    objective: 'Send the sign-in request as plain text instead of structured data and confirm it is refused with a clear message that only structured data is accepted.',
+    description: 'POST to login with Content-Type: text/plain must be refused before the handler runs by the JSON content-type hook (apps/api/src/app.ts onRequest, IMP-APF046): 415 with error.code "unsupported_media_type", message "Content-Type must be application/json" and the request id under error.details.requestId — never a 500 from an unhandled parse path. (Until mid-October the same request reached the handler and answered 422 validation_failed.) Verified live 2026-11-13 on a8d72039ae8e.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'content-type': 'text/plain' }, body_raw: 'tenantSlug=acme-demo', expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'text/plain content-type' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'content-type': 'text/plain' }, body_raw: 'username=someone', expected_status: 415, expect_json: [{ path: 'error.code', equals: 'unsupported_media_type' }, { path: 'error.message', equals: 'Content-Type must be application/json' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'text/plain content-type' }],
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'malformed', data: 'Raw body sent with Content-Type: text/plain instead of application/json.', source: 'Hand-crafted.' },
-    expected: '422 validation_failed envelope, never a 500.',
+    expected: '415 unsupported_media_type envelope, never a 500.',
   },
   {
     key: 'SB-NF-NEGATIVE-PAGE-SIZE-CLAMPED',
@@ -2239,29 +2253,29 @@ C.push(
   {
     key: 'SB-NF-HUGE-QUERY-STRING',
     name: 'Oversized query-string parameter does not destabilise the API',
-    objective: 'Send a request with a 5,000-character parameter and confirm it is handled or refused cleanly, never hanging.',
-    description: 'A GET with a single 5,000-character query-parameter value must be handled cleanly (200, verified live) or rejected with a clean 4xx — never a hang or 500. A cheap DoS-shaped input robustness check.',
+    objective: 'Send a request with a 5,000-character parameter and confirm it is answered normally with the usual catalogue, never hanging or failing.',
+    description: 'A GET with a single 5,000-character query-parameter value the route does not use must be answered normally — 200 with the message-type catalogue in data (verified live 2026-11-13 on a8d72039ae8e) — never a hang or 500. A cheap DoS-shaped input robustness check.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Demo operator identity enabled.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types?x={{rand}}0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', headers: BEARER, expected_status: [200, 400, 414], description: 'huge query string' }],
+    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types?x={{rand}}0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'huge query string' }],
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'oversized', data: 'One ~5,000-character query-parameter value.', source: 'Generated per run.' },
-    expected: 'Clean 200/400/414, never a 500 or timeout.',
+    expected: '200 with the catalogue, never a 500 or timeout.',
   },
   {
     key: 'SB-NF-INSUFFICIENT-PERMISSION-403-NOT-500',
-    name: 'Admin endpoint responds cleanly (no 5xx) under a non-admin session',
-    objective: 'Confirm an authenticated non-admin receives a clean response envelope from an admin-only area, rather than a server crash or hang.',
-    description: 'An authenticated operator calling the admin user list (GET /api/v1/admin/users) must get a clean HTTP response: in this build operators have read access (200), earlier builds returned 403; neither is a bug but a 500 or a hang IS a bug. The test asserts the clean-fail contract (status < 500), not the specific permission decision.',
+    name: 'Admin endpoint refuses a non-admin session cleanly (not allowed, never a server error)',
+    objective: 'Confirm an authenticated non-admin who asks for an admin-only area gets a clean "not allowed" answer in the standard error format, rather than a server crash or hang.',
+    description: 'An authenticated operator calling the admin user list (GET /api/v1/admin/users) must get the clean refusal the current application defines for it: 403 with the standard envelope {"error":{"code":"forbidden","message":"Missing permission users:read","details":{"requestId":"req-…"}}} (apps/api/src/modules/identity.ts listUsersForTenantAdmin — only the built-in administrator passes). Between 2026-10-02 and mid-October the same request answered 200 because roles had been removed; on a8d72039ae8e it is 403 again. A 500 or a hang is the failure this case exists to catch. Verified live 2026-11-13.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Demo operator identity enabled.',
+    preconditions: 'An ordinary (non-administrator) operator identity can sign in.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: [200, 401, 403], description: 'clean response envelope under non-admin session' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 403, expect_json: [{ path: 'error.code', equals: 'forbidden' }, { path: 'error.message', equals: 'Missing permission users:read' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'clean refusal envelope under a non-admin session' },
     ],
     tags: ['non-functional', 'sand-bench', 'robustness', 'authorization'],
     dataProfile: SIGNIN_DATA,
-    expected: 'Clean 2xx/4xx envelope; never 500.',
+    expected: '403 forbidden in the standard error envelope with a request id; never a 500.',
   },
   {
     key: 'SB-NF-MALFORMED-BEARER-SCHEME',
@@ -2318,10 +2332,10 @@ C.push(
     description: 'PUT /api/v1/datasets (a route that only supports GET/POST, not a bare PUT on the collection) must return a clean 404/405, never a 500 from routing into an unhandled verb.',
     suiteKey: 'sb-non-functional', testType: 'resilience', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Demo operator identity enabled.',
-    steps: [API_LOGIN, { action: 'request', method: 'PUT', url: '{{api}}/api/v1/datasets', headers: BEARER, expected_status: [404, 405], description: 'PUT on collection route' }],
+    steps: [API_LOGIN, { action: 'request', method: 'PUT', url: '{{api}}/api/v1/datasets', headers: BEARER, expected_status: 404, description: 'PUT on collection route' }],
     tags: ['non-functional', 'sand-bench', 'robustness'],
     dataProfile: { profile: 'negative', data: 'No body; unsupported HTTP verb on a collection route.', source: 'n/a' },
-    expected: '404 or 405, never a 500.',
+    expected: '404 — no such route for that verb; never a 500.',
   },
   {
     key: 'SB-NF-EMPTY-BEARER-TOKEN-VALUE',
@@ -2350,12 +2364,12 @@ C.push(
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/.env', expected_status: [200, 403, 404], expected_body_not_contains: 'DATABASE_URL=', description: '.env probe' },
-      { action: 'request', method: 'GET', url: '{{web}}/.env', expected_status: [200, 403, 404], expected_body_not_contains: 'PASSWORD=', description: '.env probe (2)' },
+      { action: 'request', method: 'GET', url: '{{web}}/.env', expected_status: 404, expected_body_not_contains: 'DATABASE_URL=', description: '.env probe' },
+      { action: 'request', method: 'GET', url: '{{web}}/.env', expected_status: 404, expected_body_not_contains: 'PASSWORD=', description: '.env probe (2)' },
     ],
     tags: ['security', 'vuln-scan', 'sand-bench', 'disclosure'],
     dataProfile: { profile: 'probe (read-only)', data: 'Two GETs for the well-known secret filename.', source: 'n/a' },
-    expected: 'No env-file content in any response.',
+    expected: '404 (the branded not-found page) and no env-file content in any response.',
   },
   {
     key: 'SB-VS-GIT-DIR',
@@ -2364,10 +2378,10 @@ C.push(
     description: 'GET {{web}}/.git/config must never return git config content ("[core]" / "repositoryformatversion").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/.git/config', expected_status: [200, 403, 404], expected_body_not_contains: 'repositoryformatversion', description: '.git probe' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/.git/config', expected_status: 404, expected_body_not_contains: 'repositoryformatversion', description: '.git probe' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'disclosure'],
     dataProfile: { profile: 'probe (read-only)', data: 'One GET for the well-known git metadata path.', source: 'n/a' },
-    expected: 'No git metadata in the response.',
+    expected: '404 and no git metadata in the response.',
   },
   {
     key: 'SB-VS-TRAVERSAL',
@@ -2376,10 +2390,10 @@ C.push(
     description: 'GET {{web}}/..%2f..%2f..%2fetc%2fpasswd must be rejected (verified live: 400) and must never contain passwd-file content ("root:").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Web tier deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/..%2f..%2f..%2fetc%2fpasswd', expected_status: [400, 403, 404], expected_body_not_contains: 'root:', description: 'traversal probe' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/..%2f..%2f..%2fetc%2fpasswd', expected_status: 400, expected_body_not_contains: 'root:', description: 'traversal probe' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'traversal'],
     dataProfile: { profile: 'probe (read-only)', data: 'One URL-encoded traversal GET.', source: 'n/a' },
-    expected: '4xx and no file-system content.',
+    expected: '400 (the web tier refuses a path that climbs above its root) and no file-system content.',
   },
   {
     key: 'SB-VS-SERVER-HEADER',
@@ -2419,15 +2433,19 @@ C.push(
   },
   {
     key: 'SB-VS-NO-SESSION-COOKIE-ISSUED',
-    name: 'Login does not set a session cookie',
-    objective: 'Make sure signing in does not set a browser cookie; the session is a token the client holds, which protects against cross-site request forgery.',
-    description: 'POST /api/v1/session/login must not set a Set-Cookie header — verified live — the session is a bearer token the client stores itself, not an ambient cookie the browser auto-attaches to every request (which would be CSRF-exposed).',
+    name: 'Sign-in sets no cookie for programs and only a script-proof cookie for browsers',
+    objective: 'Make sure signing in keeps the session safe from other websites: a program that signs in gets its token directly and no browser cookie, while a browser gets the real token only in a cookie that page scripts cannot read and other sites cannot send, plus a stand-in token that opens nothing by itself.',
+    description: 'The sign-in contract of a8d72039ae8e (apps/api/src/modules/sessionCookie.ts, IMP-PM029 follow-up) has two sides, both checked. (1) A non-browser client — POST {{api}}/api/v1/session/login with no x-sbe-client header — gets the real bearer token in the body and NO Set-Cookie header (what this case has always checked). (2) A browser client — the same request with x-sbe-client: browser — gets the real token only in the sbe_sid cookie, which must be HttpOnly, SameSite=Lax and scoped to Path=/api, while the body carries a "display token" whose signature part is the literal word "cookie". (3) That display token is not a credential: GET {{api}}/api/v1/session/me with it as the bearer answers 401. Until mid-October no cookie existed at all; a cookie without HttpOnly/SameSite, or a display token that authenticates, would be a real exposure. Verified live 2026-11-13.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, expect_headers: [{ name: 'set-cookie', exists: false }], description: 'no session cookie' }],
+    steps: [
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, expect_headers: [{ name: 'set-cookie', exists: false }], expect_json: [{ path: 'token', matches: '^[^.]+\\.[^.]+\\.(?!cookie$)[^.]+$' }], description: 'a program signs in: real token in the answer, no session cookie' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'x-sbe-client': 'browser' }, body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, expect_headers: [{ name: 'set-cookie', contains: 'sbe_sid=' }, { name: 'set-cookie', contains: 'HttpOnly' }, { name: 'set-cookie', contains: 'SameSite=Lax' }, { name: 'set-cookie', contains: 'Path=/api' }], expect_json: [{ path: 'token', matches: '\\.cookie$' }], save: { displayToken: 'token' }, description: 'a browser signs in: the real token only in a script-proof cookie, a stand-in token in the answer' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/me', headers: { authorization: 'Bearer {{displayToken}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'the stand-in token alone opens nothing' },
+    ],
     tags: ['security', 'vuln-scan', 'sand-bench', 'auth'],
     dataProfile: SIGNIN_DATA,
-    expected: 'No Set-Cookie header on the login response.',
+    expected: 'No Set-Cookie for a program sign-in; an HttpOnly SameSite=Lax sbe_sid cookie plus a non-credential display token for a browser sign-in; 401 when the display token is used alone.',
   },
   {
     key: 'SB-VS-API-FRAME-OPTIONS-PRESENT',
@@ -2460,10 +2478,10 @@ C.push(
     description: 'GET {{web}}/package.json falls through to the SPA shell (verified live: 200 text/html, not the real manifest) — the response must never contain dependency-manifest markers ("dependencies", "\"name\":\"").',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/package.json', expected_status: [200, 403, 404], expected_body_not_contains: '"dependencies"', description: 'package.json probe' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/package.json', expected_status: 404, expected_body_not_contains: '"dependencies"', description: 'package.json probe' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'disclosure'],
     dataProfile: { profile: 'probe (read-only)', data: 'One GET for the well-known manifest filename.', source: 'n/a' },
-    expected: 'No dependency-manifest content in the response.',
+    expected: '404 and no dependency-manifest content in the response.',
   },
   {
     key: 'SB-VS-DOCKER-COMPOSE-NOT-LEAKED',
@@ -2472,10 +2490,10 @@ C.push(
     description: 'GET {{web}}/docker-compose.yml must never return real compose-file content ("services:" mapping to container definitions) — infrastructure topology must not be disclosable through the web tier.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Web tier deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/docker-compose.yml', expected_status: [200, 403, 404], expected_body_not_contains: 'services:', description: 'docker-compose probe' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/docker-compose.yml', expected_status: 404, expected_body_not_contains: 'services:', description: 'docker-compose probe' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'disclosure'],
     dataProfile: { profile: 'probe (read-only)', data: 'One GET for the well-known compose filename.', source: 'n/a' },
-    expected: 'No compose-file content in the response.',
+    expected: '404 and no compose-file content in the response.',
   },
   {
     key: 'SB-VS-BACKUP-FILE-NOT-LEAKED',
@@ -2484,10 +2502,10 @@ C.push(
     description: 'GET {{web}}/index.html.bak must never return raw unminified source markers distinct from the real deployed shell — a common editor/deploy artefact that leaks pre-build source.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Web tier deployed.',
-    steps: [{ action: 'request', method: 'GET', url: '{{web}}/index.html.bak', expected_status: [200, 403, 404], expected_body_not_contains: '<!-- SOURCE', description: '.bak probe' }],
+    steps: [{ action: 'request', method: 'GET', url: '{{web}}/index.html.bak', expected_status: 404, expected_body_not_contains: '<!-- SOURCE', description: '.bak probe' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'disclosure'],
     dataProfile: { profile: 'probe (read-only)', data: 'One GET for the well-known backup-file suffix.', source: 'n/a' },
-    expected: 'No raw-source marker in the response.',
+    expected: '404 and no raw-source marker in the response.',
   },
   {
     key: 'SB-VS-DBVIEWER-READ-ONLY-SURFACE',
@@ -2496,10 +2514,10 @@ C.push(
     description: 'POST {{dbviewer}}/api/rows must not exist (verified live: 404 — no route registered) — the DB viewer is architecturally read-only, with no write endpoint to even authenticate against.',
     suiteKey: 'sb-vuln-scan', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'DB viewer up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{dbviewer}}/api/rows?table=users', body: { email_normalised: 'attacker@example.invalid' }, expected_status: [404, 405], description: 'POST to dbviewer rows' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{dbviewer}}/api/rows?table=users', body: { email_normalised: 'attacker@example.invalid' }, expected_status: 404, description: 'POST to dbviewer rows' }],
     tags: ['security', 'vuln-scan', 'sand-bench', 'dbviewer'],
     dataProfile: { profile: 'probe (read-only)', data: 'One POST attempt against a read-only surface; no row is created.', source: 'Hand-crafted.' },
-    expected: '404 or 405 — no write route exists.',
+    expected: '404 — no write route exists.',
   },
   {
     key: 'SB-VS-KAFKA-DESK-CONNECTION-SECRET-NOT-LEAKED',
@@ -2539,10 +2557,10 @@ C.push(
     description: 'ASVS V6: an empty credential submission must be rejected with a 4xx validation envelope (verified live: 422), proving no unauthenticated path slips through and no server error leaks internals.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: {}, expected_status: [400, 401, 422], expect_json: [{ path: 'error.code', exists: true }], description: 'empty credentials' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: {}, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'username and password are required' }, { path: 'token', exists: false }], description: 'empty credentials' }],
     tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6'],
     dataProfile: { profile: 'negative-auth', data: 'Empty JSON credential object.', source: 'Hand-crafted.' },
-    expected: '4xx envelope, never 500.',
+    expected: '422 validation_failed ("username and password are required"), no session, never a 500.',
   },
   {
     key: 'SB-PT-LOGIN-WRONG-PASSWORD',
@@ -2560,13 +2578,13 @@ C.push(
     key: 'SB-PT-LOGIN-INJECTION',
     name: 'Injection-shaped username fails cleanly',
     objective: 'Try to sign in with a username crafted like a database attack and confirm it is refused cleanly, with no sign the text reached the database.',
-    description: 'ASVS V1/V5: a username shaped like a SQL injection probe ("\' OR 1=1 --") must be rejected with a clean 4xx envelope — a 500 here suggests the input reached an interpreter.',
+    description: 'ASVS V1/V5: a username shaped like a SQL injection probe ("\' OR 1=1 --") must be treated as an ordinary unknown username and refused exactly like any wrong credential — 401 with error.code "unauthorized", message "Invalid credentials" and the request id under error.details.requestId. A 200 would mean the tautology matched a row; a 500 would mean the text reached an interpreter. The login body is {username, password} only (the tenant field was removed 2026-10-02). Verified live 2026-11-13 on a8d72039ae8e.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: '{{tenant}}', username: "' OR 1=1 --", password: 'x' }, expected_status: [400, 401, 422], expect_json: [{ path: 'error.requestId', exists: true }], description: 'injection-shaped username' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: "' OR 1=1 --", password: 'x' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }, { path: 'error.details.requestId', matches: '^req-' }, { path: 'token', exists: false }], description: 'injection-shaped username' }],
     tags: ['security', 'pen-test', 'sand-bench', 'asvs-v1'],
     dataProfile: { profile: 'injection-shaped', data: 'Username "\' OR 1=1 --" (classic tautology probe), throwaway password.', source: 'Hand-crafted.' },
-    expected: '4xx envelope with requestId; no 500.',
+    expected: '401 unauthorized envelope with a request id; no session, no 500.',
   },
   {
     key: 'SB-PT-SESSION-ME-TOKENLESS',
@@ -2606,15 +2624,19 @@ C.push(
   },
   {
     key: 'SB-PT-ADMIN-PRIVILEGE-ESCALATION-BLOCKED',
-    name: 'Any authenticated operator reaches admin routes (roles removed, not a regression)',
-    objective: 'Record the current rule for admin pages: any signed-in operator may open them (roles were removed), but an unsigned-in request is still refused.',
-    description: 'RETARGETED 2026-10-02: this case used to assert a non-admin demo operator got 403 from GET /api/v1/admin/users (ASVS V4 role check). Roles/permissions were deliberately removed from the product (apps/api/src/kernel/policy.ts): any active, authenticated session now holds every permission, so the same request correctly answers 200, not 403. The boundary this suite still enforces is authentication itself: unauthenticated admin reads must answer 401. Kept under sb-pen-auth (not moved to regression) so a future reintroduction of roles is forced to notice and update this assertion rather than silently leaving stale pen-test coverage.',
+    name: 'A signed-in operator is refused on administrator-only user lists',
+    objective: 'Sign in as an ordinary operator, ask for the lists of user accounts that only the administrator may see, and confirm both requests are refused as not allowed and no account details are given away.',
+    description: 'ASVS V4 (access control). RETARGETED 2026-11-13 against a8d72039ae8e: between 2026-10-02 and mid-October any signed-in session read GET /api/v1/admin/users (200); the application has since made the built-in administrator the only administrator-equivalent identity (apps/api/src/modules/identity.ts listUsersForTenantAdmin checks seesAllData; apps/api/src/modules/registerTenantAdmin.ts admin(request, "viewUsers")). An ordinary operator\'s valid token on GET {{api}}/api/v1/admin/users and on GET {{api}}/api/v1/admin/tenants/tenant_default/users must now answer 403 {"error":{"code":"forbidden","message":"Missing permission users:read"}} — authenticated but not permitted — with no user rows in the body. Verified live for the lane operator.',
     suiteKey: 'sb-pen-auth', testType: 'security', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'Demo operator identity enabled.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 200, description: 'any signed-in operator can read admin users (roles removed)' }],
-    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v4', 'roles-removed'],
+    preconditions: 'An ordinary (non-administrator) operator identity can sign in.',
+    steps: [
+      API_LOGIN,
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/users', headers: BEARER, expected_status: 403, expect_json: [{ path: 'error.code', equals: 'forbidden' }, { path: 'error.message', equals: 'Missing permission users:read' }, { path: 'data', exists: false }], description: 'operator token on the administrator user list is refused' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: BEARER, expected_status: 403, expect_json: [{ path: 'error.code', equals: 'forbidden' }, { path: 'error.message', equals: 'Missing permission users:read' }, { path: 'data', exists: false }], description: 'operator token on the user administration list is refused' },
+    ],
+    tags: ['security', 'pen-test', 'sand-bench', 'asvs-v4', 'access-control'],
     dataProfile: SIGNIN_DATA,
-    expected: '200 — every active session holds every permission by design; no role-based 403 any more.',
+    expected: '403 forbidden on both administrator user lists; no user data in either answer.',
   },
   {
     key: 'SB-PT-UNKNOWN-USERNAME-NO-ORACLE',
@@ -2746,6 +2768,37 @@ C.push(
 const ADMIN_LOGIN = { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{admin_username}}', password: '{{admin_password}}' }, expected_status: 200, save: { adminToken: 'token' }, description: 'admin login' };
 const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
 
+/**
+ * Remove the throwaway user a case created, and prove it is gone.
+ *
+ * The current application deletes a user only when the request names the version
+ * of the user it means to delete (If-Match, 412 without it — registerTenantAdmin.ts
+ * ifMatch()). The creation answer carries that version as `etag`; signing in,
+ * a self-service reset and a forced password change do not change it
+ * (tenantAdmin.ts deleteTenantUser compares it with tenant_memberships.etag).
+ * A deleted user is soft-deleted: it leaves the user list and frees its username.
+ *
+ * `idVar` / `etagVar` are the variables the creation step saved from `id` / `etag`.
+ */
+function cleanupThrowawayUser(idVar: string, etagVar: string) {
+  const users = '{{api}}/api/v1/admin/tenants/tenant_default/users';
+  return [
+    { ...ADMIN_LOGIN, skip_if_missing: [idVar], description: 'admin login for cleanup',
+      text: 'Sign in as the administrator to remove the temporary user',
+      expected: 'The administrator is signed in.' },
+    { action: 'request', method: 'DELETE', url: `${users}/{{${idVar}}}`, headers: { ...ADMIN_BEARER, 'if-match': `{{${etagVar}}}` },
+      skip_if_missing: [idVar, etagVar], expected_status: [200, 404],
+      text: 'Remove the temporary user this test created',
+      expected: 'The user is removed, or was already gone.',
+      description: 'delete the case-owned user (If-Match: the version returned at creation)' },
+    { action: 'request', method: 'GET', url: users, headers: ADMIN_BEARER, skip_if_missing: [idVar],
+      expected_status: 200, expected_body_not_contains: `{{${idVar}}}`,
+      text: 'Check that the temporary user is no longer in the user list',
+      expected: 'The user list no longer contains the temporary user.',
+      description: 'verify the case-owned user is gone' },
+  ];
+}
+
 C.push(
   /* positive */
   {
@@ -2769,8 +2822,9 @@ C.push(
     preconditions: 'Demo admin identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-newuser-{{rand}}', displayName: 'TE identity case {{rand}}', email: 'te-newuser-{{rand}}@example.invalid', password: 'short', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }, { path: 'hasPassword', equals: true }, { path: 'passwordSetBy', equals: 'admin' }], save: { newUserId: 'id', newUsername: 'username' }, description: 'create user with short password + security Q&A' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-newuser-{{rand}}', displayName: 'TE identity case {{rand}}', email: 'te-newuser-{{rand}}@example.invalid', password: 'short', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }, { path: 'username', equals: 'te-newuser-{{rand}}' }, { path: 'status', equals: 'active' }, { path: 'hasPassword', equals: true }, { path: 'passwordSetBy', equals: 'admin' }, { path: 'etag', exists: true }], save: { newUserId: 'id', newUsername: 'username', newUserEtag: 'etag' }, description: 'create user with short password + security Q&A' },
     ],
+    cleanupSteps: cleanupThrowawayUser('newUserId', 'newUserEtag'),
     tags: ['identity', 'sand-bench', 'admin', 'positive'],
     dataProfile: { profile: 'synthetic', data: 'One admin-created user per run, unique username, 5-character password, a security question/answer.', source: 'Generated per run.' },
     expected: '201; hasPassword=true, passwordSetBy="admin".',
@@ -2779,17 +2833,18 @@ C.push(
     key: 'SB-ID-NEW-USER-SIGNS-IN',
     name: 'An admin-created user signs in with the password the admin set',
     objective: 'Create a user as the administrator, then confirm that user can sign in straight away with the password that was set.',
-    description: 'This case creates an admin-provisioned user with a password and security question, then verifies that user can sign in immediately with the exact password.',
+    description: 'This case creates an admin-provisioned user with a password and security question, then verifies that user can sign in immediately with the exact password: 200 with a token, user.username equal to the created username, and mustChangePassword=true — on a8d72039ae8e every administrator-created user is created with a pending forced password change (tenantAdmin.ts createTenantUser, must_change_password=true) and the sign-in answer says so. The user is removed afterwards.',
     suiteKey: 'sb-identity', testType: 'integration', method: 'http', severity: 'critical', priority: 'p0',
     preconditions: 'Demo admin identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-signin-{{rand}}', displayName: 'TE signin case {{rand}}', email: 'te-signin-{{rand}}@example.invalid', password: 'te-pw-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { createdUsername: 'username' }, description: 'create user' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{createdUsername}}', password: 'te-pw-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }], description: 'new user signs in' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-signin-{{rand}}', displayName: 'TE signin case {{rand}}', email: 'te-signin-{{rand}}@example.invalid', password: 'te-pw-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { createdUsername: 'username', createdUserId: 'id', createdUserEtag: 'etag' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{createdUsername}}', password: 'te-pw-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }, { path: 'user.username', equals: '{{createdUsername}}' }, { path: 'user.id', equals: '{{createdUserId}}' }, { path: 'mustChangePassword', equals: true }], description: 'new user signs in' },
     ],
+    cleanupSteps: cleanupThrowawayUser('createdUserId', 'createdUserEtag'),
     tags: ['identity', 'sand-bench', 'admin', 'positive'],
     dataProfile: { profile: 'synthetic', data: 'One admin-created user, signed in immediately with its set password.', source: 'Generated per run.' },
-    expected: '201 then 200 with a token.',
+    expected: '201 then 200 with a token for that user and mustChangePassword=true.',
   },
   {
     key: 'SB-ID-PASSWORD-RESET-HAPPY-PATH',
@@ -2800,11 +2855,12 @@ C.push(
     preconditions: 'Demo admin identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-reset-{{rand}}', displayName: 'TE reset case {{rand}}', email: 'te-reset-{{rand}}@example.invalid', password: 'te-old-{{rand}}', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, save: { resetUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-reset-{{rand}}', displayName: 'TE reset case {{rand}}', email: 'te-reset-{{rand}}@example.invalid', password: 'te-old-{{rand}}', securityQuestion: 'What is the test engine called?', securityAnswer: 'gavriq' }, expected_status: 201, save: { resetUsername: 'username', resetUserId: 'id', resetUserEtag: 'etag' }, description: 'create user' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/security-question?username={{resetUsername}}', expected_status: 200, expect_json: [{ path: 'question', equals: 'What is the test engine called?' }], description: 'load the exact question set at creation' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{resetUsername}}', securityAnswer: 'gavriq', newPassword: 'te-new-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'username', equals: '{{resetUsername}}' }], description: 'reset with the correct answer' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{resetUsername}}', password: 'te-new-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }], description: 'sign in with the new password' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{resetUsername}}', password: 'te-new-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }, { path: 'user.username', equals: '{{resetUsername}}' }], description: 'sign in with the new password' },
     ],
+    cleanupSteps: cleanupThrowawayUser('resetUserId', 'resetUserEtag'),
     timeoutSeconds: 30,
     tags: ['identity', 'sand-bench', 'password-reset', 'positive'],
     dataProfile: { profile: 'synthetic', data: 'One admin-created user, reset via its own security answer.', source: 'Generated per run.' },
@@ -2819,10 +2875,11 @@ C.push(
     preconditions: 'Demo admin identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-oldpw-{{rand}}', displayName: 'TE old-password case {{rand}}', email: 'te-oldpw-{{rand}}@example.invalid', password: 'te-will-be-old-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { oldPwUsername: 'username' }, description: 'create user' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{oldPwUsername}}', securityAnswer: 'a', newPassword: 'te-fresh-{{rand}}' }, expected_status: 200, description: 'reset the password' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{oldPwUsername}}', password: 'te-will-be-old-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }], description: 'the pre-reset password is now refused' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-oldpw-{{rand}}', displayName: 'TE old-password case {{rand}}', email: 'te-oldpw-{{rand}}@example.invalid', password: 'te-will-be-old-{{rand}}', securityQuestion: 'q', securityAnswer: 'a' }, expected_status: 201, save: { oldPwUsername: 'username', oldPwUserId: 'id', oldPwUserEtag: 'etag' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{oldPwUsername}}', securityAnswer: 'a', newPassword: 'te-fresh-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'username', equals: '{{oldPwUsername}}' }], description: 'reset the password' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{oldPwUsername}}', password: 'te-will-be-old-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }, { path: 'token', exists: false }], description: 'the pre-reset password is now refused' },
     ],
+    cleanupSteps: cleanupThrowawayUser('oldPwUserId', 'oldPwUserEtag'),
     timeoutSeconds: 30,
     tags: ['identity', 'sand-bench', 'password-reset', 'positive', 'security'],
     dataProfile: { profile: 'synthetic', data: 'One admin-created user, its original password probed after a reset.', source: 'Generated per run.' },
@@ -2850,10 +2907,11 @@ C.push(
     preconditions: 'API up; admin identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-wronga-{{rand}}', displayName: 'TE wrong-answer case {{rand}}', email: 'te-wronga-{{rand}}@example.invalid', password: 'te-unchanged-{{rand}}', securityQuestion: 'q', securityAnswer: 'the-real-answer' }, expected_status: 201, save: { wrongAnswerUsername: 'username' }, description: 'create user' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/admin/tenants/tenant_default/users', headers: ADMIN_BEARER, body: { username: 'te-wronga-{{rand}}', displayName: 'TE wrong-answer case {{rand}}', email: 'te-wronga-{{rand}}@example.invalid', password: 'te-unchanged-{{rand}}', securityQuestion: 'q', securityAnswer: 'the-real-answer' }, expected_status: 201, save: { wrongAnswerUsername: 'username', wrongAnswerUserId: 'id', wrongAnswerUserEtag: 'etag' }, description: 'create user' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/password-reset', body: { username: '{{wrongAnswerUsername}}', securityAnswer: 'definitely-not-it-{{rand}}', newPassword: 'te-should-not-apply-{{rand}}' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }], description: 'wrong security answer' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{wrongAnswerUsername}}', password: 'te-unchanged-{{rand}}' }, expected_status: 200, description: 'the original password still works — nothing changed' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{wrongAnswerUsername}}', password: 'te-unchanged-{{rand}}' }, expected_status: 200, expect_json: [{ path: 'token', exists: true }, { path: 'user.username', equals: '{{wrongAnswerUsername}}' }], description: 'the original password still works — nothing changed' },
     ],
+    cleanupSteps: cleanupThrowawayUser('wrongAnswerUserId', 'wrongAnswerUserEtag'),
     timeoutSeconds: 30,
     tags: ['security', 'pen-test', 'sand-bench', 'asvs-v6', 'negative'],
     dataProfile: { profile: 'negative-auth', data: 'One admin-created user; a deliberately wrong security answer.', source: 'Generated per run.' },
@@ -3069,25 +3127,25 @@ C.push(
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Testhub and API up.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app', body: { channel: 'carrier-pigeon', systemId: 'te_chaos', systemName: 'TE chaos probe', payload: { MsgId: 'TE-CH-{{ts}}' } }, expected_status: [202, 400, 422], description: 'unknown channel' },
+      { action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app', body: { channel: 'carrier-pigeon', systemId: 'te_chaos', systemName: 'TE chaos probe', payload: { MsgId: 'TE-CH-{{ts}}' } }, expected_status: 202, expect_json: [{ path: 'forwarded', equals: true }, { path: 'status', equals: 202 }], description: 'unknown channel' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
     ],
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'fault-injection', data: 'One message with channel "carrier-pigeon" and unique MsgId.', source: 'Generated per run.' },
-    expected: 'Delivery handled either way; health 200 after.',
+    expected: '202 forwarded=true (the hub hands the message on); health 200 after.',
     atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app: on 202 the event lands in the inbound-events append-only audit log (no delete route). Per-run unique MsgId keeps the row isolated.' },
   },
   {
     key: 'SB-CH-GHOST-TENANT',
     name: 'Login against a non-existent tenant fails cleanly',
-    objective: 'Try to sign in to a tenant that does not exist and confirm a clean refusal rather than an internal error.',
-    description: 'A login for tenant "ghost-tenant-{{rand}}" must be rejected with a 4xx envelope — the tenancy layer degrades to a clean rejection, not a 500 from a missing-row lookup.',
+    objective: 'Try to sign in naming a tenant and a user that do not exist and confirm a clean refusal rather than an internal error.',
+    description: 'A login that names tenant "ghost-tenant-{{rand}}" and user "ghost-user-{{rand}}" must be rejected with the generic 401 envelope (error.code "unauthorized", message "Invalid credentials", request id under error.details.requestId) — the product has one hidden tenant since 2026-10-02 and ignores a tenant field in the login body, so the unknown user decides the answer; the lookup degrades to a clean rejection, not a 500 from a missing row. Verified live 2026-11-13 on a8d72039ae8e.',
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API up.',
-    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: 'ghost-tenant-{{rand}}', username: 'nobody', password: 'irrelevant' }, expected_status: [401, 404, 422], expect_json: [{ path: 'error.requestId', exists: true }], description: 'ghost tenant' }],
+    steps: [{ action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { tenantSlug: 'ghost-tenant-{{rand}}', username: 'ghost-user-{{rand}}', password: 'irrelevant' }, expected_status: 401, expect_json: [{ path: 'error.code', equals: 'unauthorized' }, { path: 'error.message', equals: 'Invalid credentials' }, { path: 'error.details.requestId', matches: '^req-' }], description: 'ghost tenant' }],
     tags: ['chaos', 'sand-bench', 'tenancy'],
-    dataProfile: { profile: 'fault-injection', data: 'Per-run-unique nonexistent tenant slug; throwaway credentials.', source: 'Generated per run.' },
-    expected: '4xx envelope with requestId.',
+    dataProfile: { profile: 'fault-injection', data: 'Per-run-unique nonexistent tenant slug and username; throwaway credentials.', source: 'Generated per run.' },
+    expected: '401 unauthorized envelope with a request id.',
   },
   {
     key: 'SB-CH-DBVIEWER-BAD-TABLE',
@@ -3128,14 +3186,14 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: [200, 202, 400, 422], save: { negcount_run_id: 'runId' }, description: 'negative count' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: 202, expect_json: [{ path: 'accepted', equals: true }, { path: 'runId', exists: true }, { path: 'generated', equals: 1 }], save: { negcount_run_id: 'runId' }, description: 'negative count' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
     ],
     cleanupSteps: cleanupRunFixture('negcount_run_id'),
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'fault-injection', data: 'count:-5 (negative, invalid run size).', source: 'Hand-crafted.' },
-    expected: 'Clean accept-or-reject, never a 500; health 200 after.',
+    expected: '202 accepted with exactly 1 message generated (the negative count is clamped), never a 500; health 200 after.',
   },
   {
     key: 'SB-CH-INVALID-MESSAGE-TYPE-CODE',
@@ -3163,7 +3221,7 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: [200, 202, 400, 422], save: { injection_run_id: 'runId' }, description: 'injection-shaped channel' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: 202, expect_json: [{ path: 'accepted', equals: true }, { path: 'runId', exists: true }, { path: 'generated', equals: 1 }], save: { injection_run_id: 'runId' }, description: 'injection-shaped channel' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', headers: BEARER, expected_status: 200, description: 'catalogue routes still work (no table dropped)' },
     ],
@@ -3171,7 +3229,7 @@ C.push(
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation', 'injection'],
     dataProfile: { profile: 'injection-shaped', data: 'channel = "\'; DROP TABLE test_runs; --" (SQL tautology/drop probe as a string value).', source: 'Hand-crafted.' },
-    expected: 'Clean accept-or-reject; health 200; catalogue routes unaffected (no table actually dropped).',
+    expected: '202 accepted with 1 message generated (the channel text is treated as data); health 200; catalogue routes unaffected (no table actually dropped).',
   },
   {
     key: 'SB-CH-DBVIEWER-INJECTION-SHAPED-TABLE-PARAM',
@@ -3254,13 +3312,13 @@ C.push(
     suiteKey: 'sb-chaos', testType: 'resilience', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Testhub and API up.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app', body: { channel: 'api', systemId: 'te_nest', systemName: 'TE nested-payload probe', payload: { MsgId: 'TE-NEST-{{ts}}-{{rand}}', nested: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: 'deep' } } } } } } } } } } } } } } } } } } } } } }, expected_status: [200, 202, 400, 413], description: '20-level nested payload' },
+      { action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app', body: { channel: 'api', systemId: 'te_nest', systemName: 'TE nested-payload probe', payload: { MsgId: 'TE-NEST-{{ts}}-{{rand}}', nested: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: { a: 'deep' } } } } } } } } } } } } } } } } } } } } } }, expected_status: 202, expect_json: [{ path: 'forwarded', equals: true }, { path: 'status', equals: 202 }], description: '20-level nested payload' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'still healthy' },
     ],
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'oversized', data: 'One JSON payload nested 20 levels deep.', source: 'Hand-crafted.' },
-    expected: 'Clean accept-or-reject; health 200 after.',
+    expected: '202 forwarded=true (the nested message is accepted); health 200 after.',
     atomicityNote: { reason: 'no-cleanup-endpoint', detail: 'Posts via /hub/to-app: on 2xx the event lands in the inbound-events append-only audit log (no delete route). Per-run unique MsgId keeps the row isolated.' },
   },
   {
@@ -3294,8 +3352,11 @@ C.push(
     objective: 'Confirm, directly in the database, that sign-in attempts are written to the audit trail.',
     description: 'The audit_events table (read independently via the DB viewer) must contain session.login actions — the compliance evidence that authentication activity is audited.',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p1',
-    preconditions: 'DB viewer registered; at least one login attempt has occurred (pen-auth suite creates them).',
-    steps: [{ action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=audit_events&page_size=100', expected_status: 200, expected_body_contains: 'session.login', description: 'audit trail' }],
+    preconditions: 'DB viewer registered. The case signs in itself first, so it does not rely on another test having signed in.',
+    steps: [
+      API_LOGIN,
+      { action: 'request', method: 'GET', url: '{{dbviewer}}/api/rows?table=audit_events&page_size=100', expected_status: 200, expected_body_contains: 'session.login', expect_json: [{ path: 'table', equals: 'audit_events' }, { path: 'data', min_length: 1 }], description: 'audit trail' },
+    ],
     tags: ['compliance', 'sand-bench', 'audit'],
     dataProfile: { profile: 'production-shaped (read-only)', data: 'Reads up to 100 audit rows.', source: 'Application-written audit data.' },
     expected: 'session.login present in audit rows.',
@@ -3363,17 +3424,17 @@ C.push(
   {
     key: 'SB-CP-AUDIT-ROWS-ALWAYS-ATTRIBUTED',
     name: 'A successful authenticated action is attributed to a real actor',
-    objective: 'Sign in once and confirm the newest audit row is that sign-in, attributed to the operator who did it.',
-    description: 'Trigger one fresh, successful login, then confirm the newest audit row is a session.login action carrying that operator\'s actor_user_id — compliance requires every SUCCESSFUL audited action to be traceable to a specific identity. (Verified live: the audit table also carries rows with a null actor_user_id for rejected/unauthenticated attempts — e.g. a wrong-password or bogus-token probe never resolves to an identity — which is correct, not a compliance gap; this case checks attribution on the case that actually matters, a real successful action, instead of a blanket "never null" claim that doesn\'t hold across a full audit history.)',
+    objective: 'Sign in once and confirm the audit trail\'s newest sign-in entry for that operator names the operator who did it and records it as successful.',
+    description: 'Trigger one fresh, successful login, then read the audit trail filtered to that operator\'s own sign-ins (GET {{api}}/api/v1/audit?action=session.login&actorUserId=<the signed-in user id>&pageSize=1 — filters from apps/api/src/modules/auditSearch.ts, newest first) and confirm the newest row is a session.login action carrying exactly that operator\'s actor_user_id, resource_type "session" and outcome "success" — compliance requires every SUCCESSFUL audited action to be traceable to a specific identity. The read is filtered to the operator\'s own rows because the audit trail is shared: other operators\' activity lands in it at the same moment, so "the newest row of the whole trail" is not this case\'s row. (The audit table also carries rows with a null actor_user_id for rejected/unauthenticated attempts — e.g. a wrong-password or bogus-token probe never resolves to an identity — which is correct, not a compliance gap; this case checks attribution on the case that actually matters, a real successful action.)',
     suiteKey: 'sb-compliance', testType: 'other', method: 'http', severity: 'critical', priority: 'p1',
     preconditions: 'Demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, save: { auditToken: 'token' }, description: 'fresh successful login' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: { authorization: 'Bearer {{auditToken}}' }, expected_status: 200, expect_json: [{ path: 'data.0.actor_user_id', exists: true }, { path: 'data.0.action', equals: 'session.login' }], description: 'newest row is attributed' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, save: { auditToken: 'token', auditUserId: 'user.id' }, description: 'fresh successful login' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit?action=session.login&actorUserId={{auditUserId}}&pageSize=1', headers: { authorization: 'Bearer {{auditToken}}' }, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }, { path: 'data.0.action', equals: 'session.login' }, { path: 'data.0.actor_user_id', equals: '{{auditUserId}}' }, { path: 'data.0.resource_type', equals: 'session' }, { path: 'data.0.outcome', equals: 'success' }], description: 'the operator\'s newest sign-in row is attributed to that operator' },
     ],
     tags: ['compliance', 'sand-bench', 'audit'],
     dataProfile: SIGNIN_DATA,
-    expected: 'Newest audit row is action="session.login" with a non-null actor_user_id.',
+    expected: 'The operator\'s newest session.login audit row carries that operator\'s actor_user_id, resource_type "session" and outcome "success".',
   },
   {
     key: 'SB-CP-SIGNING-CAPABILITY-DISCLOSED',
