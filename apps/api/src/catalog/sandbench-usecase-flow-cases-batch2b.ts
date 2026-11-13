@@ -2,17 +2,24 @@
  * Sand Bench use-case flow catalog — Batch 2b (more safe, scoped-to-own-data create flows).
  *
  * Covers UC-dsNew, UC-tcNew, UC-trNew, UC-tsAll, UC-tsNew. Request/response
- * shapes were live-probed against the deployed stack before being encoded:
- * every create endpoint here (test-cases, test-suites, datasets) answers 200
- * (not 201 — only schedules/runs set 201 explicitly in this API), and
- * mutating calls on an existing resource (items, delete) require an If-Match
- * header taken from the JSON body's own "etag" field, not a response header.
+ * shapes were read from the application source at commit a8d72039ae8e
+ * (collections.ts, registerTestSuites.ts, registerSpecPersist.ts,
+ * registerDatasetItems.ts, liveOps.ts) and probed on staging on 2026-11-13:
+ * creating a test case or a dataset answers 200, creating a test suite answers
+ * 201, starting a run or a suite run answers 202, and changing or deleting a
+ * versioned record needs an If-Match header carrying the record's own "etag"
+ * field (412 without it or with a stale one).
  *
- * SB-UC-dsNew-ALT-1 documents a found defect: POST /api/v1/datasets/:id/items
- * 500s for every item kind (table/data_file/definition/workspace) against this
- * deployment — confirmed by direct probing, not assumed. It is tagged
- * known-defect and asserts today's real (broken) response; once fixed
- * upstream this case will start failing and should be updated to expect 200.
+ * Three cases here assert the application's documented behaviour and fail on
+ * this build because the application answers "Internal error" (500) instead —
+ * they are tagged known-defect and must stay red until the application is fixed:
+ *   SB-UC-dsNew-ALT-1  adding items to a dataset (collections.ts appendDatasetItems
+ *                      runs ALTER TABLE on every request)
+ *   SB-UC-tsNew-ALT-2  an empty reorder list (specLifecycle.ts reorderSuiteCases
+ *                      throws a plain Error instead of a validation error)
+ *   SB-UC-tsNew-EXC-2  an unknown member id (database trigger
+ *                      test_suite_case_tenant_integrity, migration 029, is not
+ *                      translated into a validation error)
  */
 import type { CaseDef } from './types.js';
 
@@ -24,29 +31,26 @@ const API_LOGIN = {
 };
 const BEARER = { authorization: 'Bearer {{token}}' };
 
-function cleanupDataset(id: string) {
+/**
+ * Cleanup for a record this case created: read its current version, delete it with
+ * that version, then confirm the application no longer has it. Every step is skipped
+ * when the record was never created. `tolerateGone` is for a record the case itself
+ * may already have deleted in its main steps.
+ */
+function cleanupRecord(collection: 'datasets' | 'test-cases' | 'test-suites', id: string, etagPath: string, label: string, tolerateGone = false) {
   const etag = `${id}_cleanup_etag`;
+  const url = `{{api}}/api/v1/${collection}/{{${id}}}`;
   return [
-    { action: 'request', method: 'GET', url: `{{api}}/api/v1/datasets/{{${id}}}`, headers: BEARER, expected_status: 200, save: { [etag]: 'etag' }, description: `get current ETag for ${id}` },
-    { action: 'request', method: 'DELETE', url: `{{api}}/api/v1/datasets/{{${id}}}`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned dataset ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: tolerateGone ? [200, 404] : 200, save: { [etag]: etagPath }, description: tolerateGone ? `get current ETag for ${id}, if it still exists` : `get current ETag for ${id}` },
+    { action: 'request', method: 'DELETE', url, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, skip_if_missing: [id, etag], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned ${label} ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 404, description: `verify ${label} ${id} is gone` },
   ];
 }
 
-function cleanupCase(id: string) {
-  const etag = `${id}_cleanup_etag`;
-  return [
-    { action: 'request', method: 'GET', url: `{{api}}/api/v1/test-cases/{{${id}}}`, headers: BEARER, expected_status: [200, 404], save: { [etag]: 'data.etag' }, description: `get current ETag for ${id}, if it still exists` },
-    { action: 'request', method: 'DELETE', url: `{{api}}/api/v1/test-cases/{{${id}}}`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, skip_if_missing: [etag], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned test case ${id}` },
-  ];
-}
-
-function cleanupSuite(id: string) {
-  const etag = `${id}_cleanup_etag`;
-  return [
-    { action: 'request', method: 'GET', url: `{{api}}/api/v1/test-suites/{{${id}}}`, headers: BEARER, expected_status: [200, 404], save: { [etag]: 'data.etag' }, description: `get current ETag for ${id}, if it still exists` },
-    { action: 'request', method: 'DELETE', url: `{{api}}/api/v1/test-suites/{{${id}}}`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, skip_if_missing: [etag], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned suite ${id}` },
-  ];
-}
+const cleanupDataset = (id: string) => cleanupRecord('datasets', id, 'etag', 'dataset');
+const cleanupCase = (id: string) => cleanupRecord('test-cases', id, 'data.etag', 'test case');
+/** Pass tolerateGone for a suite the case deletes itself in its main steps. */
+const cleanupSuite = (id: string, tolerateGone = false) => cleanupRecord('test-suites', id, 'data.etag', 'suite', tolerateGone);
 
 const C: CaseDef[] = [];
 
@@ -76,19 +80,20 @@ C.push(
   {
     key: 'SB-UC-dsNew-ALT-1',
     name: 'UC-dsNew alt flow 1: Items can be added after shell creation.',
-    objective: 'Check an alternative path of "Create new dataset": items can be added after shell creation. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: the matching write fails with an internal server error for every item kind (table/data_file/definition/workspace) on this deployment, even with a correct If-Match.',
-    description: 'Alternate flow 1 of UC-dsNew (Create new dataset): "Items can be added after shell creation." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: POST /api/v1/datasets/:id/items returns 500 Internal error for every item kind (table/data_file/definition/workspace) on this deployment, even with a correct If-Match. This case asserts today\'s real (broken) behavior as a regression trip-wire — when fixed, update it to expect 200 with the appended item.',
+    objective: 'Check an alternative path of "Create new dataset": items can be added after the empty dataset has been created, and the dataset then lists the added item and its row count. (Currently a known defect: the application fails internally when an item is added, so this test stays red until that is fixed.)',
+    description: 'Alternate flow of UC-dsNew (Create new dataset): "Items can be added after shell creation." POST /api/v1/datasets/:id/items with the dataset\'s current etag in If-Match must answer 200 with {id, etag, items, row_count}: the appended item gets id dsi_1 and row_count is the sum of the item counts (collections.ts appendDatasetItems, collectionHelpers.ts mergeDatasetItems). KNOWN APPLICATION DEFECT, re-confirmed on staging 2026-11-13 (commit a8d72039ae8e): the route answers 500 {"error":{"code":"internal"}} for every request that carries an If-Match, because appendDatasetItems runs "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS items" inside the request transaction (collections.ts line 656) and the application\'s database role may not alter the table. The case asserts the documented result and fails until the application is fixed.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER, body: { name: 'TE-UC-DS-ITEMS-{{ts}}' }, expected_status: 200, save: { ds_id: 'id', ds_etag: 'etag' }, description: 'create dataset shell' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets/{{ds_id}}/items', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{ds_etag}}' }, body: { items: [{ kind: 'definition', ref: 'pain.001.001.09', count: 1 }] }, expected_status: 500, expect_json: [{ path: 'error.code', equals: 'internal' }], description: 'add items (currently 500s — known defect)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER, body: { name: 'TE-UC-DS-ITEMS-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'row_count', equals: 0 }], save: { ds_id: 'id', ds_etag: 'etag' }, description: 'create dataset shell' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets/{{ds_id}}/items', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{ds_etag}}' }, body: { items: [{ kind: 'definition', ref: 'pain.001.001.09', count: 1 }] }, expected_status: 200, expect_json: [{ path: 'id', equals: '{{ds_id}}' }, { path: 'items', min_length: 1 }, { path: 'items', max_length: 1 }, { path: 'items.0.id', equals: 'dsi_1' }, { path: 'items.0.kind', equals: 'definition' }, { path: 'items.0.ref', equals: 'pain.001.001.09' }, { path: 'items.0.count', equals: 1 }, { path: 'row_count', equals: 1 }, { path: 'etag', exists: true }], description: 'add one item to the dataset (known defect: the application answers an internal error)' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets/{{ds_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'items.0.ref', equals: 'pain.001.001.09' }, { path: 'row_count', equals: 1 }], description: 'reopen the dataset: the added item is stored' },
     ],
     cleanupSteps: cleanupDataset('ds_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'dsNew', 'known-defect'],
-    dataProfile: { profile: 'synthetic-named', data: 'One dataset shell, then an item-append attempt.', source: 'Generated per run.' },
-    expected: 'KNOWN DEFECT: 500 Internal error today. Should be 200 with the item appended once fixed.',
+    dataProfile: { profile: 'synthetic-named', data: 'One dataset shell, then one item (a pain.001.001.09 definition, count 1) added to it.', source: 'Generated per run; the dataset is deleted in cleanup.' },
+    expected: '200 with the item appended as dsi_1 and row_count 1, and the same on reopening. KNOWN DEFECT: the application answers 500 Internal error today, so this case fails.',
   },
   {
     key: 'SB-UC-dsNew-ALT-2',
@@ -134,7 +139,8 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER, body: { name: 'TE-UC-DS-PARTIAL-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { ds_id: 'id' }, description: 'shell create succeeds' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets/{{ds_id}}/assemble', headers: BEARER, body: { items: [{ kind: 'not-a-real-kind', ref: 'x', count: 1 }] }, expected_status: 422, description: 'assemble with invalid kind fails independently' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets/{{ds_id}}/assemble', headers: BEARER, body: { items: [{ kind: 'not-a-real-kind', ref: 'x', count: 1 }] }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.details.items', equals: 'invalid_item' }, { path: 'error.details.requestId', exists: true }], description: 'assemble with invalid kind fails independently' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets/{{ds_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{ds_id}}' }, { path: 'row_count', equals: 0 }], description: 'the shell still exists, empty: the failed assembly did not remove or fill it' },
     ],
     cleanupSteps: cleanupDataset('ds_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'dsNew'],
@@ -288,11 +294,11 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { count: 1, channel: 'api' }, expected_status: [400, 422], description: 'missing messageTypeCode' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { count: 1, channel: 'api' }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'messageTypeCode is required' }, { path: 'error.details.requestId', exists: true }, { path: 'runId', exists: false }], description: 'missing messageTypeCode' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'trNew'],
     dataProfile: { profile: 'negative', data: 'A run request missing messageTypeCode.', source: 'n/a' },
-    expected: 'A clean 4xx; no run is generated.',
+    expected: '422 validation_failed "messageTypeCode is required"; no run is generated and no run id is returned.',
   },
   {
     key: 'SB-UC-trNew-EXC-2',
@@ -328,7 +334,7 @@ C.push(
       { action: 'request', method: 'GET', url: '{{web}}/test-suite-form.html', expected_status: 200, expected_body_contains: 'data-sbe-page="tsNew"', description: 'load screen' },
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TS-MEMBER-{{ts}}', objective: 'Temporary member created by this suite test.' }, expected_status: 200, save: { member_case_id: 'id' }, description: 'create this case\'s temporary member case' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { suite_id: 'id' }, description: 'create suite' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-{{ts}}' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }], save: { suite_id: 'id' }, description: 'create suite' },
       { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['{{member_case_id}}'] }, expected_status: 200, expect_json: [{ path: 'case_ids.0', equals: '{{member_case_id}}' }], description: 'set membership' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.case_ids.0', equals: '{{member_case_id}}' }], description: 'reopen and verify stored membership' },
     ],
@@ -346,7 +352,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-EMPTY-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'id', exists: true }], save: { suite_id: 'id' }, description: 'create empty suite' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-EMPTY-{{ts}}' }, expected_status: 201, expect_json: [{ path: 'id', exists: true }], save: { suite_id: 'id' }, description: 'create empty suite' },
     ],
     cleanupSteps: cleanupSuite('suite_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'tsNew'],
@@ -356,21 +362,25 @@ C.push(
   {
     key: 'SB-UC-tsNew-ALT-2',
     name: 'UC-tsNew alt flow 2: Later membership/order changes use the supported suite APIs.',
-    objective: 'Check an alternative path of "New test suite": later membership/order changes use the supported suite APIs. A suite\'s membership, once set, can be changed again via the same PUT endpoint. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: a second PUT with an empty case_ids array (clearing membership) 500s instead of succeeding — this case asserts today\'s real (broken) behavior as a regression trip-wire.',
-    description: 'Alternate flow 2 of UC-tsNew (New test suite): "Later membership/order changes use the supported suite APIs." A suite\'s membership, once set, can be changed again via the same PUT endpoint. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: a second PUT with an empty case_ids array (clearing membership) 500s instead of succeeding — this case asserts today\'s real (broken) behavior as a regression trip-wire.',
+    objective: 'Check an alternative path of "New test suite": later membership and order changes use the supported suite operations. Reordering puts the named member first and keeps the others after it, replacing the membership needs the suite\'s current version, and an empty reorder list is refused with a clear validation message. (Currently a known defect: the empty list makes the application fail internally instead of refusing it, so this test stays red until that is fixed.)',
+    description: 'Alternate flow 2 of UC-tsNew (New test suite): "Later membership or order changes use the supported suite APIs: PUT /api/v1/test-suites/:id/cases (body case_ids) puts the named cases first in that order and keeps any current member it does not name after them (duplicates collapse, an empty list is refused …), and PUT /api/v1/test-suites/:id (name and caseIds, If-Match) renames the suite and replaces its membership." Verified against registerSpecPersist.ts / specLifecycle.ts reorderSuiteCases and collections.ts updateSuite. KNOWN APPLICATION DEFECT, re-confirmed on staging 2026-11-13 (commit a8d72039ae8e): PUT …/cases with case_ids [] answers 500 {"error":{"code":"internal"}} — reorderSuiteCases throws a plain Error("case_ids is required") that the route does not turn into the validation error it uses for a missing case_ids. The last step asserts the documented refusal (422 validation_failed "case_ids is required") and fails until the application is fixed.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TS-REORDER-MEMBER-{{ts}}' }, expected_status: 200, save: { member_case_id: 'id' }, description: 'create this case\'s temporary member case' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-REORDER-{{ts}}' }, expected_status: 200, save: { suite_id: 'id' }, description: 'create suite' },
-      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['{{member_case_id}}'] }, expected_status: 200, description: 'first membership set' },
-      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: [] }, expected_status: 500, expect_json: [{ path: 'error.code', equals: 'internal' }], description: 'second call clears membership (currently 500s — known defect)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TS-REORDER-MEMBER-A-{{ts}}' }, expected_status: 200, save: { member_a_id: 'id' }, description: 'create this case\'s first temporary member case (A)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TS-REORDER-MEMBER-B-{{ts}}' }, expected_status: 200, save: { member_b_id: 'id' }, description: 'create this case\'s second temporary member case (B)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-REORDER-{{ts}}', caseIds: ['{{member_a_id}}', '{{member_b_id}}'] }, expected_status: 201, save: { suite_id: 'id' }, description: 'create suite with members A then B' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['{{member_b_id}}'] }, expected_status: 200, expect_json: [{ path: 'id', equals: '{{suite_id}}' }, { path: 'case_ids.0', equals: '{{member_b_id}}' }, { path: 'case_ids.1', equals: '{{member_a_id}}' }, { path: 'case_ids', max_length: 2 }], description: 'reorder: B is named, so B comes first and A is kept after it' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.case_ids.0', equals: '{{member_b_id}}' }, { path: 'data.case_ids.1', equals: '{{member_a_id}}' }], save: { suite_etag: 'data.etag' }, description: 'reopen: the new order is stored; note the suite\'s current version' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{suite_etag}}' }, body: { caseIds: ['{{member_a_id}}'] }, expected_status: 200, expect_json: [{ path: 'data.case_ids.0', equals: '{{member_a_id}}' }, { path: 'data.case_ids', max_length: 1 }, { path: 'data.name', equals: 'TE-UC-TS-REORDER-{{ts}}' }], description: 'replace the membership with A only, quoting the current version' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: [] }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'case_ids is required' }], description: 'an empty reorder list is refused (known defect: the application answers an internal error)' },
     ],
-    cleanupSteps: [...cleanupSuite('suite_id'), ...cleanupCase('member_case_id')],
+    cleanupSteps: [...cleanupSuite('suite_id'), ...cleanupCase('member_a_id'), ...cleanupCase('member_b_id')],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'tsNew', 'known-defect'],
-    dataProfile: { profile: 'synthetic-named', data: 'One suite, membership set then an attempted clear via a second PUT call.', source: 'Generated per run.' },
-    expected: 'KNOWN DEFECT: 500 today when clearing to an empty array. Should be 200 once fixed.',
+    dataProfile: { profile: 'synthetic-named', data: 'Two temporary member cases and one suite holding them; the suite is reordered, its membership replaced, then an empty reorder list is sent.', source: 'Created by this case with unique per-run names; cleanup deletes the suite, then both member cases.' },
+    expected: 'Reorder answers 200 with B then A; replacing the membership with the current version answers 200 with A only; an empty reorder list answers 422 validation_failed. KNOWN DEFECT: the empty list answers 500 Internal error today, so this case fails at its last step.',
+    atomicityNote: { reason: 'tests-interaction', detail: 'Reordering is only observable with two members, so the case creates two temporary test cases; both are deleted in cleanup.' },
   },
   {
     key: 'SB-UC-tsNew-EXC-1',
@@ -390,19 +400,22 @@ C.push(
   {
     key: 'SB-UC-tsNew-EXC-2',
     name: 'UC-tsNew exc flow 2: Unknown member IDs or duplicate entries need an explicit result rather than silent loss.',
-    objective: 'Check that "New test suite" fails safely: unknown member IDs or duplicate entries need an explicit result rather than silent loss. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: setting membership to a nonexistent case id 500s rather than being silently dropped OR cleanly rejected — the actual failure mode is worse than the spec\'s own concern (an unhandled crash, not even a silent loss).',
-    description: 'Exception flow 2 of UC-tsNew (New test suite): "Unknown member IDs or duplicate entries need an explicit result rather than silent loss." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: setting membership to a nonexistent case id 500s rather than being silently dropped OR cleanly rejected — the actual failure mode is worse than the spec\'s own concern (an unhandled crash, not even a silent loss).',
+    objective: 'Check that "New test suite" fails safely: duplicate or unknown members get an explicit result rather than being lost silently. A member named twice is kept once, and a member that does not exist is refused with a clear validation message while the suite keeps its real member. (Currently a known defect: the unknown member makes the application fail internally instead of refusing it, so this test stays red until that is fixed.)',
+    description: 'Exception flow 2 of UC-tsNew (New test suite): "Unknown member IDs or duplicate entries need an explicit result rather than silent loss." Duplicates: PUT /api/v1/test-suites/:id/cases collapses a repeated id (specLifecycle.ts reorderSuiteCases) and answers 200 with it once. Unknown id: the database refuses a suite member that is not a live test case of the tenant (trigger test_suite_case_tenant_integrity, db/migrations/029_tenant_reference_integrity.sql, SQLSTATE 23514); the explicit result the flow calls for is the API\'s validation refusal (422 validation_failed, kernel/errors.ts). KNOWN APPLICATION DEFECT, re-confirmed on staging 2026-11-13 (commit a8d72039ae8e): the route (registerSpecPersist.ts) does not translate the trigger\'s refusal and answers 500 {"error":{"code":"internal"}}. Note that UC-tsNew alternate flow 2 says such an id "is added without checking that the case exists" — that does not happen either. The case asserts the refusal and fails until the application is fixed.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-UNKNOWN-{{ts}}' }, expected_status: 200, save: { suite_id: 'id' }, description: 'create suite' },
-      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['tc_does_not_exist_00000000'] }, expected_status: 500, expect_json: [{ path: 'error.code', equals: 'internal' }], description: 'set membership to a nonexistent case id (currently 500s — known defect)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TS-UNKNOWN-MEMBER-{{ts}}' }, expected_status: 200, save: { member_case_id: 'id' }, description: 'create this case\'s temporary member case' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TS-UNKNOWN-{{ts}}' }, expected_status: 201, save: { suite_id: 'id' }, description: 'create suite' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['{{member_case_id}}', '{{member_case_id}}'] }, expected_status: 200, expect_json: [{ path: 'case_ids.0', equals: '{{member_case_id}}' }, { path: 'case_ids', max_length: 1 }], description: 'name the same member twice: it is kept once' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: ['tc_does_not_exist_00000000'] }, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'name a member that does not exist: refused (known defect: the application answers an internal error)' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.case_ids.0', equals: '{{member_case_id}}' }, { path: 'data.case_ids', max_length: 1 }], description: 'reopen: the suite still holds only its real member' },
     ],
-    cleanupSteps: cleanupSuite('suite_id'),
+    cleanupSteps: [...cleanupSuite('suite_id'), ...cleanupCase('member_case_id')],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'tsNew', 'known-defect'],
-    dataProfile: { profile: 'negative', data: 'A membership PUT naming a case id that does not exist.', source: 'n/a' },
-    expected: 'KNOWN DEFECT: 500 today. Should be a clean validation_failed or an explicit stored-result once fixed.',
+    dataProfile: { profile: 'negative', data: 'One temporary member case and one suite; a reorder naming the member twice, then one naming a case id that does not exist.', source: 'Created by this case with unique per-run names; cleanup deletes the suite, then the member case.' },
+    expected: 'The duplicate answers 200 with the member once; the unknown id answers 422 validation_failed and the suite is unchanged. KNOWN DEFECT: the unknown id answers 500 Internal error today, so this case fails at that step.',
   }
 );
 
@@ -421,8 +434,8 @@ C.push(
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/test-suites.html', expected_status: 200, expected_body_contains: 'data-sbe-page="testSuitesDesk"', description: 'load screen' },
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-{{ts}}' }, expected_status: 200, save: { suite_id: 'id' }, description: 'create a suite to run (own data, not a shared one)' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites/{{suite_id}}/run', headers: BEARER, expected_status: 202, expect_json: [{ path: 'accepted', equals: true }, { path: 'outcome.suiteId', equals: '{{suite_id}}' }, { path: 'outcome.ranCases', exists: true }], description: 'request a run of it' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-{{ts}}' }, expected_status: 201, save: { suite_id: 'id' }, description: 'create a suite to run (own data, not a shared one)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites/{{suite_id}}/run', headers: BEARER, expected_status: 202, expect_json: [{ path: 'accepted', equals: true }, { path: 'suiteId', equals: '{{suite_id}}' }, { path: 'outcome.suiteId', equals: '{{suite_id}}' }, { path: 'outcome.ranCases', equals: 0 }, { path: 'outcome.passed', equals: 0 }, { path: 'outcome.failed', equals: 0 }, { path: 'outcome.runs', max_length: 0 }], description: 'request a run of it' },
     ],
     cleanupSteps: cleanupSuite('suite_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'tsAll'],
@@ -438,7 +451,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-EMPTY-{{ts}}' }, expected_status: 200, save: { suite_id: 'id' }, description: 'create an empty suite' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-EMPTY-{{ts}}' }, expected_status: 201, save: { suite_id: 'id' }, description: 'create an empty suite' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{suite_id}}' }], description: 'it is independently readable' },
     ],
     cleanupSteps: cleanupSuite('suite_id'),
@@ -456,11 +469,11 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TSALL-DEL-MEMBER-{{ts}}' }, expected_status: 200, save: { member_case_id: 'id' }, description: 'create this case\'s temporary member case' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-DEL-{{ts}}', caseIds: ['{{member_case_id}}'] }, expected_status: 200, save: { suite_id: 'id', suite_etag: 'etag' }, description: 'create a suite containing that case' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-DEL-{{ts}}', caseIds: ['{{member_case_id}}'] }, expected_status: 201, save: { suite_id: 'id', suite_etag: 'etag' }, description: 'create a suite containing that case' },
       { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{suite_etag}}' }, expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: 'delete the suite (the grouping, not the case)' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/test-cases/{{member_case_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{member_case_id}}' }], description: 'the case still exists' },
     ],
-    cleanupSteps: [...cleanupSuite('suite_id'), ...cleanupCase('member_case_id')],
+    cleanupSteps: [...cleanupSuite('suite_id', true), ...cleanupCase('member_case_id')],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'tsAll'],
     dataProfile: { profile: 'synthetic-named', data: 'One temporary member case and one suite. The suite is explicitly deleted; cleanup deletes the member case.', source: 'Both resources are created by this case.' },
     expected: 'Suite deletion reports deleted=true; the member case remains fully intact.',
@@ -474,7 +487,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-STALE-{{ts}}' }, expected_status: 200, save: { suite_id: 'id' }, description: 'create a suite' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-STALE-{{ts}}' }, expected_status: 201, save: { suite_id: 'id' }, description: 'create a suite' },
       { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: { authorization: 'Bearer {{token}}', 'if-match': '"deliberately-stale-etag"' }, expected_status: 412, description: 'stale If-Match on delete is rejected' },
     ],
     cleanupSteps: cleanupSuite('suite_id'),
@@ -485,20 +498,21 @@ C.push(
   {
     key: 'SB-UC-tsAll-EXC-2',
     name: 'UC-tsAll exc flow 2: A removed member must not be silently counted as an executed case.',
-    objective: 'Check that "Test Suites" fails safely: a removed member must not be silently counted as an executed case. KNOWN DEFECT, confirmed by direct probing on 2026-10-01: clearing a suite\'s membership to an empty array via PUT the application application service 500s rather than succeeding, so the "removed member, then run" path cannot currently be exercised past the removal step.',
-    description: 'Exception flow 2 of UC-tsAll (Test Suites): "A removed member must not be silently counted as an executed case." KNOWN DEFECT, confirmed by direct probing on 2026-10-01: clearing a suite\'s membership to an empty array via PUT /api/v1/test-suites/:id/cases 500s rather than succeeding, so the "removed member, then run" path cannot currently be exercised past the removal step.',
+    objective: 'Check that "Test Suites" fails safely: a removed member must not be silently counted as an executed case. A suite is created with one member, the member is removed from the suite, and a run of the suite then reports that no case was run.',
+    description: 'Exception flow of UC-tsAll (Test Suites): "A removed member must not be silently counted as an executed case." The member is removed through the supported membership replacement, PUT /api/v1/test-suites/:id with caseIds [] and the suite\'s current etag in If-Match (collections.ts updateSuite); POST /api/v1/test-suites/:id/run must then report outcome.ranCases 0 with no per-case runs. (The reorder route PUT …/cases never removes a member and refuses an empty list — see SB-UC-tsNew-ALT-2 for that route and its known defect.)',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-cases', headers: BEARER, body: { name: 'TE-UC-TSALL-REMOVED-MEMBER-{{ts}}' }, expected_status: 200, save: { member_case_id: 'id' }, description: 'create this case\'s temporary member' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-REMOVED-{{ts}}', caseIds: ['{{member_case_id}}'] }, expected_status: 200, save: { suite_id: 'id' }, description: 'create suite with one member' },
-      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}/cases', headers: BEARER, body: { case_ids: [] }, expected_status: 500, expect_json: [{ path: 'error.code', equals: 'internal' }], description: 'remove the member (currently 500s — known defect)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER, body: { name: 'TE-UC-TSALL-REMOVED-{{ts}}', caseIds: ['{{member_case_id}}'] }, expected_status: 201, save: { suite_id: 'id', suite_etag: 'etag' }, description: 'create suite with one member' },
+      { action: 'request', method: 'PUT', url: '{{api}}/api/v1/test-suites/{{suite_id}}', headers: { authorization: 'Bearer {{token}}', 'if-match': '{{suite_etag}}' }, body: { caseIds: [] }, expected_status: 200, expect_json: [{ path: 'data.id', equals: '{{suite_id}}' }, { path: 'data.case_ids', max_length: 0 }], description: 'remove the member: replace the membership with an empty list, quoting the current version' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites/{{suite_id}}/run', headers: BEARER, expected_status: 202, expect_json: [{ path: 'accepted', equals: true }, { path: 'outcome.suiteId', equals: '{{suite_id}}' }, { path: 'outcome.ranCases', equals: 0 }, { path: 'outcome.runs', max_length: 0 }], description: 'run the suite: the removed member is not counted' },
     ],
     cleanupSteps: [...cleanupSuite('suite_id'), ...cleanupCase('member_case_id')],
-    tags: ['usecase', 'sand-bench', 'exception-flow', 'tsAll', 'known-defect'],
-    dataProfile: { profile: 'synthetic-named', data: 'One temporary member case and suite, then an attempted removal; both are cleaned up.', source: 'Created by this case.' },
-    expected: 'KNOWN DEFECT: 500 today on removal. Should be 200, with a subsequent run reporting ranCases=0, once fixed.',
+    tags: ['usecase', 'sand-bench', 'exception-flow', 'tsAll'],
+    dataProfile: { profile: 'synthetic-named', data: 'One temporary member case and one suite holding it; the member is removed, then the suite is run.', source: 'Created by this case with unique per-run names; cleanup deletes the suite, then the member case.' },
+    expected: 'Removing the member answers 200 with an empty member list; the run answers 202 with ranCases 0 and no per-case runs.',
   }
 );
 

@@ -1,11 +1,11 @@
 /**
- * Sand Bench use-case flow catalog � Batch 2a (safe, scoped-to-own-data create flows).
+ * Sand Bench use-case flow catalog — Batch 2a (safe, scoped-to-own-data create flows).
  *
  * Covers the use cases whose main flow creates a resource (schedule, rule, test
  * case, test suite, dataset, run) via a real POST against the deployed API.
  * Every create uses a {{ts}}/{{rand}}-unique name and every follow-on lifecycle
  * call (stage, validate, assemble, delete) operates on that SAME just-created
- * resource � never on pre-existing shared tenant data � so this suite is safe
+ * resource — never on pre-existing shared tenant data — so this suite is safe
  * to run repeatedly against the shared Sand Bench deployment.
  *
  * Request/response shapes below were read from the live source
@@ -25,36 +25,47 @@ const BEARER = { authorization: 'Bearer {{token}}' };
 
 const createScheduleTargetSuite = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/test-suites', headers: BEARER,
-  body: { name: 'TE-UC-SCH-TARGET-{{ts}}' }, expected_status: 200,
-  expect_json: [{ path: 'id', exists: true }], save: { schedule_suite_id: 'id', schedule_suite_etag: 'etag' },
+  body: { name: 'TE-UC-SCH-TARGET-{{ts}}' }, expected_status: 201,
+  expect_json: [{ path: 'id', matches: '^su_' }, { path: 'name', equals: 'TE-UC-SCH-TARGET-{{ts}}' }], save: { schedule_suite_id: 'id', schedule_suite_etag: 'etag' },
   description: 'create this case\'s temporary schedule target suite',
 };
 
+/** Remove a schedule this case created (current version read first), then confirm it is gone. */
 function cleanupSchedule(id: string) {
+  const url = `{{api}}/api/v1/schedules/{{${id}}}`;
   return [
-    { action: 'request', method: 'GET', url: `{{api}}/api/v1/schedules/{{${id}}}`, headers: BEARER, expected_status: 200, save: { [`${id}_etag`]: 'etag' }, description: `get current ETag for ${id}` },
-    { action: 'request', method: 'DELETE', url: `{{api}}/api/v1/schedules/{{${id}}}`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${id}_etag}}` }, expected_status: 200, description: `delete case-owned schedule ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 200, save: { [`${id}_etag`]: 'etag' }, description: `get current ETag for ${id}` },
+    { action: 'request', method: 'DELETE', url, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${id}_etag}}` }, skip_if_missing: [id, `${id}_etag`], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned schedule ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 404, description: `verify schedule ${id} is gone` },
   ];
 }
 
 const cleanupScheduleTargetSuite = {
   action: 'request', method: 'DELETE', url: '{{api}}/api/v1/test-suites/{{schedule_suite_id}}',
   headers: { authorization: 'Bearer {{token}}', 'if-match': '{{schedule_suite_etag}}' },
-  expected_status: 200, description: 'delete this case\'s temporary schedule target suite',
+  skip_if_missing: ['schedule_suite_id', 'schedule_suite_etag'],
+  expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: 'delete this case\'s temporary schedule target suite',
 };
 
+/**
+ * Remove a rule this case created. The application deletes a rule in any lifecycle
+ * state (in review, staged, deprecated) when the request carries the rule's current
+ * version; the current version is read first because validating or staging changes it.
+ */
 function cleanupRule(id: string) {
   const etag = `${id}_cleanup_etag`;
+  const url = `{{api}}/api/v1/rules/{{${id}}}`;
   return [
-    { action: 'request', method: 'GET', url: `{{api}}/api/v1/rules/{{${id}}}`, headers: BEARER, expected_status: 200, save: { [etag]: 'data.etag' }, description: `get current ETag for ${id}` },
-    { action: 'request', method: 'POST', url: `{{api}}/api/v1/rules/{{${id}}}/transitions`, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, body: { transition: 'deprecate', reason: 'test case cleanup' }, expected_status: 200, expect_json: [{ path: 'status', equals: 'deprecated' }], description: `deprecate case-owned rule ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 200, save: { [etag]: 'data.etag' }, description: `get current ETag for ${id}` },
+    { action: 'request', method: 'DELETE', url, headers: { authorization: 'Bearer {{token}}', 'if-match': `{{${etag}}}` }, skip_if_missing: [id, etag], expected_status: 200, expect_json: [{ path: 'deleted', equals: true }], description: `delete case-owned rule ${id}` },
+    { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [id], expected_status: 404, description: `verify rule ${id} is gone` },
   ];
 }
 
 const C: CaseDef[] = [];
 
 /* ------------------------------------------------------------------------ */
-/* UC-schNew � New schedule                                                  */
+/* UC-schNew — New schedule                                                  */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -99,14 +110,14 @@ C.push(
   {
     key: 'SB-UC-schNew-ALT-2',
     name: 'UC-schNew alt flow 2: The proposed run-template linkage requires a separately confirmed payload.',
-    objective: 'Check an alternative path of "New schedule": the proposed run-template linkage requires a separately confirmed payload.',
-    description: 'Alternate flow 2 of UC-schNew (New schedule): "The proposed run-template linkage requires a separately confirmed payload." Closest executable proxy: a schedule created WITHOUT a channel/connectionId still succeeds (those are genuinely optional, not silently defaulted into an unconfirmed run template).',
+    objective: 'Check an alternative path of "New schedule": what a schedule runs is the target chosen for it, and the delivery channel and delivery endpoint are optional. A schedule saved without them is accepted, keeps its chosen target, and shows both as not set rather than inventing a value.',
+    description: 'Alternate flow 2 of UC-schNew (New schedule), current wording: "The run linkage is the payload targetType (suite or test_case) and targetId … channel and connectionId are optional." (Earlier wording: "The proposed run-template linkage requires a separately confirmed payload.") A schedule created without channel/connectionId answers 201 with target_type "suite", target_id the case\'s own suite, and channel / connection_id null.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
       createScheduleTargetSuite,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-NOCHAN-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'channel', exists: false }, { path: 'id', exists: true }], save: { schedule_no_channel_id: 'id' }, description: 'create without channel' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-NOCHAN-{{ts}}', cadence: 'daily', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'id', matches: '^sch_' }, { path: 'target_type', equals: 'suite' }, { path: 'target_id', equals: '{{schedule_suite_id}}' }, { path: 'channel', equals: null }, { path: 'connection_id', equals: null }, { path: 'status', equals: 'scheduled' }], save: { schedule_no_channel_id: 'id' }, description: 'create without channel' },
     ],
     cleanupSteps: [...cleanupSchedule('schedule_no_channel_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'schNew'],
@@ -122,7 +133,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: {}, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }], description: 'missing name and cadence' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: {}, expected_status: 422, expect_json: [{ path: 'error.code', equals: 'validation_failed' }, { path: 'error.message', equals: 'Schedule is not valid' }, { path: 'error.details.name', equals: 'required' }, { path: 'error.details.cadence', equals: 'one_of:once,hourly,daily,weekly' }, { path: 'error.details.targetType', equals: 'one_of:suite,test_case' }, { path: 'error.details.targetId', equals: 'required' }, { path: 'error.details.requestId', exists: true }, { path: 'id', exists: false }], description: 'missing name and cadence: every missing field is named' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'schNew'],
     dataProfile: { profile: 'negative', data: 'Empty body.', source: 'n/a' },
@@ -132,24 +143,24 @@ C.push(
     key: 'SB-UC-schNew-EXC-2',
     name: 'UC-schNew exc flow 2: A sch_local fallback is not evidence that a scheduler will execute a durable record.',
     objective: 'Check that "New schedule" fails safely: a sch_local fallback is not evidence that a scheduler will execute a durable record.',
-    description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id � proving it is a real persisted row, not a client-side-only fallback id.',
+    description: 'Exception flow 2 of UC-schNew (New schedule): "A sch_local fallback is not evidence that a scheduler will execute a durable record." Closest executable proxy: a successfully created schedule\'s id is immediately readable back via GET /api/v1/schedules/:id — proving it is a real persisted row, not a client-side-only fallback id.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
       createScheduleTargetSuite,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-DURABLE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, save: { new_sch_id: 'id' }, description: 'create schedule' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/schedules/{{new_sch_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{new_sch_id}}' }], description: 'read it back by id' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schedules', headers: BEARER, body: { name: 'TE-UC-SCH-DURABLE-{{ts}}', cadence: 'once', targetType: 'suite', targetId: '{{schedule_suite_id}}' }, expected_status: 201, expect_json: [{ path: 'id', matches: '^sch_(?!local)' }, { path: 'etag', exists: true }], save: { new_sch_id: 'id' }, description: 'create schedule: the identity returned is a stored one, not a local stand-in' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/schedules/{{new_sch_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'id', equals: '{{new_sch_id}}' }, { path: 'name', equals: 'TE-UC-SCH-DURABLE-{{ts}}' }, { path: 'cadence', equals: 'once' }, { path: 'target_id', equals: '{{schedule_suite_id}}' }], description: 'read it back by id' },
     ],
     cleanupSteps: [...cleanupSchedule('new_sch_id'), cleanupScheduleTargetSuite],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'schNew'],
     dataProfile: { profile: 'synthetic-named', data: 'One uniquely named schedule, read back by its returned id.', source: 'Generated per run.' },
-    expected: 'The created id is independently readable � a real persisted row, not a local-only id.',
+    expected: 'The created id is independently readable — a real persisted row, not a local-only id.',
   }
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchCreate � Create new rule                                      */
+/* UC-ruleBenchCreate — Create new rule                                      */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -167,8 +178,8 @@ C.push(
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'ruleBenchCreate'],
-    dataProfile: { profile: 'synthetic-named', data: 'One rule named TE-UC-RULE-{{ts}}, category fraud, condition amount_gte(instdAmt, 10000).', source: 'Generated per run; left in place (no delete endpoint for rules in this API).' },
-    expected: '201 with id, status "in_review" and the exact name supplied.',
+    dataProfile: { profile: 'synthetic-named', data: 'One rule named TE-UC-RULE-{{ts}}, category fraud, condition amount_gte(instdAmt, 10000).', source: 'Generated per run; deleted in cleanup.' },
+    expected: '200 with id, status "in_review" and the exact name supplied.',
   },
   {
     key: 'SB-UC-ruleBenchCreate-ALT-1',
@@ -185,20 +196,20 @@ C.push(
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchCreate'],
     dataProfile: { profile: 'synthetic-named', data: 'One rejected attempt, one corrected resubmission, same name.', source: 'Generated per run.' },
-    expected: 'First call 422; corrected resubmission 201 with a real id.',
+    expected: 'First call 422; corrected resubmission 200 with a real id.',
   },
   {
     key: 'SB-UC-ruleBenchCreate-ALT-2',
     name: 'UC-ruleBenchCreate alt flow 2: Analyst leaves without saving; no rule is inferred from a partially completed form.',
     objective: 'Check an alternative path of "Create new rule": analyst leaves without saving; no rule is inferred from a partially completed form.',
-    description: 'Alternate flow 2 of UC-ruleBenchCreate (Create new rule): "Analyst leaves without saving; no rule is inferred from a partially completed form." No backing API call is made for this flow by design � leaving the form is evidenced only by the screen loading and no POST ever firing.',
+    description: 'Alternate flow 2 of UC-ruleBenchCreate (Create new rule): "Analyst leaves without saving; no rule is inferred from a partially completed form." No backing API call is made for this flow by design — leaving the form is evidenced only by the screen loading and no POST ever firing.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-create.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchCreate"', description: 'load screen' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchCreate'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload � deliberately no POST is made.', source: 'n/a' },
+    dataProfile: { profile: 'none (read-only)', data: 'No request payload — deliberately no POST is made.', source: 'n/a' },
     expected: 'Screen loads; no rule is created by this case.',
   },
   {
@@ -219,8 +230,8 @@ C.push(
   {
     key: 'SB-UC-ruleBenchCreate-EXC-2',
     name: 'UC-ruleBenchCreate exc flow 2: A lost save response is unconfirmed; a second write is not evidence that the first failed.',
-    objective: 'Check that "Create new rule" fails safely: a lost save response is unconfirmed; a second write is not evidence that the first failed. Two independent creates with distinct names each get their own distinct id � a dropped response for one call is never inferred from the other succeeding.',
-    description: 'Exception flow 2 of UC-ruleBenchCreate (Create new rule): "A lost save response is unconfirmed; a second write is not evidence that the first failed." Two independent creates with distinct names each get their own distinct id � a dropped response for one call is never inferred from the other succeeding.',
+    objective: 'Check that "Create new rule" fails safely: a lost save response is unconfirmed; a second write is not evidence that the first failed. Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
+    description: 'Exception flow 2 of UC-ruleBenchCreate (Create new rule): "A lost save response is unconfirmed; a second write is not evidence that the first failed." Two independent creates with distinct names each get their own distinct id — a dropped response for one call is never inferred from the other succeeding.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
@@ -237,7 +248,7 @@ C.push(
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchStage � Stage rules                                           */
+/* UC-ruleBenchStage — Stage rules                                           */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -270,7 +281,7 @@ C.push(
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-stage.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchStage"', description: 'load screen' },
     ],
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchStage'],
-    dataProfile: { profile: 'none (read-only)', data: 'No request payload � deliberately no stage call.', source: 'n/a' },
+    dataProfile: { profile: 'none (read-only)', data: 'No request payload — deliberately no stage call.', source: 'n/a' },
     expected: 'Screen loads; no rule is staged by this case.',
   },
   {
@@ -300,7 +311,8 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-STALE-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 10000 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/stage', headers: { authorization: 'Bearer {{token}}', 'if-match': '"deliberately-stale-etag"' }, expected_status: 412, description: 'stale If-Match is rejected' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/stage', headers: { authorization: 'Bearer {{token}}', 'if-match': '"deliberately-stale-etag"' }, expected_status: 412, expect_json: [{ path: 'error.code', equals: 'precondition_failed' }, { path: 'error.details.requestId', exists: true }], description: 'stale If-Match is rejected' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/rules/{{rule_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.status', equals: 'in_review' }, { path: 'data.staged_environment', equals: null }], description: 'the rule was not staged' },
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchStage'],
@@ -327,7 +339,7 @@ C.push(
 );
 
 /* ------------------------------------------------------------------------ */
-/* UC-ruleBenchValidate � Validate rules                                     */
+/* UC-ruleBenchValidate — Validate rules                                     */
 /* ------------------------------------------------------------------------ */
 
 C.push(
@@ -342,7 +354,7 @@ C.push(
       { action: 'request', method: 'GET', url: '{{web}}/rule-bench-validate.html', expected_status: 200, expected_body_contains: 'data-sbe-page="ruleBenchValidate"', description: 'load screen' },
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-VAL-{{ts}}', category: 'fraud', severity: 'medium', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule that matches almost everything' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20, seed: 'TE-UC-VAL-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'result', exists: true }, { path: 'passRate', exists: true }], description: 'validate against generated data' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20, seed: 'TE-UC-VAL-{{ts}}' }, expected_status: 200, expect_json: [{ path: 'cases', equals: 20 }, { path: 'triggered', min: 1 }, { path: 'passRate', min: 1 }, { path: 'result', matches: '^(passed|warning)$' }, { path: 'rule.id', equals: '{{rule_id}}' }, { path: 'rule.last_validation_json.cases', equals: 20 }, { path: 'rule.last_validated_at', exists: true }], description: 'validate against generated data: 20 messages are judged and the rule fires (passed, or warning when it fires on every message)' },
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'main-flow', 'ruleBenchValidate'],
@@ -370,15 +382,15 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-ALT-2',
     name: 'UC-ruleBenchValidate alt flow 2: A broader test run is a separate action from the rule validation endpoint.',
-    objective: 'Check an alternative path of "Validate rules": a broader test run is a separate action from the rule validation endpoint. Validating a rule does not itself create a run row � the matching read count is unaffected by the validate call above.',
-    description: 'Alternate flow 2 of UC-ruleBenchValidate (Validate rules): "A broader test run is a separate action from the rule validation endpoint." Validating a rule does not itself create a run row � GET /api/v1/runs count is unaffected by the validate call above.',
+    objective: 'Check an alternative path of "Validate rules": a broader test run is a separate action from validating a rule. Validating a rule answers with a validation result for that rule only — it starts no test run and reports no run identity or delivery.',
+    description: 'Alternate flow 2 of UC-ruleBenchValidate (Validate rules): "A broader test run is a separate action from the rule validation endpoint." POST /api/v1/rules/:id/validate answers {rule, cases, triggered, passRate, result} (detectionRules.ts validateDetectionRuleAgainstData) with no runId / accepted / delivery fields (those belong to POST /api/v1/runs), and nothing is readable under the rule\'s id in the runs collection (404).',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'low', priority: 'p3',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', exists: true }], save: { runs_before: 'data' }, description: 'runs before validate' },
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-NORUN-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 5 }, expected_status: 200, description: 'validate (not a run)' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 5 }, expected_status: 200, expect_json: [{ path: 'cases', equals: 5 }, { path: 'result', exists: true }, { path: 'rule.id', equals: '{{rule_id}}' }, { path: 'runId', exists: false }, { path: 'accepted', exists: false }, { path: 'delivery', exists: false }], description: 'validate (not a run): the answer is a validation result for the rule and carries no run identity or delivery' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/runs/{{rule_id}}', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }], description: 'the runs collection has no record under the rule\'s identity' },
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'alternate-flow', 'ruleBenchValidate'],
@@ -388,19 +400,19 @@ C.push(
   {
     key: 'SB-UC-ruleBenchValidate-EXC-1',
     name: 'UC-ruleBenchValidate exc flow 1: No cases or unavailable data is not a passed validation.',
-    objective: 'Check that "Validate rules" fails safely: no cases or unavailable data is not a passed validation. A condition engineered to match nothing (amount_gte 999999999) must report a result other than "passed" (warning, since zero hits out of N is a non-trigger, not a pass).',
-    description: 'Exception flow 1 of UC-ruleBenchValidate (Validate rules): "No cases or unavailable data is not a passed validation." A condition engineered to match nothing (amount_gte 999999999) must report a result other than "passed" (warning, since zero hits out of N is a non-trigger, not a pass).',
+    objective: 'Check that "Validate rules" fails safely: a rule that never fires on its sample data is not a passed validation. A rule built to match nothing must be reported as failed, with zero of the twenty sample messages triggering it.',
+    description: 'Exception flow 1 of UC-ruleBenchValidate (Validate rules): "No cases or unavailable data is not a passed validation." A condition engineered to match nothing (amount_gte 999999999) must report result "failed" with triggered 0 of cases 20 and passRate 0 — detectionRules.ts classifyValidation: a rule that never fires is a real failure, one that fires on everything is a warning.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-NOHIT-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 999999999 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule that can never match' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20 }, expected_status: 200, expect_json: [{ path: 'result', matches: '^(warning|failed)$' }], description: 'validate a never-matching rule' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 20 }, expected_status: 200, expect_json: [{ path: 'result', equals: 'failed' }, { path: 'cases', equals: 20 }, { path: 'triggered', equals: 0 }, { path: 'passRate', equals: 0 }, { path: 'rule.id', equals: '{{rule_id}}' }, { path: 'rule.last_validation_result', equals: 'failed' }], description: 'validate a never-matching rule' },
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchValidate'],
-    dataProfile: { profile: 'synthetic-generated', data: '20 generated messages against a rule designed to never trigger.', source: 'Generated per run.' },
-    expected: 'Result is reported honestly (warning/zero-hit), never fabricated as "passed".',
+    dataProfile: { profile: 'synthetic-generated', data: '20 generated messages against a rule designed to never trigger.', source: 'Generated per run; the rule is deleted in cleanup.' },
+    expected: 'Result "failed" with 0 of 20 messages triggering the rule — never fabricated as "passed".',
   },
   {
     key: 'SB-UC-ruleBenchValidate-EXC-2',
@@ -412,12 +424,13 @@ C.push(
     steps: [
       API_LOGIN,
       { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules', headers: BEARER, body: { name: 'TE-UC-RULE-BADTYPE-{{ts}}', category: 'fraud', severity: 'low', condition: { kind: 'amount_gte', field: 'instdAmt', value: 1 } }, expected_status: 200, save: { rule_id: 'id' }, description: 'create a rule' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'not.a.real.type', count: 5 }, expected_status: [404, 400, 422], description: 'validate against an unknown message type' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/rules/{{rule_id}}/validate', headers: BEARER, body: { messageTypeCode: 'not.a.real.type', count: 5 }, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'Message type not found' }, { path: 'error.details.requestId', exists: true }, { path: 'result', exists: false }], description: 'validate against an unknown message type' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/rules/{{rule_id}}', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.last_validation_result', equals: null }, { path: 'data.last_validated_at', equals: null }], description: 'the rule carries no validation result from the failed attempt' },
     ],
     cleanupSteps: cleanupRule('rule_id'),
     tags: ['usecase', 'sand-bench', 'exception-flow', 'ruleBenchValidate'],
-    dataProfile: { profile: 'negative', data: 'An unknown messageTypeCode.', source: 'n/a' },
-    expected: 'A clean error status; never a 200 claiming a validation result.',
+    dataProfile: { profile: 'negative', data: 'An unknown messageTypeCode.', source: 'The rule is created by this case and deleted in cleanup.' },
+    expected: '404 not_found "Message type not found"; no validation result is returned or stored on the rule.',
   }
 );
 
