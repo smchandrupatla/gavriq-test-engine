@@ -110,9 +110,11 @@ const OPTIONAL_INTEGRATIONS: Record<string, { status: number; code: string; mess
   'GET /api/v1/lake/events/summary': { status: 404, code: 'not_found', message: 'event lake is not configured' },
 };
 
-// Routes that read a whole library from disk and can take several seconds to answer.
+// Routes that read a whole library from disk and take seconds to answer — tens of
+// seconds on a busy host (measured: 10 s idle, over 60 s while a full run is going).
+// This is the request's transport limit, not a performance check of the route.
 const SLOW_ROUTE_TIMEOUT_SECONDS: Record<string, number> = {
-  'GET /api/v1/improvement-library': 60,
+  'GET /api/v1/improvement-library': 150,
 };
 
 // Substitution values for path parameters.

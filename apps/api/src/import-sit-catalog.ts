@@ -32,7 +32,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, query, migrate, withTransaction } from './db/client.js';
-import { listSitTests, sharesSuite, sitKeyFor, sitScreenFields, sitScriptFor } from './sit-inventory.js';
+import { listSitTests, sharesSuite, sitKeyFor, sitScreenFields, sitScriptFor, sitTimeoutFor } from './sit-inventory.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const argv = process.argv.slice(2);
@@ -100,6 +100,28 @@ async function main() {
   }
   const takenKeys = new Set<string>((await query(`SELECT key FROM test_cases`)).rows.map((r: any) => r.key));
 
+  // Where a file's tests already live. A file whose tests were grouped by hand — the
+  // business use cases under "Business Use Cases Test", the penetration files under one
+  // suite — stays where it was put; only a file with no home yet gets a suite of its own.
+  const homeOfFile = new Map<string, string>();
+  if (existing.length) {
+    const { rows: memberships } = await query(
+      `SELECT x.test_case_id, x.test_suite_id FROM test_case_suites x WHERE x.test_case_id = ANY($1::uuid[])`,
+      [existing.map((row: any) => row.id)]
+    );
+    const suiteOfCase = new Map<string, string>(memberships.map((m: any) => [m.test_case_id, m.test_suite_id]));
+    const votes = new Map<string, Map<string, number>>();
+    for (const row of existing) {
+      const file = identityOf(row)?.split('::')[0];
+      const suite = suiteOfCase.get(row.id);
+      if (!file || !suite) continue;
+      const tally = votes.get(file) || new Map<string, number>();
+      tally.set(suite, (tally.get(suite) || 0) + 1);
+      votes.set(file, tally);
+    }
+    for (const [file, tally] of votes) homeOfFile.set(file, [...tally.entries()].sort((a, b) => b[1] - a[1])[0]![0]);
+  }
+
   let created = 0;
   let kept = 0;
   const keep = new Set<string>();
@@ -107,7 +129,8 @@ async function main() {
     const suiteIds = new Map<string, string>();
     for (const test of tests) {
       const { meta } = test;
-      if (!suiteIds.has(meta.suite)) {
+      const home = homeOfFile.get(`sit/cases/${test.file}`);
+      if (!home && !suiteIds.has(meta.suite)) {
         const { rows } = await client.query(
           `INSERT INTO test_suites (key, name, description, application_id, suite_type, created_by)
            VALUES ($1,$2,$3,$4,$5,'sit-import')
@@ -117,15 +140,17 @@ async function main() {
         );
         suiteIds.set(meta.suite, rows[0].id);
       }
+      const suiteId = home || suiteIds.get(meta.suite)!;
       const identity = sitScriptFor(test.file, test.name);
       const sf = sitScreenFields(test);
-      const tags = [...new Set(['sit', 'imported', meta.type, test.fileKey, ...meta.tags])];
+      const budget = sitTimeoutFor(test.fileKey, meta);
+      const tags = [...new Set(['sit', 'imported', meta.type, test.fileKey, ...meta.tags, ...(budget.longRunning ? ['cat:long-running'] : [])])];
       const name = test.name || `SIT file: ${test.file}`;
       const fields = [
         name, sf.description, meta.type, meta.method, identity, tags,
         sf.objective, sf.owner, sf.component, sf.environment, sf.estimated_duration, sf.visibility, sf.automation_link,
         sf.test_data, JSON.stringify(sf.attachments), sf.flakiness_notes, sf.known_workarounds, sf.common_failure_causes,
-        sf.preconditions, JSON.stringify(sf.steps),
+        sf.preconditions, JSON.stringify(sf.steps), budget.seconds,
       ];
       const canonical = (byIdentity.get(identity) || [])[0];
       let id: string;
@@ -139,7 +164,7 @@ async function main() {
              objective = $8, owner_id = COALESCE(owner_id, $9), component = $10, environment = $11,
              estimated_duration = $12, visibility = COALESCE(NULLIF(visibility, ''), $13), automation_link = $14,
              test_data = $15, attachments = $16::jsonb, flakiness_notes = $17, known_workarounds = $18,
-             common_failure_causes = $19, preconditions = $20, steps = $21::jsonb,
+             common_failure_causes = $19, preconditions = $20, steps = $21::jsonb, timeout_seconds = $22,
              updated_at = now(), updated_by = 'sit-import'
            WHERE id = $1`,
           [id, ...fields]
@@ -153,9 +178,10 @@ async function main() {
              key, application_id, name, description, test_type, execution_method, script,
              automation_status, lifecycle, tags, author_id, created_by,
              objective, owner_id, component, environment, estimated_duration, visibility, automation_link,
-             test_data, attachments, flakiness_notes, known_workarounds, common_failure_causes, preconditions, steps
+             test_data, attachments, flakiness_notes, known_workarounds, common_failure_causes, preconditions, steps,
+             timeout_seconds
            ) VALUES ($1,$2,$3,$4,$5::test_type,$6,$7,'automated','active',$8,'sit-import','sit-import',
-             $9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21,$22::jsonb)
+             $9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21,$22::jsonb,$23)
            RETURNING id`,
           [key, appId, ...fields]
         );
@@ -163,14 +189,21 @@ async function main() {
         created++;
       }
       keep.add(id);
-      await client.query(`DELETE FROM test_case_suites WHERE test_case_id = $1 AND test_suite_id <> $2`, [id, suiteIds.get(meta.suite)]);
-      await client.query(`INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, suiteIds.get(meta.suite)]);
+      await client.query(`DELETE FROM test_case_suites WHERE test_case_id = $1 AND test_suite_id <> $2`, [id, suiteId]);
+      await client.query(`INSERT INTO test_case_suites (test_case_id, test_suite_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, suiteId]);
     }
 
-    // Every other SIT registration: a second copy of a kept test, or a test the deployed suite no longer has.
-    const surplus = existing.filter((row: any) => !keep.has(row.id) && row.lifecycle === 'active');
+    // Every other SIT registration that a run would still pick up (active or draft): a second
+    // copy of a kept test, or a test the deployed suite no longer has.
+    const surplus = existing.filter((row: any) => !keep.has(row.id) && row.lifecycle !== 'archived' && row.lifecycle !== 'deprecated');
     const wanted = new Set(tests.map((t) => sitScriptFor(t.file, t.name)));
     const duplicates = surplus.filter((row: any) => { const i = identityOf(row); return i !== null && wanted.has(i); }).length;
+    if (argv.includes('--list-stale')) {
+      for (const row of surplus) {
+        const i = identityOf(row);
+        if (i === null || !wanted.has(i)) console.log(`stale\t${row.key}\t${i ?? '(no script or link)'}`);
+      }
+    }
     if (surplus.length) {
       const ids = surplus.map((row: any) => row.id);
       await client.query(

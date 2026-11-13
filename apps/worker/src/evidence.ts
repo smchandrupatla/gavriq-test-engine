@@ -178,6 +178,9 @@ export interface PublishContext {
  * server's storage. An artefact that cannot be read or uploaded is dropped —
  * claiming evidence the control plane cannot serve would defeat the gate.
  */
+const UPLOAD_ATTEMPTS = Math.max(1, Number(process.env.EVIDENCE_UPLOAD_ATTEMPTS) || 4);
+const UPLOAD_RETRY_MS = Math.max(0, Number(process.env.EVIDENCE_UPLOAD_RETRY_MS ?? 1500));
+
 export async function publishEvidence(items: EvidenceItem[], ctx: PublishContext): Promise<EvidenceItem[]> {
   const published: EvidenceItem[] = [];
   for (const item of items) {
@@ -187,35 +190,54 @@ export async function publishEvidence(items: EvidenceItem[], ctx: PublishContext
       console.warn(`[evidence] ${item.storage_key} missing locally — dropped`);
       continue;
     }
-    try {
-      const buf = readFileSync(local);
-      const res = await fetch(`${ctx.api}/api/v1/evidence/upload`, {
-        method: 'POST',
-        headers: ctx.headers,
-        body: JSON.stringify({
-          execution_id: ctx.executionId,
-          case_key: ctx.caseKey,
-          name,
-          evidence_type: item.type,
-          content_type: item.content_type,
-          content_base64: buf.toString('base64'),
-          sha256: createHash('sha256').update(buf).digest('hex'),
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      const body = (await res.json().catch(() => ({}))) as { data?: { storage_key: string; size_bytes: number; sha256: string } };
-      if (!res.ok || !body.data?.storage_key) throw new Error(`upload returned ${res.status}`);
-      published.push({
-        ...item,
-        storage_key: body.data.storage_key,
-        size_bytes: body.data.size_bytes,
-        metadata: { ...(item.metadata || {}), sha256: body.data.sha256 },
-      });
-      // The engine holds the record now; the local copy was only scratch.
-      rmSync(local, { force: true });
-    } catch (err) {
-      console.warn(`[evidence] upload of ${name} failed: ${(err as Error).message} — dropped`);
+    // A verdict without its evidence is refused by the evidence gate and recorded as an
+    // error, so one slow answer from a busy control plane must not cost a case its result:
+    // the upload is tried again (the store keys by content, a repeat is harmless) before
+    // the item is given up on.
+    const buf = readFileSync(local);
+    const payload = JSON.stringify({
+      execution_id: ctx.executionId,
+      case_key: ctx.caseKey,
+      name,
+      evidence_type: item.type,
+      content_type: item.content_type,
+      content_base64: buf.toString('base64'),
+      sha256: createHash('sha256').update(buf).digest('hex'),
+    });
+    let lastError = '';
+    for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch(`${ctx.api}/api/v1/evidence/upload`, {
+          method: 'POST',
+          headers: ctx.headers,
+          body: payload,
+          signal: AbortSignal.timeout(30_000),
+        });
+        const body = (await res.json().catch(() => ({}))) as { data?: { storage_key: string; size_bytes: number; sha256: string } };
+        if (!res.ok || !body.data?.storage_key) {
+          // A request the store rejects as wrong will be rejected again; only a busy or failing store is retried.
+          if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+            lastError = `upload returned ${res.status}`;
+            break;
+          }
+          throw new Error(`upload returned ${res.status}`);
+        }
+        published.push({
+          ...item,
+          storage_key: body.data.storage_key,
+          size_bytes: body.data.size_bytes,
+          metadata: { ...(item.metadata || {}), sha256: body.data.sha256 },
+        });
+        // The engine holds the record now; the local copy was only scratch.
+        rmSync(local, { force: true });
+        lastError = '';
+        break;
+      } catch (err) {
+        lastError = (err as Error).message;
+        if (attempt < UPLOAD_ATTEMPTS) await new Promise((r) => setTimeout(r, UPLOAD_RETRY_MS * attempt));
+      }
     }
+    if (lastError) console.warn(`[evidence] upload of ${name} failed after ${UPLOAD_ATTEMPTS} attempt(s): ${lastError} — dropped`);
   }
   return published;
 }
