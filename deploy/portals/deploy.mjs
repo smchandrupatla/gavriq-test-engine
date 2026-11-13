@@ -9,8 +9,13 @@
  *
  * The portal repos each own their own compose.yaml; this script invokes them
  * with env overrides that point them at Sand Bench's staging stack and, for
- * ftp-desk, applies deploy/portals/ftp-desk.override.yaml to swap the external
- * volume + conflicting port.
+ * ftp-desk, applies deploy/portals/ftp-desk.override.yaml to publish the port
+ * on the loopback interface only (the portal's own compose file already mounts
+ * the shared "sbe-shared-ftp" volume and uses host port 18102).
+ *
+ * Of the Kafka project only the portal service is started: its bundled testhub
+ * stub and Redpanda are left out (--no-deps), because the portal is pointed at
+ * the staging testhub instead. The API portal brings its own small Postgres.
  *
  * Usage:
  *   node deploy/portals/deploy.mjs deploy [kafka|mq|ftp|api|all]
@@ -98,7 +103,13 @@ async function deployOne(name) {
   console.log(`[portals] deploying ${name} (${p.project}) from ${p.repo}`);
   const env = { ...process.env, ...p.env };
   run('docker', ['compose', '-p', p.project, ...p.composeArgs, 'up', '-d', '--build', ...p.upArgs], { cwd: p.repo, env });
-  const health = await probe(p.healthUrl);
+  // "up -d" returns as soon as the container is started, before the portal listens:
+  // give it up to a minute to answer its own health check.
+  let health = await probe(p.healthUrl);
+  for (let waited = 0; !health.ok && waited < 60_000; waited += 2_000) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    health = await probe(p.healthUrl);
+  }
   console.log(`[portals] ${name} /health → ${health.status} ${health.ok ? 'ok' : 'FAIL'}`);
   if (!health.ok) throw new Error(`${name} did not come up healthy: ${health.body}`);
 }
