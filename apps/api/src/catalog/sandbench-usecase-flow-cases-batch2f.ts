@@ -56,7 +56,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/configuration.html', expected_status: 200, expected_body_contains: 'data-sbe-page="configuration"', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/configuration.html', expected_status: 200, expected_body_contains: 'data-sbe-page="configuration-quotas" data-screen-title="Configuration"', description: 'load screen (the Configuration page now carries the tenant-quotas page marker)' },
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/settings/use-cases', headers: BEARER, expected_status: 200, expect_json: [{ path: 'enabled', exists: true }], save: { uc_enabled: 'enabled' }, description: 'load current setting' },
       ADMIN_LOGIN,
@@ -412,7 +412,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled; external systems seeded.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/?page=externalSystems', expected_status: 200, description: 'console shell loads (externalSystems mounts client-side inside the React console)' },
+      { action: 'request', method: 'GET', url: '{{web}}/external-systems.html', expected_status: 200, expected_body_contains: 'data-sbe-page="externalSystems"', description: 'load the External systems screen (its own page, which now hands over to Connections in the browser; the web tier redirects to its /v/<id> address, which is followed)' },
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/external-systems', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data.0.id', exists: true }], save: { sys_id: 'data.0.id', sys_name: 'data.0.name', sys_kind: 'data.0.kind', sys_channel: 'data.0.channel' }, description: 'list registered systems' },
       ADMIN_LOGIN,
@@ -478,7 +478,7 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/external-systems/ext_does_not_exist_00000000/dummy', headers: BEARER, expected_status: 404, description: 'dummy send to a nonexistent system' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/external-systems/ext_does_not_exist_00000000/dummy', headers: BEARER, expected_status: 404, expect_json: [{ path: 'error.code', equals: 'not_found' }, { path: 'error.message', equals: 'External system not found' }, { path: 'error.details.requestId', exists: true }], description: 'dummy send to a nonexistent system' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'externalSystems'],
     dataProfile: { profile: 'negative', data: 'A fabricated external system id.', source: 'n/a' },
@@ -499,7 +499,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; demo operator identity enabled.',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/?page=functionalAccess', expected_status: 200, description: 'console shell loads (functionalAccess mounts client-side inside the React console)' },
+      { action: 'request', method: 'GET', url: '{{web}}/?page=functionalAccess', expected_status: 200, expected_body_contains: '<title>Sand Bench · GAVRIQ Labs</title>', description: 'console shell loads (functionalAccess mounts client-side inside the console shell)' },
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/features', headers: BEARER, expected_status: 200, expect_json: [{ path: 'pages', min_length: 5 }], description: 'feature catalogue' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/session/features', headers: BEARER, expected_status: 200, expect_json: [{ path: 'maxLevel', exists: true }, { path: 'pages', min_length: 5 }], description: 'effective grant for this operator, distinct from job permissions' },
@@ -583,7 +583,7 @@ C.push(
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled (security:manage).',
     steps: [
-      { action: 'request', method: 'GET', url: '{{web}}/security.html', expected_status: 200, expected_body_contains: 'Security', description: 'load screen' },
+      { action: 'request', method: 'GET', url: '{{web}}/security.html', expected_status: 200, expected_body_contains: 'data-sbe-page="security"', description: 'load screen' },
       API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/security/health', headers: BEARER, expected_status: 200, expect_json: [{ path: 'overall', exists: true }, { path: 'encryption', exists: true }], description: 'review health/policy' },
       ADMIN_LOGIN,
@@ -654,11 +654,11 @@ C.push(
     preconditions: 'Sand Bench web/api reachable; admin.acme demo identity enabled.',
     steps: [
       ADMIN_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/security/records/enc_does_not_exist_00000000', headers: ADMIN_BEARER, expected_status: 404, description: 'nonexistent record id' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/security/records/enc_does_not_exist_00000000', headers: ADMIN_BEARER, expected_status: 404, expect_json: [{ path: 'error', equals: 'security_failed' }, { path: 'message', equals: 'record not found' }, { path: 'data', exists: false }, { path: 'id', exists: false }], description: 'nonexistent record id: refused as not found, with no plaintext field at all' },
     ],
     tags: ['usecase', 'sand-bench', 'exception-flow', 'security'],
     dataProfile: { profile: 'negative', data: 'A fabricated record id.', source: 'n/a' },
-    expected: '404; never a 200 carrying fabricated empty plaintext.',
+    expected: '404 {error: "security_failed", message: "record not found"} (the security routes\' own error shape, security/registerSecurity.ts sendError); never a 200 carrying fabricated empty plaintext.',
   }
 );
 
