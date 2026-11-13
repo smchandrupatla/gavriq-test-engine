@@ -9,6 +9,7 @@ import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
 import { validateCaseShape } from './case-shape.js';
+import { withIdentityLane } from './identity-lane.js';
 import { runPerformance } from './runners/performance.js';
 import { runSit, isSitScript } from './runners/sit.js';
 import { runE2E } from './runners/e2e.js';
@@ -223,11 +224,11 @@ function buildVars(env: any): Record<string, string> {
   return vars;
 }
 
-async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean, signal?: AbortSignal): Promise<RunnerResult> {
+async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean, signal?: AbortSignal, lane?: unknown): Promise<RunnerResult> {
   const method = (tc?.execution_method || 'selenium').toLowerCase();
   const script = tc?.script || '';
   const rules = tc?.validation_rules || {};
-  const vars = buildVars(env);
+  const vars = withIdentityLane(buildVars(env), lane);
 
   // Atomic-contract pre-flight: refuse to run a case that references a var
   // it cannot resolve. Keeps the worker from executing a half-defined case
@@ -340,6 +341,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
         viewport,
         headless,
         signal,
+        extraHttpHeaders: rules.extra_http_headers && typeof rules.extra_http_headers === 'object' ? rules.extra_http_headers : undefined,
       });
       return {
         status: r.status,
@@ -502,7 +504,8 @@ async function runJob(execution: any) {
     });
     return;
   }
-  const secrets = secretValues(buildVars(env));
+  const lane = execution?.metadata?.identity_lane;
+  const secrets = secretValues(withIdentityLane(buildVars(env), lane));
 
   // Cancelling a run in the console must stop the work, not just relabel it:
   // the execution's status is watched while the job runs, and a cancel aborts
@@ -530,7 +533,7 @@ async function runJob(execution: any) {
     const testType = tc?.test_type || 'other';
     const caseLimitMs = caseTimeoutMs(settings, testType);
     const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(caseLimitMs)]);
-    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal);
+    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal, lane);
     // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
     if (cancel.signal.aborted) return stopped();
     // The per-test-type timeout fired instead: the case is killed and recorded as timed out,

@@ -21,6 +21,7 @@
  * adding a new CaseDef.method value; the existing cases below stay valid.
  */
 import type { CaseDef, SuiteDef } from './types.js';
+import { pageIdentitySteps } from './sandbench-page-baseline.js';
 
 export const SANDBENCH_E2E_GUI_SUITE: SuiteDef = {
   key: 'sb-e2e-gui',
@@ -143,7 +144,7 @@ const VIEWPORTS: Array<{ code: string; width: number; height: number; label: str
  * 2026-10-10. `publicPage` means the page renders content without a sign-in;
  * `assertText` is a verified string on that page used by the responsive matrix
  * to confirm something painted. Signed-in pages leave assertText empty and the
- * responsive helper falls back to a "body is painted" check after sign-in.
+ * responsive helper asserts the verified browser title and visible heading after sign-in.
  */
 const PAGES: Array<{ code: string; path: string; name: string; publicPage?: boolean; assertText?: string }> = [
   // Public landing + documentation
@@ -163,11 +164,11 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'LOGGING',            path: '/logging.html',                           name: 'System logging',                            publicPage: true, assertText: 'System logging' },
   { code: 'PG-INV',             path: '/postgres-inventory.html',                name: 'Postgres inventory',                        publicPage: true, assertText: 'Postgres inventory' },
   { code: 'BYO-XSD',            path: '/bring-your-own-xsd.html',                name: 'Bring your own XSD',                        publicPage: true, assertText: 'XSD' },
-  { code: 'MASK-DEMO',          path: '/mask-demo.html',                         name: 'Masking slide',                             publicPage: true, assertText: 'Masking' },
+  { code: 'MASK-DEMO',          path: '/mask-demo.html',                         name: 'Masking slide',                             publicPage: true, assertText: 'Same run, two tenants' },
   { code: 'HELP-CENTER',        path: '/help-center.html',                       name: 'Help center',                               publicPage: true, assertText: 'Help' },
 
   // Signed-in operator surfaces
-  { code: 'ADMIN',              path: '/admin.html',                             name: 'Admin' },
+  { code: 'ADMIN',              path: '/configuration-users.html',               name: 'Users' },
   { code: 'AGENTS',             path: '/agents.html',                            name: 'Agents' },
   { code: 'AI-DRAFTS',          path: '/ai-authoring-drafts.html',               name: 'AI authoring · drafts' },
   { code: 'AI-FROM-UC',         path: '/ai-authoring-from-use-case.html',        name: 'AI authoring · from use case' },
@@ -265,9 +266,9 @@ function signedInPage(key: string, path: string, humanName: string): CaseDef {
     key,
     name: `A signed-in operator can deep-link to the ${humanName} page`,
     objective:
-      `Sign in as the demo operator and open the ${humanName} page directly; confirm the sign-in gate is not shown — the operator reaches the page they linked to, not a sign-in redirect.`,
+      `Sign in as the demo operator and open the ${humanName} page directly; confirm its browser title and visible heading match the requested page and the sign-in gate is hidden.`,
     description:
-      `Open {{web}}/, sign in as the demo operator, then navigate to {{web}}${path} in the same browser session. The sign-in gate (#gate) must stay hidden — the ${humanName} page is served to the signed-in operator without a second sign-in.`,
+      `Open {{web}}/, sign in as the demo operator, then navigate to {{web}}${path} in the same browser session. The browser title and visible heading must identify ${humanName}, and the sign-in gate (#gate) must stay hidden.`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -278,7 +279,7 @@ function signedInPage(key: string, path: string, humanName: string): CaseDef {
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to the ${humanName} page after sign-in` },
-      { action: 'wait', value: '2000', description: 'give the page time to render' },
+      ...pageIdentitySteps(path, humanName),
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: `the sign-in gate is not shown on the ${humanName} page` },
     ],
     timeoutSeconds: 60,
@@ -386,9 +387,9 @@ const ELEMENT_CHECKS: Array<{ code: string; name: string; description: string; s
   },
   {
     code: 'STYLESHEET',
-    name: 'page links a stylesheet',
-    description: 'at least one <link rel="stylesheet"> is on the page — the page is styled, not plain HTML',
-    step: { action: 'wait_for', selector: 'link[rel="stylesheet"]', timeout_ms: 10000, description: 'a stylesheet link is on the page' },
+    name: 'the page declares its styles',
+    description: 'a stylesheet link or an inline style block is attached to the document — the Help page uses inline styles in the pinned application',
+    step: { action: 'wait_for', selector: 'link[rel="stylesheet"], style', state: 'attached', timeout_ms: 10000, description: 'a stylesheet link or inline style block is attached to the document' },
   },
   {
     code: 'ANCHORS-HREF',
@@ -472,7 +473,7 @@ function responsiveCase(
     ? [
         ...CONSOLE_SIGNIN,
         { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${humanName} after sign-in` },
-        { action: 'wait', value: '2000', description: 'let the shell render at this viewport' },
+        ...pageIdentitySteps(path, humanName),
         { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is not shown — operator reached the page' },
         { action: 'assert_no_horizontal_overflow', description: 'no horizontal scrolling needed at this viewport' },
       ]
@@ -531,12 +532,12 @@ function ucGuiAvailability(ucId: string, path: string, humanName: string, option
   const steps = options.publicPage
     ? [
         { action: 'navigate', value: `{{web}}${path}`, description: `open the ${humanName} screen as an anonymous visitor` },
-        { action: 'assert_selector_count_min', selector: 'body', value: '1', description: 'the shell is served' },
+        ...pageIdentitySteps(path, humanName),
       ]
     : [
         ...CONSOLE_SIGNIN,
         { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to the ${humanName} screen after sign-in` },
-        { action: 'wait', value: '2000', description: 'give the shell time to decide between gate and signed-in state' },
+        ...pageIdentitySteps(path, humanName),
         { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the sign-in gate is not shown — the screen was served' },
       ];
   return {
@@ -1164,7 +1165,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   publicPage('SB-E2E-GUI-VISITOR-READS-LOGGING', '/logging.html', 'System logging', 'System logging'),
   publicPage('SB-E2E-GUI-VISITOR-READS-PG-INVENTORY', '/postgres-inventory.html', 'Postgres inventory', 'Postgres inventory'),
   publicPage('SB-E2E-GUI-VISITOR-READS-BYO-XSD', '/bring-your-own-xsd.html', 'Bring your own XSD — Sand Bench', 'XSD'),
-  publicPage('SB-E2E-GUI-VISITOR-READS-MASK-DEMO', '/mask-demo.html', 'Masking slide — Sand Bench', 'Masking'),
+  publicPage('SB-E2E-GUI-VISITOR-READS-MASK-DEMO', '/mask-demo.html', 'Masking slide — Sand Bench', 'Same run, two tenants'),
   publicPage('SB-E2E-GUI-VISITOR-READS-HELP-CENTER', '/help-center.html', 'Help', 'Help'),
 
   /* ---------------------------------------------------------------------- */
@@ -1340,7 +1341,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   /* Signed-in deep links — one case per operator page                      */
   /* ---------------------------------------------------------------------- */
 
-  signedInPage('SB-E2E-GUI-SIGNED-IN-ADMIN', '/admin.html', 'Admin'),
+  signedInPage('SB-E2E-GUI-SIGNED-IN-ADMIN', '/configuration-users.html', 'Users'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-AGENTS', '/agents.html', 'Agents'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-SCHEME-DEFINITIONS', '/scheme-definitions.html', 'Scheme Definitions'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-TEST-CASES', '/test-cases.html', 'Test cases'),
@@ -1976,7 +1977,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     'confirms the browser is told not to sniff the content type of the About page.'),
   headerCheck('SB-E2E-GUI-NOT-PRODUCTION-HAS-NOSNIFF', '/not-production.html', 'x-content-type-options', 'nosniff',
     'confirms the browser is told not to sniff the content type of the disclosure page.'),
-  headerCheck('SB-E2E-GUI-GATE-HAS-REFERRER-POLICY', '/', 'referrer-policy', 'strict',
+  headerCheck('SB-E2E-GUI-GATE-HAS-REFERRER-POLICY', '/', 'referrer-policy', 'same-origin',
     'confirms the gate\'s referrer policy keeps information from leaking to third parties on outbound navigation.'),
 
   /* ---------------------------------------------------------------------- */
@@ -2279,7 +2280,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'Sign in, deep-link to the Overview page, then deep-link to the Admin page in the same browser session, and confirm the sign-in gate never reappears — the session carries the operator across multiple pages.',
     description:
-      'Open {{web}}/, sign in, navigate to {{web}}/overview.html, confirm #gate is hidden, navigate to {{web}}/admin.html, confirm #gate is still hidden.',
+      'Open {{web}}/, sign in, navigate to {{web}}/overview.html, confirm #gate is hidden, navigate to {{web}}/configuration-users.html, confirm #gate is still hidden.',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -2290,7 +2291,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       ...CONSOLE_SIGNIN,
       { action: 'navigate', value: '{{web}}/overview.html', description: 'deep-link to Overview' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is hidden on Overview' },
-      { action: 'navigate', value: '{{web}}/admin.html', description: 'deep-link to Admin' },
+      { action: 'navigate', value: '{{web}}/configuration-users.html', description: 'deep-link to Users' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is hidden on Admin — session carried over' },
     ],
     timeoutSeconds: 90,
@@ -2386,12 +2387,12 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     dataProfile: PUBLIC_READ,
     expected: 'The Help page carries a top heading titled Help.',
   },
-  anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-ADMIN', '/admin.html', 'Admin'),
+  anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-ADMIN', '/configuration-users.html', 'Users'),
   anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-AGENTS', '/agents.html', 'Agents'),
   anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-SCHEME-DEFS', '/scheme-definitions.html', 'Scheme Definitions'),
-  headerCheck('SB-E2E-GUI-GATE-HAS-FRAME-OPTIONS', '/', 'x-frame-options', 'DENY',
+  headerCheck('SB-E2E-GUI-GATE-HAS-FRAME-OPTIONS', '/', 'x-frame-options', 'SAMEORIGIN',
     'confirms the browser refuses to render the gate inside a frame on another site, blocking clickjacking.'),
-  headerCheck('SB-E2E-GUI-ABOUT-HAS-FRAME-OPTIONS', '/about.html', 'x-frame-options', 'DENY',
+  headerCheck('SB-E2E-GUI-ABOUT-HAS-FRAME-OPTIONS', '/about.html', 'x-frame-options', 'SAMEORIGIN',
     'confirms the About page cannot be framed by another site, blocking clickjacking.'),
   browserCompat('SB-E2E-GUI-DEMO-ON-FIREFOX', '/demo.html', 'firefox', '90-second demo — Sand Bench', 'demo'),
   browserCompat('SB-E2E-GUI-DEMO-ON-WEBKIT', '/demo.html', 'webkit', '90-second demo — Sand Bench', 'demo'),

@@ -10,7 +10,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SANDBENCH_CASES, SANDBENCH_SUITES } from '../apps/api/src/catalog/sandbench-cases.ts';
+import { SANDBENCH_ALL_CASES as SANDBENCH_CASES, SANDBENCH_ALL_SUITES as SANDBENCH_SUITES } from '../apps/api/src/catalog/sandbench-catalog.js';
 import { ENGINE_CASES, ENGINE_SUITES } from '../apps/api/src/catalog/engine-cases.ts';
 import { ESTIMATED_DURATIONS, VISIBILITIES, TRIAGE_STATUSES, PRIORITY_LABEL, type CaseDef, type SuiteDef } from '../apps/api/src/catalog/types.ts';
 import { findJargon, narrateStep, screenFields, plainStatus, describePath, type AppContext } from '../apps/api/src/catalog/plain-language.ts';

@@ -8,7 +8,8 @@
  * on both testhub and the portal. The pass criterion is the strong one the
  * user picked: portal /app/log + testhub /hub/inbox both carry the tag.
  */
-import { CaseDef, SuiteDef, tagSource } from './types.ts';
+import { type CaseDef, type SuiteDef, tagSource } from './types.js';
+import { cleanupVersionedFixture } from './sandbench-cleanup.js';
 
 const FILE = 'apps/api/src/catalog/sandbench-event-roundtrip-cases.ts';
 
@@ -34,7 +35,7 @@ export const SANDBENCH_EVENT_RT_SUITES: SuiteDef[] = [
 const API_LOGIN = {
   action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
   body: { username: '{{username}}', password: '{{password}}' },
-  expected_status: 200, save: { token: 'token' },
+  expected_status: 200, save: { token: 'token', event_actor_id: 'user.id' },
   description: 'operator login',
 } as const;
 const BEARER = { authorization: 'Bearer {{token}}' };
@@ -309,6 +310,12 @@ function eventEmissionCase(ev: EventSpec): CaseDef {
   if (!triggerIsLogin) steps.push(API_LOGIN);
   // Clone trigger step with (possibly) BEARER header, if the trigger didn't already include it.
   const trig: Record<string, unknown> = { ...ev.trigger };
+  const cleanupSteps: unknown[] = [];
+  if (ev.code === 'biz.dataset.created') {
+    trig.body = { ...(trig.body as Record<string, unknown>), messageTypeCode: 'pacs.008.001.14' };
+    trig.save = { event_dataset_id: 'id' };
+    cleanupSteps.push(...cleanupVersionedFixture('datasets', 'event_dataset_id'));
+  }
   if (!triggerIsLogin && !trig.headers) trig.headers = BEARER;
   steps.push(trig);
   // Verifier always needs a Bearer token; for login-trigger cases we sign in
@@ -316,10 +323,17 @@ function eventEmissionCase(ev: EventSpec): CaseDef {
   if (triggerIsLogin) steps.push(API_LOGIN);
   steps.push({
     action: 'request', method: 'GET',
-    url: `{{api}}/api/v1/events?code=${encodeURIComponent(ev.code)}&limit=1`,
+    // The pinned API ignores a `code` query parameter. Match the actual event
+    // code and actor together; a nonempty global history is not proof.
+    url: '{{api}}/api/v1/events?limit=500',
     headers: BEARER,
     expected_status: 200,
-    expect_json: [{ path: 'data', min_length: 1 }],
+    expect_json: [{ path: 'data', some: {
+      eventCode: ev.code,
+      'actor.userId': '{{event_actor_id}}',
+      occurredAt: { at_or_after: '{{ts}}' },
+      ...(ev.code === 'biz.dataset.created' ? { 'entity.id': '{{event_dataset_id}}' } : {}),
+    } }],
     poll: { timeout_ms: 10000, interval_ms: 500 },
     description: `event ${ev.code} recorded`,
   });
@@ -335,7 +349,12 @@ function eventEmissionCase(ev: EventSpec): CaseDef {
     priority: ev.priority ?? 'p1',
     preconditions: 'Sand Bench API reachable; demo operator can sign in.',
     steps,
-    tags: ['integration', 'event-emission', ev.code.split('.')[0]],
+    ...(cleanupSteps.length ? { cleanupSteps } : {}),
+    ...(ev.code === 'biz.file.generated' ? { atomicityNote: {
+      reason: 'no-cleanup-endpoint' as const,
+      detail: 'The pinned application stores generated_messages but exposes no delete route for generated files. This case cannot restore those rows and must be run on a disposable baseline; it does not claim complete baseline restoration.',
+    } } : {}),
+    tags: ['integration', 'event-emission', ev.code.split('.')[0]!],
     dataProfile: {
       profile: 'synthetic',
       data: ev.trigger.body ? JSON.stringify(ev.trigger.body) : 'A single HTTP call.',

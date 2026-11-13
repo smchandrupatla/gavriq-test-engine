@@ -25,6 +25,7 @@
  */
 import { tagSource, type CaseDef, type SuiteDef, type TypeMeta } from './types.js';
 import { describeTarget } from './plain-language.js';
+import { cleanupRunFixture, cleanupVersionedFixture } from './sandbench-cleanup.js';
 import { SANDBENCH_UPLOAD_CASES, SANDBENCH_UPLOAD_SUITE } from './sandbench-upload-cases.js';
 import { SANDBENCH_UPLOAD_SELENIUM_CASES, SANDBENCH_UPLOAD_SELENIUM_SUITE } from './sandbench-upload-selenium-cases.js';
 import { SANDBENCH_E2E_GUI_CASES, SANDBENCH_E2E_GUI_SUITE } from './sandbench-e2e-gui-cases.js';
@@ -176,10 +177,10 @@ C.push(
     description: 'GET {{api}}/api/v1/channel-targets must list the file, api, mq and kafka channels — the delivery surface the rest of the suite exercises.',
     suiteKey: 'sb-smoke', testType: 'smoke', method: 'http', severity: 'high', priority: 'p1',
     preconditions: 'API container up.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/channel-targets', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 4 }, { path: 'data', contains: '"channel":"kafka"' }, { path: 'data', contains: '"channel":"mq"' }], description: 'channel-targets' }],
+    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/channel-targets', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 4 }, ...['file', 'api', 'mq', 'kafka'].map(channel => ({ path: 'data', some: { channel } }))], description: 'channel-targets' }],
     tags: ['smoke', 'sand-bench', 'channels', 'auth-required'],
     dataProfile: { profile: 'none (read-only)', data: 'No request payload.', source: 'n/a' },
-    expected: '200 with >= 4 channels including mq and kafka.',
+    expected: '200 with all four delivery channels: file, api, mq and kafka.',
   },
   {
     key: 'SB-SMOKE-CAPABILITIES',
@@ -1005,15 +1006,23 @@ C.push(
   },
   {
     key: 'SB-UC-DATASETS-CATALOGUE-FOR-TEST-DESIGN',
-    name: 'Dataset catalogue is populated for test-design use cases',
-    objective: 'Confirm at least one dataset exists for an operator to pick when building a rule or a run.',
-    description: 'GET {{api}}/api/v1/datasets must return >= 1 dataset — the "build a rule/run from a curated dataset" use case depends on at least one dataset existing to pick from.',
+    name: 'A new dataset is available for test design',
+    objective: 'Create a dataset and confirm the operator can find that same dataset when preparing a test.',
+    description: 'Create a case-owned dataset, verify its ID, name and message type in GET /api/v1/datasets, then delete it with its current version and verify absence.',
     suiteKey: 'sb-usecase', testType: 'acceptance', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'At least one dataset seeded.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'datasets catalogue' }],
+    preconditions: 'Operator can sign in; the installed pacs.008.001.14 message type is available.',
+    steps: [
+      API_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/datasets', headers: BEARER,
+        body: { name: 'test-design-{{rand}}-{{ts}}', messageTypeCode: 'pacs.008.001.14' },
+        expected_status: 200, save: { design_dataset_id: 'id' }, expect_json: [{ path: 'id', exists: true }], description: 'create this test’s dataset' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/datasets', headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{design_dataset_id}}', name: 'test-design-{{rand}}-{{ts}}', message_type_code: 'pacs.008.001.14', row_count: 0 } }], description: 'find the newly created dataset in the catalogue' },
+    ],
+    cleanupSteps: cleanupVersionedFixture('datasets', 'design_dataset_id'),
     tags: ['usecase', 'sand-bench', 'datasets'],
-    dataProfile: SIGNIN_DATA,
-    expected: '>= 1 dataset published.',
+    dataProfile: { profile: 'synthetic', data: 'One uniquely named empty dataset using the installed pacs.008 message type.', source: 'Created by this case.' },
+    expected: 'The catalogue contains this case’s dataset with its exact identity and message type; cleanup verifies it is removed.',
   }
 );
 
@@ -1845,20 +1854,21 @@ C.push(
     key: 'SB-PERF-MIXED-WORKLOAD-DURATION',
     name: 'Mixed workload wall-clock budget',
     objective: 'Run one request against each of the API, portal and DB viewer tiers in sequence and confirm the whole sequence completes within the budget — mirrors a real page-load cost.',
-    description: 'Sequentially hits /health + console/bootstrap + /index.html + dbviewer/api/tables + a login reject POST. The whole sequence must complete within the per-case timeout (budget: 10 s). This complements the isolated-endpoint benchmarks by catching cross-tier interference the single-endpoint benchmarks miss.',
+    description: 'Sign in, then sequentially request /health, authenticated console/bootstrap, /index.html, dbviewer/api/tables and a rejected login. All six requests share the existing 10-second budget.',
     suiteKey: 'sb-performance', testType: 'performance', method: 'http',
     severity: 'high', priority: 'p1',
     preconditions: 'API, portal and DB viewer tiers are all reachable from the worker.',
     steps: [
+      API_LOGIN,
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'api healthy' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/console/bootstrap', description: 'bootstrap payload' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/console/bootstrap', headers: BEARER, expected_status: 200, description: 'bootstrap payload' },
       { action: 'request', method: 'GET', url: '{{web}}/index.html', expected_status: 200, description: 'portal page' },
       { action: 'request', method: 'GET', url: '{{dbviewer}}/api/tables', expected_status: 200, description: 'dbviewer catalog' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'content-type': 'application/json' }, body: { username: 'nobody', password: 'nothing' }, description: 'login reject' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', headers: { 'content-type': 'application/json' }, body: { username: 'missing-user-{{rand}}', password: 'invalid-{{rand}}' }, expected_status: [401, 429], description: 'login reject' },
     ],
     timeoutSeconds: 10,
     tags: ['performance', 'sand-bench', 'mixed'],
-    dataProfile: { profile: 'cross-tier', data: '5 sequential HTTP requests spanning api / web / dbviewer.', source: 'Hand-crafted.' },
+    dataProfile: { profile: 'cross-tier', data: '6 sequential requests spanning sign-in, API, web and DB viewer; one deliberately invalid unique login.', source: 'Hand-crafted.' },
     expected: 'The whole sequence completes within the 10-second budget.',
   },
 
@@ -2105,11 +2115,26 @@ C.push(
     objective: 'Guard that the schema list still answers for an older Import Scheme screen build.',
     description: 'GET /api/v1/schemas must keep resolving with a data array — an older Import Scheme screen build that lists previously imported schemas by this exact path must keep working across an upgrade.',
     suiteKey: 'sb-rolling-upgrade', testType: 'deployment', method: 'http', severity: 'medium', priority: 'p2',
-    preconditions: 'At least one schema imported.',
-    steps: [API_LOGIN, { action: 'request', method: 'GET', url: '{{api}}/api/v1/schemas', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'schemas endpoint' }],
+    preconditions: 'Operator can sign in and import a schema.',
+    steps: [
+      API_LOGIN,
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/schemas', headers: BEARER,
+        body: { name: 'n2-schema-{{rand}}', fileName: 'n2-{{rand}}.json', overrideMsgType: 'n2.{{rand}}.{{ts}}',
+          content: '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"reference":{"type":"string"}}}' },
+        expected_status: 200, save: { n2_schema_id: 'id', n2_message_type: 'msgType' }, expect_json: [{ path: 'id', exists: true }], description: 'import this case’s schema' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/schemas', headers: BEARER, expected_status: 200,
+        expect_json: [{ path: 'data', some: { id: '{{n2_schema_id}}' } }], description: 'find this case’s imported schema' },
+    ],
+    cleanupSteps: [
+      ...cleanupVersionedFixture('schemas', 'n2_schema_id'),
+      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/message-types/{{n2_message_type}}', headers: BEARER,
+        skip_if_missing: ['n2_message_type'], expected_status: [200, 404], description: 'remove this schema’s message type' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types/{{n2_message_type}}', headers: BEARER,
+        skip_if_missing: ['n2_message_type'], expected_status: 404, description: 'verify the temporary message type was removed' },
+    ],
     tags: ['rolling-upgrade', 'sand-bench', 'contract'],
-    dataProfile: SIGNIN_DATA,
-    expected: '>= 1 schema returned.',
+    dataProfile: { profile: 'synthetic', data: 'One minimal JSON Schema with a unique message type.', source: 'Created and removed by this case.' },
+    expected: 'The list contains this case’s schema; both its schema and message type are removed afterwards.',
   }
 );
 
@@ -3103,12 +3128,10 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: [200, 202, 400, 422], save: { negcount_run_id: 'id' }, description: 'negative count' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: -5, channel: 'api', seed: 'TE-CH-NEGCOUNT-{{ts}}' }, expected_status: [200, 202, 400, 422], save: { negcount_run_id: 'runId' }, description: 'negative count' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
     ],
-    cleanupSteps: [
-      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/runs/{{negcount_run_id}}', headers: BEARER, expected_status: [200, 204, 404], skip_if_missing: ['negcount_run_id'], description: 'remove the created run if one was created' },
-    ],
+    cleanupSteps: cleanupRunFixture('negcount_run_id'),
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation'],
     dataProfile: { profile: 'fault-injection', data: 'count:-5 (negative, invalid run size).', source: 'Hand-crafted.' },
@@ -3140,13 +3163,11 @@ C.push(
     preconditions: 'Demo operator identity enabled.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: [200, 202, 400, 422], save: { injection_run_id: 'id' }, description: 'injection-shaped channel' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/runs', headers: BEARER, body: { messageTypeCode: 'pain.001.001.09', count: 1, channel: "'; DROP TABLE test_runs; --" }, expected_status: [200, 202, 400, 422], save: { injection_run_id: 'runId' }, description: 'injection-shaped channel' },
       { action: 'request', method: 'GET', url: '{{api}}/health', expected_status: 200, description: 'app still healthy' },
       { action: 'request', method: 'GET', url: '{{api}}/api/v1/message-types', headers: BEARER, expected_status: 200, description: 'catalogue routes still work (no table dropped)' },
     ],
-    cleanupSteps: [
-      { action: 'request', method: 'DELETE', url: '{{api}}/api/v1/runs/{{injection_run_id}}', headers: BEARER, expected_status: [200, 204, 404], skip_if_missing: ['injection_run_id'], description: 'remove the created run if one was created' },
-    ],
+    cleanupSteps: cleanupRunFixture('injection_run_id'),
     timeoutSeconds: 30,
     tags: ['chaos', 'sand-bench', 'degradation', 'injection'],
     dataProfile: { profile: 'injection-shaped', data: 'channel = "\'; DROP TABLE test_runs; --" (SQL tautology/drop probe as a string value).', source: 'Hand-crafted.' },
@@ -3569,17 +3590,19 @@ C.push(
     objective: 'Count the audit rows, sign in once more, and confirm the count did not go down; the audit trail only ever grows.',
     description: 'Read the audit total, perform one more auditable action (login), then read the total again: the second count must be >= the first — append-only durability. A durable audit store never loses previously written rows.',
     suiteKey: 'sb-dr', testType: 'resilience', method: 'http', severity: 'high', priority: 'p1',
-    preconditions: 'At least one prior audited action exists.',
+    preconditions: 'Operator can sign in and read the audit trail.',
     steps: [
       API_LOGIN,
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], description: 'audit before' },
-      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, description: 'one more auditable action' },
-      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit', headers: BEARER, expected_status: 200, expect_json: [{ path: 'data', min_length: 1 }], poll: { timeout_ms: 5000, interval_ms: 500 }, description: 'audit after' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit?pageSize=1', headers: BEARER, expected_status: 200, expect_json: [{ path: 'total', min: 1 }], save: { audit_before: 'total' }, description: 'capture the audit total before the action',
+        text: 'Read and remember how many audit entries exist', expected: 'There is at least one entry, and its total is remembered for the comparison.' },
+      { action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login', body: { username: '{{username}}', password: '{{password}}' }, expected_status: 200, save: { token: 'token' }, description: 'one more auditable action; keep the replacement session token' },
+      { action: 'request', method: 'GET', url: '{{api}}/api/v1/audit?pageSize=1', headers: BEARER, expected_status: 200, expect_json: [{ path: 'total', min: '{{audit_before}}' }], poll: { timeout_ms: 5000, interval_ms: 500 }, description: 'verify the audit total did not decrease',
+        text: 'Read the audit total again after signing in', expected: 'The total is at least the value recorded before this action.' },
     ],
     timeoutSeconds: 30,
     tags: ['dr', 'sand-bench', 'durability', 'audit'],
     dataProfile: SIGNIN_DATA,
-    expected: 'Audit trail is non-empty before and after; nothing is lost.',
+    expected: 'The audit total after the action is at least its captured starting total.',
   },
   {
     key: 'SB-DR-TENANT-MEMBERSHIP-DUAL-PATH-CONSISTENT',

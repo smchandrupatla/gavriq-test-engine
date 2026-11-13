@@ -1,18 +1,33 @@
 /**
- * One test case per Sand Bench REST endpoint — a surface-coverage sweep
- * built from the live route table captured on 2026-10-10 by greping the
- * deployed staging container's /app/apps/api/src source tree. All 367
- * documented routes are covered.
+ * One test case per Sand Bench REST endpoint — a surface-coverage sweep built
+ * from the route table of the DEPLOYED build.
  *
- * Each case issues one request to the matching route via {{api}} using the
- * environment's demo operator session where auth is required; the assertion
- * is that the route answers at all (any reasonable 2xx or documented 4xx),
- * never a 5xx. These are deliberately shallow — one proof per endpoint — so
- * the sweep catches route-level regressions (removed routes, newly-500ing
- * routes, broken auth gates) without duplicating the deeper per-feature
- * suites.
+ * The table is not typed in here. scripts/sandbench-route-baseline.mts reads
+ * every route registration out of the deployed commit's source, asks the
+ * deployed API who may call each one (nobody signed in, an operator, the
+ * administrator) and writes ./sandbench-route-baseline.json. After a deploy
+ * that adds, removes or re-protects routes, rerun that script and reseed: new
+ * routes become new cases, removed routes are archived by the seeder, and a
+ * route that moved behind the administrator is called as the administrator.
+ *
+ * What a correct answer is does NOT come from that probe. It comes from the
+ * kind of route (apiCoverageExpectation below): a list must answer 200, an
+ * unknown reference must be refused without a server error, an anonymous write
+ * must be refused with exactly 401. A route that answers outside its kind's
+ * statuses fails its case — it is never baselined as "expected".
+ *
+ * Reads use an authenticated session where required. Protected writes check
+ * their sign-in boundary without a token: an empty body is not safe setup,
+ * since some routes reset configuration, rotate keys, clear data or create
+ * default records. Successful writes and validation are exercised by the
+ * feature cases with their own fixtures and cleanup. These write probes prove
+ * access control; a deny-by-default gateway can also reject an unregistered
+ * path, so they do not claim positive route or feature coverage.
  */
-import { CaseDef, SuiteDef, tagSource } from './types.ts';
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { type CaseDef, type SuiteDef, tagSource } from './types.js';
+import { describeTarget } from './plain-language.js';
 
 const FILE = 'apps/api/src/catalog/sandbench-api-coverage-cases.ts';
 
@@ -20,7 +35,7 @@ export const SANDBENCH_API_COVERAGE_SUITE: SuiteDef = {
   key: 'sb-api-coverage',
   name: 'Sand Bench API surface coverage',
   description:
-    'One proof-of-life case per Sand Bench REST endpoint, built from the live route table — a shallow sweep that catches route-level regressions.',
+    'One proof-of-life case per Sand Bench REST endpoint, built from the route table of the deployed build — a shallow sweep that catches route-level regressions.',
   typeKey: 'apiPortalIntegration',
   category: 'qa',
 };
@@ -32,391 +47,73 @@ const API_LOGIN = {
   description: 'operator login',
 } as const;
 const BEARER = { authorization: 'Bearer {{token}}' };
-
-// Live route table from `grep -rhoE "app\.(get|post|put|patch|delete)\(\"[^\"]+\"" /app/apps/api/src`
-// captured against sand-bench-staging-api-1 on 2026-10-10. One row per
-// method+path pair, sorted alphabetically. See scratchpad/sb-routes.txt
-// for the raw dump.
-const RAW_ROUTES = `
-DELETE /api/v1/access/:type/:id/grants/:userId
-DELETE /api/v1/admin/branding/profiles/:id
-DELETE /api/v1/admin/functional-access-profiles/:profileId
-DELETE /api/v1/admin/tenants/:tenantId/roles/:roleId
-DELETE /api/v1/admin/tenants/:tenantId/users/:userId
-DELETE /api/v1/catalog/designer-types/:id
-DELETE /api/v1/datasets/:id
-DELETE /api/v1/datasets/:id/messages/:seq
-DELETE /api/v1/definitions/:id
-DELETE /api/v1/drafts/:id
-DELETE /api/v1/external-systems/:id
-DELETE /api/v1/field-rules/:id
-DELETE /api/v1/list-boxes/:key/items/:id
-DELETE /api/v1/message-types/:code
-DELETE /api/v1/naming/:kind
-DELETE /api/v1/runs/:id
-DELETE /api/v1/schedules/:id
-DELETE /api/v1/schemas/:id
-DELETE /api/v1/session/sessions/:id
-DELETE /api/v1/test-cases/:id
-DELETE /api/v1/test-suites/:id
-GET /api/v1/access/:type/:id/grants
-GET /api/v1/access/assets
-GET /api/v1/access/me
-GET /api/v1/access/users
-GET /api/v1/actions
-GET /api/v1/admin/branding/active
-GET /api/v1/admin/branding/profiles
-GET /api/v1/admin/branding/profiles/:id
-GET /api/v1/admin/branding/schema.json
-GET /api/v1/admin/data-access-profiles
-GET /api/v1/admin/functional-access-profiles
-GET /api/v1/admin/tenants
-GET /api/v1/admin/tenants/:tenantId/permissions
-GET /api/v1/admin/tenants/:tenantId/roles
-GET /api/v1/admin/tenants/:tenantId/users
-GET /api/v1/admin/users
-GET /api/v1/admin/users/:userId/effective-access
-GET /api/v1/ai-authoring/drafts
-GET /api/v1/ai-authoring/drafts/:id
-GET /api/v1/ai-authoring/providers
-GET /api/v1/analytics/aggregates
-GET /api/v1/analytics/coverage-drift
-GET /api/v1/analytics/dashboard-kpis
-GET /api/v1/analytics/duration-percentiles
-GET /api/v1/analytics/error-clusters
-GET /api/v1/analytics/export.csv
-GET /api/v1/analytics/flaky-cases
-GET /api/v1/analytics/samples
-GET /api/v1/analytics/slowest-cases
-GET /api/v1/analytics/suite-compare
-GET /api/v1/analytics/suite-health
-GET /api/v1/analytics/suite-health/:suiteId
-GET /api/v1/analytics/volume
-GET /api/v1/assurance/chain
-GET /api/v1/assurance/chain/report-links
-GET /api/v1/attacks
-GET /api/v1/audit
-GET /api/v1/auth/module
-GET /api/v1/auth/oauth
-GET /api/v1/auth/oauth/start
-GET /api/v1/capabilities
-GET /api/v1/catalog/designer-types
-GET /api/v1/catalog/designer-types/:id
-GET /api/v1/catalog/iso
-GET /api/v1/catalog/iso/:code
-GET /api/v1/catalog/iso/:code/tree
-GET /api/v1/catalog/iso/families
-GET /api/v1/catalog/iso/uploads
-GET /api/v1/catalog/iso/uploads/:id
-GET /api/v1/catalog/iso/uploads/:id/files/:kind
-GET /api/v1/catalog/iso/uploads/:id/structure
-GET /api/v1/catalog/iso/uploads/:id/tree
-GET /api/v1/catalog/signatures
-GET /api/v1/catalog/signatures/keys/lab
-GET /api/v1/catalog/signatures/profile
-GET /api/v1/channel-targets
-GET /api/v1/console/bootstrap
-GET /api/v1/console/nav
-GET /api/v1/dashboard/activity
-GET /api/v1/dashboard/overview
-GET /api/v1/dashboard/stats
-GET /api/v1/data-feeder-runs/:runId
-GET /api/v1/data-feeders
-GET /api/v1/data-feeders/:id
-GET /api/v1/data-feeders/:id/plan
-GET /api/v1/data-feeders/:id/plan.csv
-GET /api/v1/data-feeders/:id/runs
-GET /api/v1/data-files
-GET /api/v1/datasets
-GET /api/v1/datasets/:id
-GET /api/v1/datasets/:id/messages
-GET /api/v1/definitions
-GET /api/v1/definitions/:id
-GET /api/v1/definitions/:id/datasets
-GET /api/v1/devtools/clear-data
-GET /api/v1/drafts
-GET /api/v1/drafts/:id
-GET /api/v1/events
-GET /api/v1/events/catalog
-GET /api/v1/events/export
-GET /api/v1/events/framework
-GET /api/v1/events/headers
-GET /api/v1/external-systems
-GET /api/v1/external-systems/:id/sample
-GET /api/v1/external-systems/grouped
-GET /api/v1/external-systems/kafka/connectivity-check/:correlationId
-GET /api/v1/external-systems/public
-GET /api/v1/families
-GET /api/v1/families/:code/message-types
-GET /api/v1/features
-GET /api/v1/features/pages
-GET /api/v1/field-rules
-GET /api/v1/field-rules/:id
-GET /api/v1/foundation/patterns
-GET /api/v1/foundation/patterns/:key
-GET /api/v1/foundation/patterns/facets
-GET /api/v1/foundation/status
-GET /api/v1/generated-messages
-GET /api/v1/improvement-library
-GET /api/v1/improvement-library/template
-GET /api/v1/improvements
-GET /api/v1/inbound/events
-GET /api/v1/integration
-GET /api/v1/jobs/:jobId
-GET /api/v1/lake/events
-GET /api/v1/lake/events/summary
-GET /api/v1/list-boxes
-GET /api/v1/list-boxes/:key
-GET /api/v1/message-store/tables
-GET /api/v1/message-types
-GET /api/v1/message-types/:code
-GET /api/v1/message-types/:code/fields
-GET /api/v1/message-types/:code/template.csv
-GET /api/v1/naming
-GET /api/v1/naming-conventions
-GET /api/v1/openapi.json
-GET /api/v1/platform/tenants
-GET /api/v1/reports
-GET /api/v1/resilience
-GET /api/v1/rules
-GET /api/v1/rules/:id
-GET /api/v1/rules/export
-GET /api/v1/runs
-GET /api/v1/runs/:id
-GET /api/v1/runs/:id/deliveries
-GET /api/v1/runs/:id/stream
-GET /api/v1/schedules
-GET /api/v1/schedules/:id
-GET /api/v1/schemas
-GET /api/v1/schemas/:id
-GET /api/v1/security/health
-GET /api/v1/security/policies
-GET /api/v1/security/records
-GET /api/v1/security/records/:id
-GET /api/v1/security/secrets/:path
-GET /api/v1/security/status
-GET /api/v1/session/features
-GET /api/v1/session/me
-GET /api/v1/session/security-question
-GET /api/v1/session/sessions
-GET /api/v1/settings
-GET /api/v1/settings/authenticator
-GET /api/v1/settings/developer
-GET /api/v1/settings/eventing
-GET /api/v1/settings/logging
-GET /api/v1/settings/use-cases
-GET /api/v1/test-cases
-GET /api/v1/test-cases/:id
-GET /api/v1/test-cases/:id/runs
-GET /api/v1/test-cases/:id/suites
-GET /api/v1/test-cases/analytics
-GET /api/v1/test-cases/check-id
-GET /api/v1/test-cases/summary
-GET /api/v1/test-suites
-GET /api/v1/test-suites/:id
-GET /api/v1/test-suites/:id/evidence
-GET /api/v1/test-suites/:id/runs
-GET /api/v1/use-cases
-GET /api/v1/use-cases.md
-GET /api/v1/use-cases/:page
-GET /api/v1/use-cases/:page.md
-GET /api/v1/use-cases/:page/revisions
-GET /api/v1/use-cases/:page/revisions/:id.md
-GET /api/v1/ux/clock
-GET /api/v1/ux/demo/n2
-GET /api/v1/ux/first-run
-GET /api/v1/ux/status
-GET /health
-GET /ready
-PATCH /api/v1/admin/branding/profiles/:id
-PATCH /api/v1/admin/functional-access-profiles/:profileId
-PATCH /api/v1/admin/tenants/:tenantId/roles/:roleId
-PATCH /api/v1/admin/tenants/:tenantId/users/:userId
-PATCH /api/v1/admin/users/:userId
-PATCH /api/v1/ai-authoring/drafts/:id
-PATCH /api/v1/datasets/:id
-PATCH /api/v1/datasets/:id/messages/:seq
-PATCH /api/v1/events/framework
-PATCH /api/v1/events/headers
-PATCH /api/v1/features/bulk-level
-PATCH /api/v1/list-boxes/:key/items/:id
-PATCH /api/v1/platform/tenants/:id
-PATCH /api/v1/reports/:id
-PATCH /api/v1/runs/:id
-PATCH /api/v1/security/encryption
-PATCH /api/v1/settings/:key
-PATCH /api/v1/settings/authenticator
-PATCH /api/v1/settings/developer
-PATCH /api/v1/settings/feature-access
-PATCH /api/v1/settings/feature-access/:page
-PATCH /api/v1/settings/integration
-PATCH /api/v1/settings/use-cases
-PATCH /api/v1/test-cases/:id/triage
-POST /api/v1/admin/branding/profiles
-POST /api/v1/admin/branding/profiles/:id/activate
-POST /api/v1/admin/branding/profiles/:id/rollback
-POST /api/v1/admin/branding/profiles/:id/transitions
-POST /api/v1/admin/functional-access-profiles
-POST /api/v1/admin/tenants/:tenantId/roles
-POST /api/v1/admin/tenants/:tenantId/users
-POST /api/v1/admin/tenants/:tenantId/users/:userId/password-reset
-POST /api/v1/admin/tenants/:tenantId/users/:userId/sessions/revoke
-POST /api/v1/admin/users
-POST /api/v1/admin/users/:userId/transitions
-POST /api/v1/ai-authoring/drafts/:id/approve
-POST /api/v1/ai-authoring/drafts/:id/attach
-POST /api/v1/ai-authoring/drafts/:id/reject
-POST /api/v1/ai-authoring/drafts/bulk
-POST /api/v1/ai-authoring/drafts/from-openapi
-POST /api/v1/ai-authoring/drafts/from-story
-POST /api/v1/ai-authoring/drafts/from-use-case
-POST /api/v1/analytics/aggregates/invalidate
-POST /api/v1/analytics/coverage-drift/ingest
-POST /api/v1/analytics/dashboard-kpis/ingest
-POST /api/v1/analytics/duration-percentiles/ingest
-POST /api/v1/analytics/error-clusters/ingest
-POST /api/v1/analytics/export/ingest
-POST /api/v1/analytics/flaky-cases/ingest
-POST /api/v1/analytics/samples/ingest
-POST /api/v1/analytics/slowest-cases/ingest
-POST /api/v1/analytics/suite-compare/ingest
-POST /api/v1/analytics/suite-health/ingest
-POST /api/v1/analytics/volume/ingest
-POST /api/v1/assurance/chain/bind
-POST /api/v1/assurance/chain/gap
-POST /api/v1/auth/login
-POST /api/v1/auth/signup
-POST /api/v1/catalog/iso/import
-POST /api/v1/catalog/iso/parse
-POST /api/v1/catalog/iso/uploads
-POST /api/v1/catalog/iso/validate-markdown
-POST /api/v1/catalog/signatures/keys/lab
-POST /api/v1/catalog/signatures/sign
-POST /api/v1/catalog/signatures/verify
-POST /api/v1/catalog/structure
-POST /api/v1/catalog/trees/parse
-POST /api/v1/dashboard/refresh
-POST /api/v1/data-feeder-runs/:runId/cancel
-POST /api/v1/data-feeder-runs/:runId/pause
-POST /api/v1/data-feeder-runs/:runId/resume
-POST /api/v1/data-feeders
-POST /api/v1/data-feeders/:id/archive
-POST /api/v1/data-feeders/:id/duplicate
-POST /api/v1/data-feeders/:id/runs
-POST /api/v1/data-feeders/plan
-POST /api/v1/data-profiles
-POST /api/v1/datasets
-POST /api/v1/datasets/:id/assemble
-POST /api/v1/datasets/:id/items
-POST /api/v1/datasets/:id/messages
-POST /api/v1/datasets/bulk/merge
-POST /api/v1/definitions
-POST /api/v1/definitions/:id/datasets
-POST /api/v1/definitions/:id/discard
-POST /api/v1/definitions/:id/publish
-POST /api/v1/definitions/bulk/:action
-POST /api/v1/definitions/import
-POST /api/v1/definitions/preview
-POST /api/v1/definitions/randomize
-POST /api/v1/deliveries
-POST /api/v1/devtools/clear-data
-POST /api/v1/devtools/reseed-demo-identities
-POST /api/v1/devtools/sample-data/reload
-POST /api/v1/devtools/sample-data/step
-POST /api/v1/dmn/export
-POST /api/v1/drafts
-POST /api/v1/events/emit
-POST /api/v1/external-systems/:id/dummy
-POST /api/v1/external-systems/:id/probe
-POST /api/v1/external-systems/:id/send
-POST /api/v1/external-systems/kafka/connectivity-check
-POST /api/v1/field-rules
-POST /api/v1/generated-messages
-POST /api/v1/improvement-library/files
-POST /api/v1/improvements/actions
-POST /api/v1/inbound/events
-POST /api/v1/jobs
-POST /api/v1/list-boxes/:key/items
-POST /api/v1/message-types
-POST /api/v1/naming
-POST /api/v1/naming/preview
-POST /api/v1/platform/tenants
-POST /api/v1/platform/tenants/:id/transitions
-POST /api/v1/privacy/delete
-POST /api/v1/privacy/screen
-POST /api/v1/reports
-POST /api/v1/rules
-POST /api/v1/rules/:id/promote
-POST /api/v1/rules/:id/stage
-POST /api/v1/rules/:id/transitions
-POST /api/v1/rules/:id/validate
-POST /api/v1/rules/describe
-POST /api/v1/runs
-POST /api/v1/schedules
-POST /api/v1/schemas
-POST /api/v1/schemas/parse
-POST /api/v1/security/records
-POST /api/v1/security/remediate
-POST /api/v1/security/rotate
-POST /api/v1/session/login
-POST /api/v1/session/logout
-POST /api/v1/session/password-reset
-POST /api/v1/session/sessions/revoke-others
-POST /api/v1/settings
-POST /api/v1/settings/eventing/dummy
-POST /api/v1/settings/eventing/test
-POST /api/v1/templates/generate
-POST /api/v1/test-cases
-POST /api/v1/test-cases/:id/notes
-POST /api/v1/test-cases/:id/run
-POST /api/v1/test-cases/:id/watch
-POST /api/v1/test-cases/describe
-POST /api/v1/test-cases/run-batch
-POST /api/v1/test-suites
-POST /api/v1/test-suites/:id/run
-POST /api/v1/test-suites/from-suites
-POST /api/v1/test-suites/run-batch
-POST /api/v1/typologies/generate
-POST /api/v1/use-cases/review
-POST /api/v1/use-cases/review/batch
-POST /api/v1/ux/demo/n2
-POST /api/v1/ux/replay
-POST /api/v1/validate
-PUT /api/v1/access/:type/:id/grants/:userId
-PUT /api/v1/access/:type/:id/owner
-PUT /api/v1/ai-authoring/providers/:provider
-PUT /api/v1/catalog/signatures/profile
-PUT /api/v1/data-feeders/:id
-PUT /api/v1/datasets/:id
-PUT /api/v1/definitions/:id
-PUT /api/v1/definitions/:id/working
-PUT /api/v1/drafts/:id
-PUT /api/v1/external-systems/:id
-PUT /api/v1/field-rules/:id
-PUT /api/v1/message-types/:code
-PUT /api/v1/rules/:id
-PUT /api/v1/schedules/:id
-PUT /api/v1/schemas/:id
-PUT /api/v1/security/policies
-PUT /api/v1/security/secrets/:path
-PUT /api/v1/settings/eventing
-PUT /api/v1/settings/logging
-PUT /api/v1/test-cases/:id
-PUT /api/v1/test-suites/:id
-PUT /api/v1/test-suites/:id/cases
-PUT /api/v1/use-cases/:page
-`;
+// The application's one administrator-equivalent account. The seeder marks this
+// sign-in as shared (catalog/sandbench-identity.ts), so a run opens one
+// administrator session per worker, not one per case.
+const ADMIN_LOGIN = {
+  action: 'request', method: 'POST', url: '{{api}}/api/v1/session/login',
+  body: { username: '{{admin_username}}', password: '{{admin_password}}' },
+  expected_status: 200, save: { adminToken: 'token' },
+  description: 'administrator login',
+} as const;
+const ADMIN_BEARER = { authorization: 'Bearer {{adminToken}}' };
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-const PUBLIC_PATHS = new Set<string>([
-  '/health', '/ready',
-  '/api/v1/session/login', '/api/v1/auth/login', '/api/v1/auth/signup',
-  '/api/v1/auth/oauth', '/api/v1/auth/oauth/start', '/api/v1/auth/module',
-  '/api/v1/openapi.json',
-  '/api/v1/capabilities', '/api/v1/resilience',
-  '/api/v1/external-systems/public',
-]);
+/**
+ * Who may call a route, as the deployed API answered the baseline script:
+ *   public     answers a caller who is not signed in
+ *   operator   needs a session; an ordinary operator's is enough
+ *   admin      refuses an operator; needs the administrator
+ *   signed-in  a write that refuses an anonymous caller with 401 (who may then
+ *              perform it is the feature cases' business, not this sweep's)
+ *   nobody     refused even for the administrator (e.g. a machine-key route)
+ */
+export type RouteAccess = 'public' | 'operator' | 'admin' | 'signed-in' | 'nobody';
+export interface RouteRow { method: Method; path: string; access: RouteAccess }
+
+const BASELINE_FILE = fileURLToPath(new URL('./sandbench-route-baseline.json', import.meta.url));
+const BASELINE: { source_commit?: string; routes: RouteRow[] } = existsSync(BASELINE_FILE)
+  ? JSON.parse(readFileSync(BASELINE_FILE, 'utf8'))
+  : { routes: [] };
+
+/** The deployed commit the route table was read from. */
+export const SANDBENCH_ROUTE_BASELINE_COMMIT = BASELINE.source_commit || '';
+
+// These routes deliberately accept anonymous callers in the test baseline.
+// An empty request is rejected before a password or inbound record can change.
+// Keep this method-specific: GET /inbound/events still needs a live session.
+const PUBLIC_INVALID_WRITES: Record<string, string> = {
+  'POST /api/v1/session/password-reset': 'username, securityAnswer and newPassword are required',
+  'POST /api/v1/inbound/events': 'channel is required',
+};
+
+// Optional sign-in providers: reachable, but may be switched off on a deployment.
+const OPTIONAL_PROVIDER_PATHS = new Set(['/api/v1/auth/oauth', '/api/v1/auth/oauth/start']);
+
+// Lists that cannot answer without a query the sweep does not send. The documented
+// refusal is the contract here, and it is asserted exactly — status, code and message.
+const REQUIRED_QUERY: Record<string, { status: number; message: string }> = {
+  'GET /api/v1/analytics/env-compare': { status: 400, message: 'suiteId is required' },
+  'GET /api/v1/analytics/suite-compare': { status: 400, message: 'leftSuiteId and rightSuiteId are required' },
+  'GET /api/v1/rules/field-catalog': { status: 422, message: 'Give definitionId or messageTypeCode' },
+  'GET /api/v1/test-coverage/waivers/export': { status: 422, message: 'Say which repository to export waivers for.' },
+};
+
+// Lists backed by an integration a deployment may leave unconfigured. Such a
+// deployment answers with its documented "not configured" refusal instead of the
+// list. Either answer passes, but the refusal is held to its own contract
+// (expect_by_status), so an unrelated 503/404 on the same route still fails.
+const OPTIONAL_INTEGRATIONS: Record<string, { status: number; code: string; message: string }> = {
+  'GET /api/v1/improvements': { status: 503, code: 'not_ready', message: 'Improvements Log is not configured' },
+  'GET /api/v1/lake/events': { status: 404, code: 'not_found', message: 'event lake is not configured' },
+  'GET /api/v1/lake/events/summary': { status: 404, code: 'not_found', message: 'event lake is not configured' },
+};
+
+// Routes that read a whole library from disk and can take several seconds to answer.
+const SLOW_ROUTE_TIMEOUT_SECONDS: Record<string, number> = {
+  'GET /api/v1/improvement-library': 60,
+};
 
 // Substitution values for path parameters.
 const PARAM_VALUES: Record<string, string> = {
@@ -457,6 +154,11 @@ function hasParams(path: string): boolean {
   return path.split('/').some((seg) => seg.startsWith(':'));
 }
 
+/** The path a route is probed at: every parameter replaced by a reference that does not exist. */
+export function apiCoverageProbePath(_method: Method, path: string): string {
+  return substituteParams(path);
+}
+
 function keyFromPath(method: Method, path: string): string {
   return 'SB-API-' + method + '-' + path
     .replace(/^\/api\/v1\//, '')
@@ -477,16 +179,12 @@ function classify(method: Method, path: string): Expected {
   if (path === '/api/v1/session/login' && method === 'POST') {
     return { statuses: [200], body: { username: '{{username}}', password: '{{password}}' } };
   }
-  // Public GETs → 200 (or 404/503 if the feature is disabled on this deployment).
-  if (method === 'GET' && PUBLIC_PATHS.has(path)) {
-    if (path === '/api/v1/openapi.json') return { statuses: [200, 404, 500, 503] };
-    return { statuses: [200, 404, 503] };
-  }
-  // Authenticated GET on a list (no params) → 200, or 404/503 if the feature
-  // is not mounted or not configured on this deployment.
-  if (method === 'GET' && !paramised) return { statuses: [200, 404, 503] };
-  // Authenticated GET on a parameterised path → 200/400/404/422/503.
-  if (method === 'GET' && paramised) return { statuses: [200, 400, 404, 422, 503] };
+  // Optional sign-in providers → 200, or 404/503 if switched off on this deployment.
+  if (method === 'GET' && OPTIONAL_PROVIDER_PATHS.has(path)) return { statuses: [200, 404, 503] };
+  // A documented list route must actually be mounted and ready.
+  if (method === 'GET' && !paramised) return { statuses: [200] };
+  // A nonexistent reference must be handled without a server error.
+  if (method === 'GET' && paramised) return { statuses: [200, 400, 404, 422] };
   // Writes against a parameterised probe id (we substitute :id with
   // 00000000-...): the route MUST refuse, since atomicity would be broken by
   // accidentally mutating the probe row. If a route accepts 2xx against the
@@ -521,25 +219,34 @@ function classify(method: Method, path: string): Expected {
   return { statuses: [200, 400, 404] };
 }
 
-function parseRoutes(): { method: Method; path: string }[] {
-  return RAW_ROUTES.split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .map((l) => {
-      const [m, p] = l.split(/\s+/, 2);
-      return { method: m as Method, path: p };
-    });
+/**
+ * The statuses a route's case accepts, decided by the KIND of route — never by
+ * what a deployment happened to answer. The baseline script uses the same
+ * function to list routes that answer outside it.
+ */
+export function apiCoverageExpectation(row: RouteRow): Expected {
+  const route = `${row.method} ${row.path}`;
+  if (PUBLIC_INVALID_WRITES[route]) return { statuses: [422], body: {} };
+  if (REQUIRED_QUERY[route]) return { statuses: [REQUIRED_QUERY[route]!.status] };
+  if (OPTIONAL_INTEGRATIONS[route]) return { statuses: [200, OPTIONAL_INTEGRATIONS[route]!.status] };
+  // A protected write is probed without a session: exactly 401, before any change is made.
+  if (row.method !== 'GET' && row.access === 'signed-in') return { statuses: [401], body: {} };
+  return classify(row.method, row.path);
 }
 
-function buildCase(method: Method, path: string): CaseDef {
+function buildCase(row: RouteRow): CaseDef {
+  const { method, path, access } = row;
   const resolved = substituteParams(path);
   const url = '{{api}}' + resolved;
-  const needsAuth = !PUBLIC_PATHS.has(path);
-  const { statuses, body } = classify(method, path);
+  const invalidPublicMessage = PUBLIC_INVALID_WRITES[`${method} ${path}`];
+  const authBoundary = method !== 'GET' && access === 'signed-in';
+  const asAdmin = method === 'GET' && (access === 'admin' || access === 'nobody');
+  const asOperator = method === 'GET' && access === 'operator';
+  const isLogin = path === '/api/v1/session/login' && method === 'POST';
+  const { statuses, body } = apiCoverageExpectation(row);
   const steps: unknown[] = [];
-  if (needsAuth && path !== '/api/v1/session/login') {
-    steps.push(API_LOGIN);
-  }
+  if (asOperator) steps.push(API_LOGIN);
+  if (asAdmin) steps.push(ADMIN_LOGIN);
   const step: Record<string, unknown> = {
     action: 'request',
     method,
@@ -547,37 +254,67 @@ function buildCase(method: Method, path: string): CaseDef {
     expected_status: statuses.length === 1 ? statuses[0] : statuses,
     description: `${method} ${resolved}`,
   };
-  if (needsAuth && path !== '/api/v1/session/login') step.headers = BEARER;
+  if (asOperator) step.headers = BEARER;
+  if (asAdmin) step.headers = ADMIN_BEARER;
   if (body !== undefined) step.body = body;
+  if (invalidPublicMessage) step.expect_json = [
+    { path: 'error.code', equals: 'validation_failed' },
+    { path: 'error.message', equals: invalidPublicMessage },
+  ];
+  const requiredQuery = REQUIRED_QUERY[`${method} ${path}`];
+  if (requiredQuery) step.expect_json = [
+    { path: 'error.code', equals: 'validation_failed' },
+    { path: 'error.message', equals: requiredQuery.message },
+  ];
+  const optional = OPTIONAL_INTEGRATIONS[`${method} ${path}`];
+  if (optional) step.expect_by_status = {
+    [String(optional.status)]: { expect_json: [
+      { path: 'error.code', equals: optional.code },
+      { path: 'error.message', contains: optional.message },
+    ] },
+  };
   steps.push(step);
 
   const expectedTxt = statuses.join('/');
   const key = keyFromPath(method, path);
+  const slowTimeout = SLOW_ROUTE_TIMEOUT_SECONDS[`${method} ${path}`];
+  const operation = { GET: 'read', POST: 'send a request to', PUT: 'replace', PATCH: 'update', DELETE: 'remove a record from' }[method];
+  const who = asAdmin ? 'the administrator' : 'a caller';
+  const signedInAs = asAdmin ? ' with the administrator\'s Bearer token' : asOperator ? ' with an operator Bearer token' : '';
   return {
     key,
-    name: `${method} ${path}`,
-    objective: `Confirm Sand Bench's ${method} ${path} answers at all with a documented status — never a 5xx.`,
-    description: `Issue ${method} ${url}${needsAuth ? ' with an operator Bearer token' : ''}; expect ${expectedTxt}.`,
+    name: invalidPublicMessage ? `Incomplete ${path.endsWith('password-reset') ? 'password reset' : 'inbound event'} requests are rejected` : authBoundary ? `Sign-in is required to ${operation} ${describeTarget(url)}` : `${method} ${path}`,
+    objective: invalidPublicMessage
+      ? `Confirm the public ${path.endsWith('password-reset') ? 'password reset' : 'inbound event'} entry point rejects missing information before it changes application data.`
+      : authBoundary
+      ? `Confirm a visitor must sign in before being allowed to ${operation} ${describeTarget(url)}, so an anonymous request cannot change application data.`
+      : requiredQuery
+      ? `Confirm that asking to ${operation} ${describeTarget(url)} without saying what to look up is turned away with a clear explanation instead of an error or an empty answer.`
+      : optional
+      ? `Check that ${who} can ${operation} ${describeTarget(url)}, or — where this installation has not set that feature up — is told so plainly instead of getting an error.`
+      : `Check the documented response when ${who} asks to ${operation} ${describeTarget(url)}${hasParams(path) ? ' using a reference that does not exist' : ''}, so broken requests are detected.`,
+    description: `Issue ${method} ${url}${authBoundary ? ' without a token; require exactly 401 before any change is made' : signedInAs}; expect ${expectedTxt}${requiredQuery ? ` with error.code validation_failed and the message "${requiredQuery.message}"` : ''}${optional ? ` (${optional.status} only as the documented refusal: error.code ${optional.code}, "${optional.message}")` : ''}. Feature cases cover successful writes with case-owned setup and cleanup.`,
     suiteKey: SANDBENCH_API_COVERAGE_SUITE.key,
     testType: 'integration',
     method: 'http',
-    severity: path === '/health' || path === '/ready' || path === '/api/v1/session/login' ? 'critical' : 'medium',
-    priority: path === '/health' || path === '/ready' || path === '/api/v1/session/login' ? 'p0' : 'p2',
-    preconditions: `Sand Bench API reachable at {{api}}${needsAuth && path !== '/api/v1/session/login' ? '; demo operator can sign in' : ''}.`,
+    severity: path === '/health' || path === '/ready' || isLogin ? 'critical' : 'medium',
+    priority: path === '/health' || path === '/ready' || isLogin ? 'p0' : 'p2',
+    preconditions: `Sand Bench API reachable at {{api}}${asAdmin ? '; the administrator can sign in' : asOperator || isLogin ? '; an operator can sign in' : ''}. This surface probe is read-only with respect to business data.`,
     steps,
-    tags: ['api-coverage', 'sand-bench', 'surface-sweep'],
+    ...(slowTimeout ? { timeoutSeconds: slowTimeout } : {}),
+    tags: ['api-coverage', 'sand-bench', 'surface-sweep', ...(authBoundary ? ['auth-boundary'] : []), ...(asAdmin ? ['administrator'] : []), ...(invalidPublicMessage || requiredQuery ? ['validation-boundary'] : [])],
     dataProfile: {
       profile: body ? 'synthetic' : 'none (read-only)',
       data: body ? JSON.stringify(body) : 'A single HTTP call.',
       source: body ? 'inline' : 'n/a',
     },
-    expected: `Response status is one of ${expectedTxt}; never 5xx.`,
+    expected: `Response status is one of ${expectedTxt}${statuses.includes(503) ? '; an explicitly disabled optional sign-in provider may report unavailable' : '; server errors fail'}.`,
   };
 }
 
-const generated = parseRoutes().map((r) => buildCase(r.method, r.path));
+const generated = BASELINE.routes.map((r) => buildCase(r));
 
-// De-dupe by key — in case the raw list contains any method+path collisions
+// De-dupe by key — in case the table contains any method+path collisions
 // (none expected, but cheap safety).
 const seen = new Set<string>();
 const unique: CaseDef[] = [];

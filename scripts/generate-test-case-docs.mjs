@@ -15,19 +15,34 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const BASE = (process.env.TE_BASE || 'http://127.0.0.1:8797').replace(/\/$/, '');
+const PAGE_SIZE = Number(process.env.TE_DOCS_PAGE_SIZE || 200);
+if (!Number.isInteger(PAGE_SIZE) || PAGE_SIZE < 1 || PAGE_SIZE > 200) throw new Error('TE_DOCS_PAGE_SIZE must be an integer from 1 to 200');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outFile = path.join(root, 'docs', 'TEST-CASE-CATALOG.md');
 
 async function j(p) {
-  const res = await fetch(`${BASE}${p}`, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`${p} -> ${res.status}`);
-  return res.json();
+  // This export performs only reads. Retry a transient transport/server
+  // failure without changing the expectations or timeouts of executable cases.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${p}`, { signal: AbortSignal.timeout(30000) });
+      if (!res.ok) {
+        const error = new Error(`${p} -> ${res.status}`);
+        error.permanent = res.status < 500 && res.status !== 429;
+        throw error;
+      }
+      return await res.json();
+    } catch (error) {
+      if (error.permanent || attempt === 3) throw new Error(`Catalog read ${p} failed: ${error.message}`, { cause: error });
+      await new Promise(resolve => setTimeout(resolve, 250 * attempt));
+    }
+  }
 }
 
 async function allCases(appId) {
   const out = [];
-  for (let off = 0; ; off += 200) {
-    const r = await j(`/api/v1/test-cases?application_id=${appId}&full=1&limit=200&offset=${off}`);
+  for (let off = 0; ; off += PAGE_SIZE) {
+    const r = await j(`/api/v1/test-cases?application_id=${appId}&full=1&limit=${PAGE_SIZE}&offset=${off}`);
     out.push(...(r.data || []));
     if (!(r.data || []).length || out.length >= (r.total ?? out.length)) break;
   }
@@ -43,7 +58,7 @@ function stepLine(s, i) {
     const target = s.url || s.path || '/';
     const checks = [];
     if (s.expected_status !== undefined) checks.push(`status ${Array.isArray(s.expected_status) ? s.expected_status.join('/') : s.expected_status}`);
-    if (s.expect_json?.length) checks.push(s.expect_json.map((e) => `\`${e.path}\` ${e.equals !== undefined ? `= ${JSON.stringify(e.equals)}` : e.contains !== undefined ? `contains ${JSON.stringify(e.contains)}` : e.min_length !== undefined ? `length ≥ ${e.min_length}` : e.min !== undefined ? `≥ ${e.min}` : e.exists !== undefined ? (e.exists ? 'exists' : 'absent') : ''}`).join(', '));
+    if (s.expect_json?.length) checks.push(s.expect_json.map((e) => `\`${e.path}\` ${e.equals !== undefined ? `= ${JSON.stringify(e.equals)}` : e.contains !== undefined ? `contains ${JSON.stringify(e.contains)}` : e.some !== undefined ? `includes one entry matching ${JSON.stringify(e.some)}` : e.min_length !== undefined ? `length ≥ ${e.min_length}` : e.min !== undefined ? `≥ ${e.min}` : e.exists !== undefined ? (e.exists ? 'exists' : 'absent') : ''}`).join(', '));
     if (s.expected_body_contains) checks.push(`body contains ${JSON.stringify(s.expected_body_contains)}`);
     if (s.expected_body_not_contains) checks.push(`body must NOT contain ${JSON.stringify(s.expected_body_not_contains)}`);
     if (s.expect_headers?.length) checks.push(s.expect_headers.map((h) => `header \`${h.name}\` ${h.exists === false ? 'absent' : h.contains ? `contains "${h.contains}"` : h.not_contains ? `without "${h.not_contains}"` : 'present'}`).join(', '));
@@ -52,6 +67,7 @@ function stepLine(s, i) {
     if (s.poll) extras.push(`poll up to ${(s.poll.timeout_ms ?? 8000) / 1000}s`);
     if (s.body !== undefined) extras.push(`body: \`${mdEscape(JSON.stringify(s.body)).slice(0, 220)}\``);
     if (s.body_raw !== undefined) extras.push(`raw body: \`${mdEscape(s.body_raw).slice(0, 80)}\``);
+    if (s.body_json !== undefined) extras.push(`captured JSON body: \`${mdEscape(s.body_json).slice(0, 80)}\``);
     return `${i}. **${s.method || 'GET'}** \`${mdEscape(target)}\`${s.description ? ` — ${mdEscape(s.description)}` : ''}${checks.length ? `\n      - expect: ${checks.join('; ')}` : ''}${extras.length ? `\n      - ${extras.join('; ')}` : ''}`;
   }
   const bits = [s.selector && `selector \`${mdEscape(s.selector)}\``, s.value && `value \`${mdEscape(s.value)}\``, s.expected && `expect \`${mdEscape(s.expected)}\``].filter(Boolean).join(', ');

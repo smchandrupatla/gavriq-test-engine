@@ -16,11 +16,11 @@
  *                 not re-contact the portal.
  *   - malformed request: POST /dispatch with no channel — 400.
  *
- * Each case re-reads the policy before and resets it afterwards to minimise
- * cross-case drift; the catalog seeder has no transactions so cases
- * sequence in run order.
+ * Policy changes capture their starting values and verify exact restoration
+ * in unconditional cleanup. These application-wide policies require an
+ * isolated target when another case could change the same channel.
  */
-import { CaseDef, SuiteDef, tagSource } from './types.ts';
+import { type CaseDef, type SuiteDef, tagSource } from './types.js';
 
 const FILE = 'apps/api/src/catalog/sandbench-resilience-cases.ts';
 
@@ -60,7 +60,10 @@ C.push({
     API_LOGIN,
     { action: 'request', method: 'GET', url: '{{api}}/api/v1/integrations',
       headers: BEARER, expected_status: 200,
-      expect_json: [{ path: 'data', min_length: 4 }],
+      expect_json: [
+        { path: 'data', min_length: 4, max_length: 4 },
+        ...CHANNELS.map(channel => ({ path: 'data', some: { channel } })),
+      ],
       description: 'policies list' },
   ],
   tags: ['integration', 'resilience', 'policy', 'visibility'],
@@ -72,7 +75,7 @@ for (const ch of CHANNELS) {
   C.push({
     key: `SBE-RES-POLICY-GET-${ch.toUpperCase()}`,
     name: `${ch} channel policy is readable with the documented fields`,
-    objective: `Confirm the ${ch} resilience policy carries timeout_ms, max_retries, backoff_ms, transactional and idempotency fields.`,
+    objective: `Confirm operators can read the ${ch} delivery limits, retry settings and duplicate-delivery protection.`,
     description: `GET /api/v1/integrations/${ch} returns 200 with the policy fields set.`,
     suiteKey: SANDBENCH_RESILIENCE_SUITE.key, testType: 'integration', method: 'http',
     severity: 'medium', priority: 'p2',
@@ -85,8 +88,10 @@ for (const ch of CHANNELS) {
           { path: 'data.channel', equals: ch },
           { path: 'data.timeout_ms', exists: true },
           { path: 'data.max_retries', exists: true },
+          { path: 'data.backoff_ms', exists: true },
           { path: 'data.transactional', exists: true },
           { path: 'data.idempotency_header', exists: true },
+          { path: 'data.idempotency_ttl_ms', exists: true },
         ],
         description: `policy /${ch}` },
     ],
@@ -99,7 +104,7 @@ for (const ch of CHANNELS) {
     key: `SBE-RES-POLICY-PUT-${ch.toUpperCase()}`,
     name: `${ch} channel policy is updatable; readback reflects the change`,
     objective: `Confirm an operator can lower retries + timeout on ${ch} and read the new values back.`,
-    description: `PUT /api/v1/integrations/${ch} {timeout_ms, max_retries} and GET returns the new values. Teardown restores defaults.`,
+    description: `PUT /api/v1/integrations/${ch} {timeout_ms, max_retries, backoff_ms} and GET returns all changed values. Cleanup restores and verifies the captured policy.`,
     suiteKey: SANDBENCH_RESILIENCE_SUITE.key, testType: 'integration', method: 'http',
     severity: 'medium', priority: 'p2',
     preconditions: 'Sand Bench feat/portal-features deployed.',
@@ -108,18 +113,15 @@ for (const ch of CHANNELS) {
       { action: 'request', method: 'PUT', url: `{{api}}/api/v1/integrations/${ch}`,
         headers: BEARER, body: { timeout_ms: 1234, max_retries: 1, backoff_ms: 50 },
         expected_status: 200,
-        expect_json: [{ path: 'data.timeout_ms', equals: 1234 }, { path: 'data.max_retries', equals: 1 }],
+        expect_json: [{ path: 'data.timeout_ms', equals: 1234 }, { path: 'data.max_retries', equals: 1 }, { path: 'data.backoff_ms', equals: 50 }],
         description: 'patch policy' },
       { action: 'request', method: 'GET', url: `{{api}}/api/v1/integrations/${ch}`,
         headers: BEARER, expected_status: 200,
-        expect_json: [{ path: 'data.timeout_ms', equals: 1234 }],
+        expect_json: [{ path: 'data.timeout_ms', equals: 1234 }, { path: 'data.max_retries', equals: 1 }, { path: 'data.backoff_ms', equals: 50 }],
         description: 'readback' },
     ],
     cleanupSteps: [
       API_LOGIN,
-      { action: 'request', method: 'PUT', url: `{{api}}/api/v1/integrations/${ch}`,
-        headers: BEARER, body: { timeout_ms: 2000, max_retries: 3, backoff_ms: 100 },
-        expected_status: 200, description: 'restore defaults' },
     ],
     tags: ['integration', 'resilience', 'policy', ch, 'update'],
     dataProfile: { profile: 'synthetic', data: 'A short policy patch and a readback.', source: 'inline' },
@@ -156,7 +158,7 @@ const UNREACHABLE_URL = 'http://127.0.0.1:65535/nope';
 C.push({
   key: 'SBE-RES-DISPATCH-FATAL-RETRIES-THEN-ROLLBACK',
   name: 'Transactional dispatch rolls back after retries exhaust against an unreachable portal',
-  objective: 'Confirm Sand Bench retries up to the configured count against a fatally-failing portal, then rolls the dispatch back with a 502.',
+  objective: 'Confirm Sand Bench retries a failed delivery up to the configured limit and then rolls it back, so an unsuccessful dispatch is never recorded as delivered.',
   description: 'With the default policy (max_retries=3, transactional=true), POST /dispatch at a dead URL ends 502 with rolled_back:true and attempts=4.',
   suiteKey: SANDBENCH_RESILIENCE_SUITE.key, testType: 'integration', method: 'http',
   severity: 'critical', priority: 'p0',
@@ -182,9 +184,6 @@ C.push({
   ],
   cleanupSteps: [
     API_LOGIN,
-    { action: 'request', method: 'PUT', url: '{{api}}/api/v1/integrations/api',
-      headers: BEARER, body: { timeout_ms: 2000, max_retries: 3, backoff_ms: 100, transactional: true },
-      expected_status: 200, description: 'restore defaults' },
   ],
   tags: ['integration', 'resilience', 'dispatch', 'retry', 'rollback', 'transactional'],
   dataProfile: { profile: 'synthetic', data: 'One generated message dispatched at a dead URL.', source: 'generated' },
@@ -219,9 +218,6 @@ C.push({
   ],
   cleanupSteps: [
     API_LOGIN,
-    { action: 'request', method: 'PUT', url: '{{api}}/api/v1/integrations/api',
-      headers: BEARER, body: { timeout_ms: 2000, max_retries: 3, backoff_ms: 100, transactional: true },
-      expected_status: 200, description: 'restore defaults' },
   ],
   tags: ['integration', 'resilience', 'dispatch', 'tolerate'],
   dataProfile: { profile: 'synthetic', data: 'One generated message dispatched at a dead URL under non-transactional policy.', source: 'generated' },
@@ -266,8 +262,8 @@ C.push({
 
 C.push({
   key: 'SBE-RES-DISPATCH-RETRIES-SUCCEED',
-  name: 'Dispatch succeeds on retry when the first attempt points at a dead URL and the retry uses the healthy portal',
-  objective: 'Confirm the retry mechanism actually works: when the policy caps retries at 1 but the URL changes mid-flight is impossible, this instead probes the attempts counter on a successful (first-try) dispatch.',
+  name: 'Successful dispatch reports its first attempt and delivery policy',
+  objective: 'Confirm a successful delivery reports one attempt and the policy it used, so operators can distinguish immediate success from a retried delivery.',
   description: 'Dispatch succeeds on first attempt; response reports attempts:1 and policy values. (A true "fail then recover" case is hard to orchestrate without a per-attempt URL rewrite — the fatal case covers the retry path.)',
   suiteKey: SANDBENCH_RESILIENCE_SUITE.key, testType: 'integration', method: 'http',
   severity: 'medium', priority: 'p2',
@@ -293,5 +289,47 @@ C.push({
   dataProfile: { profile: 'synthetic', data: 'One generated message dispatched to the healthy API portal.', source: 'generated' },
   expected: 'attempts:1 and policy fields reported in the response.',
 });
+
+for (const c of C) {
+  const steps = c.steps as Record<string, any>[];
+  // The supported generation route persists the row and deposits its file.
+  // POST /generated-messages has never been a generation route in this pin.
+  for (const step of steps) {
+    if (step.method === 'POST' && step.url === '{{api}}/api/v1/generated-messages') {
+      step.url = '{{api}}/api/v1/generated-messages/to-ftp';
+      step.expected_status = 200;
+      step.expect_json = [{ path: 'ok', equals: true }, { path: 'stored', equals: 1 }, { path: 'ids', min_length: 1, max_length: 1 }, { path: 'ids.0', exists: true }];
+    }
+  }
+  const policyUrls = [...new Set(steps.filter(s => s.method === 'PUT' && /\/integrations\/(api|mq|kafka|ftp)$/.test(s.url || '')).map(s => s.url as string))];
+  if (policyUrls.length) {
+    const fields = ['channel', 'timeout_ms', 'max_retries', 'backoff_ms', 'transactional', 'idempotency_header', 'idempotency_ttl_ms'];
+    c.cleanupSteps ||= [];
+    for (const [index, url] of policyUrls.entries()) {
+      const prefix = `policy_before_${index}`;
+      const firstWrite = steps.findIndex(s => s.method === 'PUT' && s.url === url);
+      steps.splice(firstWrite, 0, {
+        action: 'request', method: 'GET', url, headers: BEARER, expected_status: 200,
+        expect_json: fields.map(field => ({ path: `data.${field}`, exists: true })),
+        save: { [prefix]: 'data', ...Object.fromEntries(fields.map(field => [`${prefix}_${field}`, `data.${field}`])) },
+        description: 'Capture the original delivery settings before changing them',
+      });
+      c.cleanupSteps.push(
+        { action: 'request', method: 'PUT', url, headers: BEARER, body_json: `{{${prefix}}}`,
+          skip_if_missing: [prefix], expected_status: 200, description: 'Restore the captured delivery settings with their original types' },
+        { action: 'request', method: 'GET', url, headers: BEARER, skip_if_missing: [prefix], expected_status: 200,
+          expect_json: fields.map(field => ({ path: `data.${field}`, equals: `{{${prefix}_${field}}}` })),
+          description: 'Verify every original delivery setting was restored' },
+      );
+    }
+    c.preconditions += ' Use an isolated target: channel policies are application-wide and must not be changed concurrently.';
+  }
+  if (steps.some(s => s.method === 'POST' && s.url === '{{api}}/api/v1/generated-messages/to-ftp')) {
+    c.atomicityNote = {
+      reason: 'no-cleanup-endpoint',
+      detail: 'The pinned application exposes no delete operation for generated message rows or deposited output through its API. Settings cleanup restores and verifies captured settings, but generated output requires a disposable target; this case does not claim complete baseline restoration.',
+    };
+  }
+}
 
 export const SANDBENCH_RESILIENCE_CASES: CaseDef[] = tagSource(FILE, C);

@@ -35,6 +35,8 @@ export interface HttpStep {
   body?: unknown;
   /** Raw request body sent verbatim (for malformed-payload tests); wins over `body`. */
   body_raw?: string;
+  /** JSON text resolved from captured variables, then parsed to preserve numbers, booleans and objects. */
+  body_json?: string;
   expected_status?: number | number[];
   expected_body_contains?: string;
   expected_body_not_contains?: string;
@@ -47,11 +49,13 @@ export interface HttpStep {
     /** Upper bound on an array's or string's length (inclusive). */
     max_length?: number;
     /** Numeric lower bound (inclusive). */
-    min?: number;
+    min?: number | string;
     /** Numeric upper bound (inclusive). */
-    max?: number;
+    max?: number | string;
     /** Regular expression the value (as a string) must match. */
     matches?: string;
+    /** At least one entry must match all dot paths. A timestamp can use { at_or_after: '{{ts}}' } (epoch ms). */
+    some?: Record<string, unknown>;
   }>;
   expect_headers?: Array<{
     name: string;
@@ -59,10 +63,28 @@ export interface HttpStep {
     contains?: string;
     not_contains?: string;
   }>;
+  /**
+   * Extra body checks that apply only when the response has that status. For a
+   * route with more than one legitimate answer — a list that an unconfigured
+   * optional integration replaces with its documented "not configured" refusal —
+   * each answer is held to its own contract, so allowing the second status does
+   * not also allow an unrelated failure that happens to share it.
+   */
+  expect_by_status?: Record<string, Pick<HttpStep, 'expect_json' | 'expected_body_contains' | 'expected_body_not_contains'>>;
   save?: Record<string, string>;
   /** Cleanup-only: skip this operation when one of these case variables was never captured. */
   skip_if_missing?: string[];
   poll?: { timeout_ms?: number; interval_ms?: number };
+  /**
+   * Sign-in steps only: share one session per worker instead of opening a new one
+   * for every case. The first case signs in; later cases get the same answer back
+   * after `check_url` (sent with the session's bearer token, read from the sign-in
+   * answer at `token_path`, default "token") confirms the session is still alive.
+   * Used for an identity that every case has to share — the application's single
+   * administrator, capped at a handful of sessions — so a run does not evict its
+   * own sessions. A case must never sign such an identity out.
+   */
+  reuse_session?: { check_url: string; token_path?: string };
   allow_failure?: boolean;
   precondition?: boolean;
   description?: string;
@@ -116,6 +138,8 @@ interface Exchange {
   description?: string;
   request: { method: string; url: string; headers?: Record<string, string>; body?: string };
   response?: { status: number; headers: Record<string, string>; body: string; latency_ms: number };
+  /** Set when the answer is the worker's shared session, re-checked, rather than a new sign-in. */
+  note?: string;
   attempts?: number;
   outcome?: 'passed' | 'failed' | 'tolerated' | 'precondition_not_met';
   failure?: string;
@@ -157,6 +181,92 @@ function substituteDeep(value: unknown, vars: Record<string, string>): unknown {
   return value;
 }
 
+function requestBody(step: HttpStep, vars: Record<string, string>): string | undefined {
+  if (step.body_json !== undefined) {
+    if (step.body !== undefined || step.body_raw !== undefined) throw new Error('body_json must not be combined with body or body_raw');
+    try { return JSON.stringify(JSON.parse(substitute(step.body_json, vars))); }
+    catch { throw new Error('body_json did not resolve to valid JSON'); }
+  }
+  return step.body_raw !== undefined ? step.body_raw : step.body !== undefined ? JSON.stringify(substituteDeep(step.body, vars)) : undefined;
+}
+
+function captureText(value: unknown): string {
+  return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * Shared sessions (`reuse_session`), one per sign-in request for the life of the
+ * worker: the sign-in answer as received, or null when the sign-in was refused.
+ * Stored as a promise so cases that start together wait for one sign-in instead
+ * of each opening a session of their own.
+ */
+const sharedSessions = new Map<string, Promise<string | null>>();
+const SESSION_REUSED_NOTE = 'session reused: this worker already holds a session for this identity; it was checked and is still valid, so no new one was opened';
+
+/** Forget every shared session (tests, and a worker that is shutting down). */
+export function clearSharedSessions(): void {
+  sharedSessions.clear();
+}
+
+async function sessionStillValid(text: string, checkUrl: string, tokenPath: string): Promise<boolean> {
+  let token: unknown;
+  try { token = getPath(JSON.parse(text), tokenPath); } catch { return false; }
+  if (typeof token !== 'string' || !token) return false;
+  try {
+    const res = await fetch(checkUrl, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+    await res.arrayBuffer().catch(() => undefined);
+    return res.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send one step's request. A `reuse_session` sign-in is answered from the shared
+ * session when that is still valid; everything else goes on the wire as written.
+ */
+async function sendStep(
+  step: HttpStep,
+  request: { method: string; url: string; headers?: Record<string, string>; body?: string },
+  vars: Record<string, string>,
+  signal: AbortSignal
+): Promise<{ res: Response; text: string; reused: boolean }> {
+  const direct = async () => {
+    const res = await fetch(request.url, { method: request.method, headers: request.headers, body: request.body, signal });
+    return { res, text: await res.text(), reused: false };
+  };
+  const reuse = step.reuse_session;
+  if (!reuse || request.method !== 'POST' || !reuse.check_url) return direct();
+
+  const key = `${request.url}\n${request.body || ''}`;
+  const checkUrl = substitute(reuse.check_url, vars);
+  const tokenPath = reuse.token_path || 'token';
+  for (let round = 0; round < 3; round++) {
+    const pending = sharedSessions.get(key);
+    if (!pending) break;
+    const text = await pending.catch(() => null);
+    if (text && (await sessionStillValid(text, checkUrl, tokenPath))) {
+      return { res: new Response(text, { status: 200, headers: { 'content-type': 'application/json' } }), text, reused: true };
+    }
+    // Ended since (evicted, signed out, expired): drop it unless another case has already replaced it.
+    if (sharedSessions.get(key) === pending) sharedSessions.delete(key);
+  }
+
+  let settle!: (value: string | null) => void;
+  const flight = new Promise<string | null>((resolve) => { settle = resolve; });
+  sharedSessions.set(key, flight);
+  try {
+    const sent = await direct();
+    settle(sent.res.status === 200 ? sent.text : null);
+    if (sent.res.status !== 200 && sharedSessions.get(key) === flight) sharedSessions.delete(key);
+    return sent;
+  } catch (err) {
+    settle(null);
+    if (sharedSessions.get(key) === flight) sharedSessions.delete(key);
+    throw err;
+  }
+}
+
 function checkExpectations(
   step: HttpStep,
   status: number,
@@ -169,6 +279,11 @@ function checkExpectations(
   const allowed = Array.isArray(expected) ? expected : [expected];
   if (!allowed.includes(status)) {
     return `expected status ${allowed.join('/')} got ${status}: ${text.slice(0, 160)}`;
+  }
+  const forStatus = step.expect_by_status?.[String(status)];
+  if (forStatus) {
+    const failure = checkExpectations({ ...step, ...forStatus, expected_status: status, expect_by_status: undefined, expect_headers: undefined }, status, text, json, headers, vars);
+    if (failure) return `for status ${status}: ${failure}`;
   }
   if (step.expected_body_contains) {
     const needle = substitute(step.expected_body_contains, vars);
@@ -200,6 +315,21 @@ function checkExpectations(
         : String(actual ?? '').includes(needle);
       if (!found) return `expect_json ${ex.path}: ${JSON.stringify(actual)?.slice(0, 160)} does not contain "${needle}"`;
     }
+    if (ex.some !== undefined) {
+      const fields = Object.entries(ex.some);
+      const found = fields.length > 0 && Array.isArray(actual) && actual.some(item => fields.every(([path, expected]) => {
+        const value = getPath(item, path);
+        if (expected && typeof expected === 'object' && 'at_or_after' in expected) {
+          const threshold = Number(substitute(String(expected.at_or_after), vars));
+          const timestamp = typeof value === 'string' ? Date.parse(value) : NaN;
+          return Number.isFinite(threshold) && Number.isFinite(timestamp) && timestamp >= threshold;
+        }
+        const want = typeof expected === 'string' ? substitute(expected, vars) : expected;
+        return typeof expected === 'string' && expected.includes('{{') && (typeof value === 'number' || typeof value === 'boolean')
+          ? String(value) === want : value === want;
+      }));
+      if (!found) return `expect_json ${ex.path}: no single entry matches ${JSON.stringify(ex.some)}`;
+    }
     if (ex.min_length !== undefined) {
       const len = Array.isArray(actual) ? actual.length : typeof actual === 'string' ? actual.length : -1;
       if (len < ex.min_length) return `expect_json ${ex.path}: length ${len} < ${ex.min_length}`;
@@ -210,11 +340,15 @@ function checkExpectations(
     }
     if (ex.min !== undefined) {
       const num = Number(actual);
-      if (!Number.isFinite(num) || num < ex.min) return `expect_json ${ex.path}: ${JSON.stringify(actual)} < ${ex.min}`;
+      const bound = Number(substitute(String(ex.min), vars));
+      if (!Number.isFinite(bound)) return `expect_json ${ex.path}: min did not resolve to a finite number`;
+      if (actual === null || actual === undefined || !Number.isFinite(num) || num < bound) return `expect_json ${ex.path}: ${JSON.stringify(actual)} < ${bound}`;
     }
     if (ex.max !== undefined) {
       const num = Number(actual);
-      if (actual === null || actual === undefined || !Number.isFinite(num) || num > ex.max) return `expect_json ${ex.path}: ${JSON.stringify(actual)} > ${ex.max}`;
+      const bound = Number(substitute(String(ex.max), vars));
+      if (!Number.isFinite(bound)) return `expect_json ${ex.path}: max did not resolve to a finite number`;
+      if (actual === null || actual === undefined || !Number.isFinite(num) || num > bound) return `expect_json ${ex.path}: ${JSON.stringify(actual)} > ${bound}`;
     }
     if (ex.matches !== undefined) {
       const text = typeof actual === 'string' ? actual : actual === undefined ? '' : JSON.stringify(actual);
@@ -246,13 +380,12 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
     trace.current = undefined;
   }
 
-  // A precondition-not-met result means the target was never set up, so
-  // running the cleanup against a baseline that was never prepared would
-  // just report "Environment not found"/404s that are not a real cleanup
-  // failure. Skip cleanup entirely on the skipped-by-precondition path.
-  const cleanupFailures = result.status === 'skipped' ? [] : await executeCleanup(input, trace);
+  // A prerequisite can fail after earlier setup has already created data.
+  // Cleanup guards handle resources that were never created; the finalizer
+  // must still run for resources created before a skip, failure or cancellation.
+  const cleanupFailures = await executeCleanup(input, trace);
   if (cleanupFailures.length) {
-    if (result.status === 'passed') result.status = 'failed';
+    if (result.status === 'passed' || result.status === 'skipped') result.status = 'failed';
     result.classification ||= 'cleanup_failure';
     result.message = `${result.message}; cleanup failed: ${cleanupFailures.join('; ')}`.slice(0, 900);
     result.remarks = [...(result.remarks || []), `Cleanup failed: ${cleanupFailures.join('; ')}.`];
@@ -325,11 +458,15 @@ async function executeCleanup(input: HttpRunInput, trace: Trace): Promise<string
       continue;
     }
 
-    const body = step.body_raw !== undefined
-      ? step.body_raw
-      : step.body !== undefined
-        ? JSON.stringify(substituteDeep(step.body, trace.vars))
-        : undefined;
+    let body: string | undefined;
+    try { body = requestBody(step, trace.vars); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`step ${idx + 1} (${description}): ${message}`);
+      trace.exchanges.push({ step: (input.steps?.length || 0) + idx + 1, description,
+        request: { method, url: rawUrl }, outcome: 'failed', error: message });
+      continue;
+    }
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     for (const [key, value] of Object.entries(step.headers || {})) headers[key.toLowerCase()] = substitute(value, trace.vars);
 
@@ -343,19 +480,14 @@ async function executeCleanup(input: HttpRunInput, trace: Trace): Promise<string
     trace.current = { step: (input.steps?.length || 0) + idx + 1, description, request };
     const started = Date.now();
     try {
-      const response = await fetch(rawUrl, {
-        method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(Math.min(10000, remainingMs)),
-      });
-      const text = await response.text();
+      const { res: response, text, reused } = await sendStep(step, request, trace.vars, AbortSignal.timeout(Math.min(10000, remainingMs)));
       let json: unknown;
       try { json = JSON.parse(text); } catch { /* non-JSON body */ }
       const failure = checkExpectations(step, response.status, text, json, response.headers, trace.vars);
       trace.exchanges.push({
         ...trace.current,
         response: { status: response.status, headers: Object.fromEntries(response.headers.entries()), body: text, latency_ms: Date.now() - started },
+        ...(reused ? { note: SESSION_REUSED_NOTE } : {}),
         attempts: 1,
         outcome: failure ? 'failed' : 'passed',
         failure: failure || undefined,
@@ -364,7 +496,7 @@ async function executeCleanup(input: HttpRunInput, trace: Trace): Promise<string
       else {
         for (const [name, jsonPath] of Object.entries(step.save || {})) {
           const captured = getPath(json, jsonPath);
-          if (captured !== undefined) trace.vars[name] = String(captured);
+          if (captured !== undefined) trace.vars[name] = captureText(captured);
         }
       }
     } catch (error) {
@@ -400,17 +532,18 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
     method: string,
     url: string,
     headers?: Record<string, string>,
-    body?: string
+    body?: string,
+    source?: HttpStep
   ) => {
     trace.current = { step, description, request: { method, url, headers, body } };
     const t0 = Date.now();
     const signal = input.signal ? AbortSignal.any([AbortSignal.timeout(timeout), input.signal]) : AbortSignal.timeout(timeout);
-    const res = await fetch(url, { method, headers, body, signal });
+    const { res, text, reused } = await sendStep(source || { action: 'request' }, { method, url, headers, body }, vars, signal);
     const latency = Date.now() - t0;
-    const text = await res.text();
     const recorded: Exchange = {
       ...trace.current,
       response: { status: res.status, headers: Object.fromEntries(res.headers.entries()), body: text, latency_ms: latency },
+      ...(reused ? { note: SESSION_REUSED_NOTE } : {}),
     };
     trace.current = undefined;
     return { res, text, latency, recorded };
@@ -454,15 +587,10 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
           const rawUrl = step.url
             ? substitute(step.url, vars)
             : `${vars.base}${substitute(step.path || '/', vars)}`;
-          const body =
-            step.body_raw !== undefined
-              ? step.body_raw
-              : step.body !== undefined
-                ? JSON.stringify(substituteDeep(step.body, vars))
-                : undefined;
+          const body = requestBody(step, vars);
           const headers: Record<string, string> = { 'content-type': 'application/json' };
           for (const [k, v] of Object.entries(step.headers || {})) headers[k.toLowerCase()] = substitute(v, vars);
-          const { res, text, latency, recorded } = await exchange(idx + 1, step.description, method, rawUrl, headers, body);
+          const { res, text, latency, recorded } = await exchange(idx + 1, step.description, method, rawUrl, headers, body, step);
           lastLatency = latency;
           lastStatus = res.status;
           let json: unknown = undefined;
@@ -492,6 +620,17 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
           failure: failure || undefined,
         });
 
+        // Preserve identities from successful writes even when an assertion
+        // about their response fails. Otherwise finally cannot remove the new
+        // resource. Compare before saving so a step cannot overwrite a prior
+        // captured value and accidentally compare its response to itself.
+        if (outcome.res.ok || !failure) {
+          for (const [name, jsonPath] of Object.entries(step.save || {})) {
+            const captured = getPath(outcome.json, jsonPath);
+            if (captured !== undefined) vars[name] = captureText(captured);
+          }
+        }
+
         if (failure) {
           if (step.allow_failure) {
             results.push(`step ${idx + 1} (${step.description || method}) tolerated: ${failure}`);
@@ -519,13 +658,8 @@ async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult
           };
         }
 
-        for (const [name, jsonPath] of Object.entries(step.save || {})) {
-          const captured = getPath(outcome.json, jsonPath);
-          if (captured !== undefined) vars[name] = String(captured);
-        }
-
         results.push(`${method} ${step.description || outcome.rawUrl.replace(/^https?:\/\/[^/]+/, '')} → ${outcome.res.status} (${lastLatency}ms)`);
-        remarks.push(`${stepLabel(step, idx, method)}: ${statusWords(outcome.res.status)} in ${lastLatency} ms${attempts > 1 ? ` after ${attempts} attempts` : ''}.`);
+        remarks.push(`${stepLabel(step, idx, method)}: ${outcome.recorded.note ? 'already signed in — the session this worker holds was checked and reused' : statusWords(outcome.res.status)} in ${lastLatency} ms${attempts > 1 ? ` after ${attempts} attempts` : ''}.`);
       }
 
       remarks.push(`Result: all ${input.steps.length} steps passed in ${Date.now() - start} ms.`);

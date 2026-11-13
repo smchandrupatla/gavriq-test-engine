@@ -26,18 +26,16 @@
  *                  suite membership is left as it is (for an engine whose
  *                  suites are maintained by hand)
  */
-import { pool, query, migrate } from './db/client.js';
-import { SANDBENCH_CASES, SANDBENCH_SUITES, SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
-import { SANDBENCH_PORTAL_CASES, SANDBENCH_PORTAL_SUITES } from './catalog/sandbench-portal-cases.js';
-import { SANDBENCH_API_COVERAGE_CASES, SANDBENCH_API_COVERAGE_SUITE } from './catalog/sandbench-api-coverage-cases.js';
-import { SANDBENCH_EVENT_RT_CASES, SANDBENCH_EVENT_RT_SUITES } from './catalog/sandbench-event-roundtrip-cases.js';
-import { SANDBENCH_PENDING_CASES, SANDBENCH_PENDING_SUITE } from './catalog/sandbench-pending-feature-cases.js';
-import { SANDBENCH_RESILIENCE_CASES, SANDBENCH_RESILIENCE_SUITE } from './catalog/sandbench-resilience-cases.js';
+import { pool, query, migrate, withTransaction } from './db/client.js';
+import type { PoolClient } from 'pg';
+import { SANDBENCH_TYPES } from './catalog/sandbench-cases.js';
+import { SANDBENCH_ALL_CASES, SANDBENCH_ALL_SUITES } from './catalog/sandbench-catalog.js';
 import { ENGINE_CASES, ENGINE_SUITES, ENGINE_TYPES } from './catalog/engine-cases.js';
 import { RECORD_AND_PLAY_TYPE, recordAndPlaySuite } from './catalog/record-and-play-cases.js';
 import type { CaseDef, SuiteDef, TypeMeta } from './catalog/types.js';
 import { screenFields, type AppContext } from './catalog/plain-language.js';
-import { annotateAppendOnlyCases, autoAttachCleanups, bindCaseToPool, poolDefaults, poolSecretEnvDefaults } from './catalog/user-pool.js';
+import { annotateAppendOnlyCases, autoAttachCleanups, poolDefaults, poolSecretEnvDefaults } from './catalog/user-pool.js';
+import { applySandbenchIdentityRules } from './catalog/sandbench-identity.js';
 
 // Per application: the environment its cases are written for, where cases
 // that need prepared fixtures run, and the team that owns its defects.
@@ -118,6 +116,10 @@ async function upsertApplication(key: string, name: string, description: string,
   // save the created id. Keeps authors from having to repeat the save+DELETE
   // boilerplate for every case touching the same route.
   autoAttachCleanups(cases);
+  // Sand Bench sign-in rules (catalog/sandbench-identity.ts): one shared
+  // administrator session per worker, deliberate sign-in failures sent from a
+  // made-up client address, and the operator's failure count restored afterwards.
+  if (key === 'sand-bench') applySandbenchIdentityRules(cases);
   const counts = new Map<string, number>();
   for (const c of cases) {
     const suite = suites.find((s) => s.key === c.suiteKey);
@@ -157,6 +159,13 @@ async function upsertEnvironment(key: string, name: string, envType: string, bas
 }
 
 async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDef[], cases: CaseDef[]) {
+  // Publish case definitions and suite membership together. Thousands of
+  // individual commits are slow and expose a partially refreshed catalog.
+  return withTransaction(client => writeSuitesAndCases(client, appId, appKey, suites, cases));
+}
+
+async function writeSuitesAndCases(client: PoolClient, appId: string, appKey: string, suites: SuiteDef[], cases: CaseDef[]) {
+  const query = (text: string, params?: unknown[]) => client.query(text, params);
   const ctx = APP_CONTEXT[appKey]!;
   const suiteIds = new Map<string, string>();
   for (const s of WITH_SUITES ? suites : []) {
@@ -192,33 +201,18 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
     );
   }
 
-  let n = 0;
-  for (const c of cases) {
-    const suiteId = suiteIds.get(c.suiteKey);
-    const suite = suites.find((s) => s.key === c.suiteKey);
-    if (!suite || (WITH_SUITES && !suiteId)) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
-    const validationRules = {
-      ...(c.validationRules || {}),
-      ...(c.cleanupSteps?.length ? { cleanup_steps: bindCaseToPool(c.key, c.cleanupSteps) } : {}),
-      ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
-      // The worker's pre-flight shape check at `apps/worker/src/worker.ts`
-      // reads this field to let `reads-baseline` / `no-cleanup-endpoint` cases
-      // bypass the var-resolution gate.
-      ...(c.atomicityNote ? { atomicity_note: c.atomicityNote } : {}),
-      data_profile: c.dataProfile,
-    };
-    // The Test cases screen representation: objective, plain-language steps
-    // (what is done / what should happen / data used), owner, component,
-    // environment, duration, links and triage notes. Steps keep their runner
-    // fields, so the worker executes exactly what the screen describes.
-    const sf = screenFields(c, suite, ctx);
-    // Parallel-safe login: rebind this case's steps + cleanupSteps to its own
-    // user-pool slot (apps/api/src/catalog/user-pool.ts). Catalog authors keep
-    // using the shared API_LOGIN / ADMIN_LOGIN constants with the templates
-    // {{username}}/{{password}}/{{token}} and {{admin_username}}/
-    // {{admin_password}}/{{adminToken}}; this renames them per case so N
-    // parallel cases hold N distinct Sand Bench sessions. See docs/USER-POOL.md.
-    sf.steps = bindCaseToPool(c.key, sf.steps) as typeof sf.steps;
+  const batch: Array<{ key: string; params: unknown[]; suiteId?: string; sortOrder: number }> = [];
+  const valueRow = `(
+         $1,$2,$3,$4,$5::test_type,'system',
+         $6,$7,$8,$9::jsonb,$10,
+         $11::jsonb,$12,$13::severity,$14::priority,$15,
+         'automated','active','realistic-catalog','realistic-catalog',$16::jsonb,
+         $17,$18,$19,$20,$21,$22,
+         $23,$24,$25::jsonb,$26::jsonb,
+         $27,$28,$29,$30,$31
+       )`;
+  async function flushCases() {
+    if (!batch.length) return;
     const { rows } = await query(
       `INSERT INTO test_cases (
          key, name, description, application_id, test_type, test_level,
@@ -228,15 +222,7 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
          objective, owner_id, component, environment, estimated_duration, visibility,
          automation_link, test_data, attachments, dependencies,
          flakiness_notes, known_workarounds, common_failure_causes, triage_status, assignee
-       ) VALUES (
-         $1,$2,$3,$4,$5::test_type,'system',
-         $6,$7,$8,$9::jsonb,$10,
-         $11::jsonb,$12,$13::severity,$14::priority,$15,
-         'automated','active','realistic-catalog','realistic-catalog',$16::jsonb,
-         $17,$18,$19,$20,$21,$22,
-         $23,$24,$25::jsonb,$26::jsonb,
-         $27,$28,$29,$30,$31
-       )
+       ) VALUES ${batch.map((item, index) => valueRow.replace(/\$(\d+)/g, (_, n) => `$${index * item.params.length + Number(n)}`)).join(",")}
        ON CONFLICT (key) DO UPDATE SET
          name = EXCLUDED.name, description = EXCLUDED.description,
          application_id = EXCLUDED.application_id,
@@ -262,8 +248,51 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
          triage_status = CASE WHEN test_cases.triage_status = 'None' THEN EXCLUDED.triage_status ELSE test_cases.triage_status END,
          assignee = COALESCE(test_cases.assignee, EXCLUDED.assignee),
          updated_at = now(), updated_by = 'realistic-catalog'
-       RETURNING id`,
-      [
+       RETURNING id, key`,
+      batch.flatMap(item => item.params)
+    );
+    if (WITH_SUITES) {
+      const byKey = new Map(batch.map(item => [item.key, item]));
+      const ids = rows.map(row => row.id);
+      await query(`DELETE FROM test_case_suites WHERE test_case_id = ANY($1::uuid[])`, [ids]);
+      await query(
+        `INSERT INTO test_case_suites (test_case_id, test_suite_id, sort_order)
+         SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::int[]) ON CONFLICT DO NOTHING`,
+        [ids, rows.map(row => byKey.get(row.key)!.suiteId), rows.map(row => byKey.get(row.key)!.sortOrder)]
+      );
+    }
+    batch.length = 0;
+  }
+
+  let n = 0;
+  for (const c of cases) {
+    const suiteId = suiteIds.get(c.suiteKey);
+    const suite = suites.find((s) => s.key === c.suiteKey);
+    if (!suite || (WITH_SUITES && !suiteId)) throw new Error(`Case ${c.key} references unknown suite ${c.suiteKey}`);
+    const validationRules = {
+      ...(c.validationRules || {}),
+      ...(c.cleanupSteps?.length ? { cleanup_steps: c.cleanupSteps } : {}),
+      ...(c.cleanupTimeoutSeconds ? { cleanup_timeout_seconds: c.cleanupTimeoutSeconds } : {}),
+      // The worker's pre-flight shape check at `apps/worker/src/worker.ts`
+      // reads this field to let `reads-baseline` / `no-cleanup-endpoint` cases
+      // bypass the var-resolution gate.
+      ...(c.atomicityNote ? { atomicity_note: c.atomicityNote } : {}),
+      data_profile: c.dataProfile,
+    };
+    // The Test cases screen representation: objective, plain-language steps
+    // (what is done / what should happen / data used), owner, component,
+    // environment, duration, links and triage notes. Steps keep their runner
+    // fields, so the worker executes exactly what the screen describes.
+    const sf = screenFields(c, suite, ctx);
+    // Parallel-safe sign-in: steps keep the templates {{username}}/{{password}}/
+    // {{token}} and {{admin_username}}/{{admin_password}}/{{adminToken}} as
+    // written. Which identity {{username}} is gets decided when the case runs:
+    // the engine gives every running execution its own identity lane
+    // (routes/executions.ts leaseIdentityLane) and the worker resolves the
+    // templates to that lane's pool user. A case key is no longer hashed to a
+    // fixed pool slot — two cases with the same slot used to end each other's
+    // sessions when they ran together. See docs/USER-POOL.md.
+    batch.push({ key: c.key, suiteId, sortOrder: n, params: [
         c.key, c.name, c.description, appId, c.testType,
         sf.preconditions,
         `${c.dataProfile.profile}: ${c.dataProfile.data} (source: ${c.dataProfile.source})`,
@@ -277,19 +306,12 @@ async function seedSuitesAndCases(appId: string, appKey: string, suites: SuiteDe
         sf.objective, sf.owner, sf.component, sf.environment, sf.estimated_duration, sf.visibility,
         sf.automation_link, sf.test_data, JSON.stringify(sf.attachments), JSON.stringify(sf.dependency_ids),
         sf.flakiness_notes, sf.known_workarounds, sf.common_failure_causes, sf.triage_status, sf.assignee,
-      ]
-    );
-    if (suiteId) {
-      // reset membership so cases moved between suites don't keep stale links
-      await query(`DELETE FROM test_case_suites WHERE test_case_id = $1`, [rows[0]!.id]);
-      await query(
-        `INSERT INTO test_case_suites (test_case_id, test_suite_id, sort_order)
-         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [rows[0]!.id, suiteId, n]
-      );
-    }
+      ] });
+    if (batch.length >= 100) await flushCases();
     n++;
+    if (n % 1000 === 0) console.log(`[seed] prepared ${n}/${cases.length} ${appKey} cases (transaction not yet published)`);
   }
+  await flushCases();
   return n;
 }
 
@@ -334,8 +356,8 @@ async function main() {
   // 4) Applications, each with the environment it is developed on and its suites + cases.
   const grouping = WITH_SUITES ? 'suites' : 'suite definitions (not applied: --no-suites)';
   if (wanted('sand-bench')) {
-    const allSuites = [...SANDBENCH_SUITES, ...SANDBENCH_PORTAL_SUITES, SANDBENCH_API_COVERAGE_SUITE, ...SANDBENCH_EVENT_RT_SUITES, SANDBENCH_PENDING_SUITE, SANDBENCH_RESILIENCE_SUITE, recordAndPlaySuite('sand-bench')];
-    const allCases = [...SANDBENCH_CASES, ...SANDBENCH_PORTAL_CASES, ...SANDBENCH_API_COVERAGE_CASES, ...SANDBENCH_EVENT_RT_CASES, ...SANDBENCH_PENDING_CASES, ...SANDBENCH_RESILIENCE_CASES];
+    const allSuites = [...SANDBENCH_ALL_SUITES, recordAndPlaySuite('sand-bench')];
+    const allCases = SANDBENCH_ALL_CASES;
     const sbId = await upsertApplication(
       'sand-bench', 'Sand Bench',
       'Sand Bench enterprise deployment under test (web console, API, testhub, DB viewer).',
@@ -356,7 +378,7 @@ async function main() {
     const teCount = await seedSuitesAndCases(teId, 'gavriq-test-engine', engineSuites, ENGINE_CASES);
     console.log(`Seeded ${teCount} Test Engine self-test cases across ${engineSuites.length} ${grouping}.`);
   }
-  console.log('Every case is executable: http/playwright/selenium/performance steps verified against the live deployment.');
+  console.log('Catalog definitions seeded. Live execution results are separate; seeding does not verify the application.');
 
   await pool.end();
 }
