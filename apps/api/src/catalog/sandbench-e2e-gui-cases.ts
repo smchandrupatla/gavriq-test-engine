@@ -6,7 +6,9 @@
  * screen checks (those live under the Screen tests suite). The surface the
  * steps touch is the operator console at http://127.0.0.1:8080 (dev) /
  * http://127.0.0.1:18080 (staging); the sign-in form is the gate component
- * (#gate), verified live against the pinned Sand Bench commit on 2026-10-10.
+ * (#gate). Rebaselined against Sand Bench commit a8d72039ae8e (main, deployed
+ * as staging) on 2026-11-14: every page identity, sign-in message and menu
+ * location below is what that build shows in a real browser.
  *
  * Why a separate submenu: a "Screen test" asserts a single page renders; an
  * "E2E GUI test" is a scripted user journey across the console — sign in,
@@ -50,13 +52,91 @@ const CONSOLE_SIGNIN = [
     description: 'sign in as the demo operator (uses the worker session cache when possible)',
     text: 'Sign in as the demo operator',
   },
+  // The console draws its menu only once the application has confirmed the
+  // session. Waiting for it proves the sign-in really took, and it must come
+  // before the next page is opened: the console forgets a sign-in whose check
+  // is still on its way when the page is left (apps/web/public/js/live-bind.js,
+  // applyLoginGate — reported as an application defect on 2026-11-14).
+  {
+    action: 'wait_for',
+    selector: '.opsc-sidebar',
+    timeout_ms: 30000,
+    description: 'the console menu is shown — the application confirmed the session',
+    text: 'Wait until the console menu appears',
+  },
 ];
+
+/**
+ * The same, as the administrator — for the screens an ordinary operator is
+ * refused (user management, application configuration and the like). The
+ * runner keeps ONE administrator browser session per worker and reuses it, so
+ * the administrator is signed in once however many cases need it. No case may
+ * sign the administrator out: that ends every administrator session at once.
+ */
+const ADMIN_SIGNIN = [
+  {
+    action: 'sign_in',
+    value: '{{admin_username}}',
+    expected: '{{admin_password}}',
+    timeout_ms: 20000,
+    description: 'sign in as the administrator (uses the worker session cache when possible)',
+    text: 'Sign in as the administrator',
+  },
+  {
+    action: 'wait_for',
+    selector: '.opsc-sidebar',
+    timeout_ms: 30000,
+    description: 'the console menu is shown — the application confirmed the session',
+    text: 'Wait until the console menu appears',
+  },
+];
+
+/** Sign-in steps for a page: the administrator when the page needs one, the lane operator otherwise. */
+function signInFor(admin?: boolean) {
+  return admin ? ADMIN_SIGNIN : CONSOLE_SIGNIN;
+}
+
+/** After a sign-in typed by hand: the gate is gone AND the console is drawn. */
+const CONSOLE_SHOWN = [
+  { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 30000, description: 'the sign-in form is gone' },
+  { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is shown — the operator is inside', text: 'Wait until the console menu appears' },
+];
+
+/**
+ * What the sign-in form says, word for word (apps/web/public/js/live-bind.js,
+ * signIn). A refused attempt and an incomplete form are told apart by these.
+ */
+const MSG_REFUSED = 'Sign-in failed. Check the username and password.';
+const MSG_INCOMPLETE = 'Enter a username and password.';
+
+/** The form explains itself with exactly this message and stays on screen. */
+function gateSays(message: string) {
+  return [
+    { action: 'wait_for', selector: `#gate #login-err:has-text("${message}")`, timeout_ms: 15000, description: 'the sign-in form explains what happened', text: `Wait until the sign-in form shows the message "${message}"` },
+    { action: 'assert_selector_text', selector: '#gate #login-err', expected: message, description: 'the message is the one the application documents' },
+    { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the sign-in form is still shown — nobody was let in' },
+    { action: 'wait_for', selector: '.opsc-sidebar', state: 'detached', timeout_ms: 5000, description: 'the console was not opened', text: 'Check the console menu is not on the page' },
+  ];
+}
 
 const SIGNIN_DATA: CaseDef['dataProfile'] = {
   profile: 'demo-identity',
   data: 'Sign-in as the documented demo operator ({{username}} / {{password}}, no tenant field — the product is single-tenant).',
   source: 'dev/demo-seed/sand-bench-demo-tenants-users.json (fictional dev-only identity).',
 };
+
+const ADMIN_DATA: CaseDef['dataProfile'] = {
+  profile: 'administrator-identity',
+  data: 'Sign-in as the built-in administrator ({{admin_username}} / {{admin_password}}) — the only identity the application lets into its administration screens. Nothing is changed and the administrator is never signed out.',
+  source: 'The environment\'s administrator identity (engine environment variables admin_username / admin_password).',
+};
+
+/** Something only a properly loaded screen shows (rows of the administrator's own list, for instance). */
+function proofSteps(proof?: string) {
+  return proof
+    ? [{ action: 'wait_for', selector: proof, timeout_ms: 20000, description: 'the screen shows its own records — it loaded for this user, it is not an empty frame', text: 'Wait until the screen lists its records' }]
+    : [];
+}
 
 const PUBLIC_READ: CaseDef['dataProfile'] = {
   profile: 'none (read-only)',
@@ -139,14 +219,20 @@ const VIEWPORTS: Array<{ code: string; width: number; height: number; label: str
 ];
 
 /**
- * Every HTML page the Sand Bench deployment serves, from the live
- * sand-bench-staging-web-1 container's static dir plus nginx rewrites on
- * 2026-10-10. `publicPage` means the page renders content without a sign-in;
+ * Every HTML page the Sand Bench deployment serves — the 118 documents of
+ * apps/web/public at commit a8d72039ae8e plus the rule-canvas sub-directory and
+ * the two console screens that have no document of their own any more (Scheme
+ * definitions, Import scheme) — checked against the live staging web container
+ * on 2026-11-14. Retired addresses that still forward to their replacement
+ * (Users, User roles, Kafka endpoints, External systems, Imported schemes) stay
+ * in the list: a bookmark must keep landing somewhere real. `admin` marks a
+ * screen that only the administrator can load; it is opened as the
+ * administrator. `publicPage` means the page renders content without a sign-in;
  * `assertText` is a verified string on that page used by the responsive matrix
  * to confirm something painted. Signed-in pages leave assertText empty and the
  * responsive helper asserts the verified browser title and visible heading after sign-in.
  */
-const PAGES: Array<{ code: string; path: string; name: string; publicPage?: boolean; assertText?: string }> = [
+const PAGES: Array<{ code: string; path: string; name: string; publicPage?: boolean; assertText?: string; admin?: boolean; proof?: string }> = [
   // Public landing + documentation
   { code: 'GATE',               path: '/',                                       name: 'Sign-in gate',                              publicPage: true, assertText: 'Sign in' },
   { code: 'INDEX',              path: '/index.html',                             name: 'Index',                                     publicPage: true, assertText: 'Sign in' },
@@ -165,12 +251,17 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'PG-INV',             path: '/postgres-inventory.html',                name: 'Postgres inventory',                        publicPage: true, assertText: 'Postgres inventory' },
   { code: 'BYO-XSD',            path: '/bring-your-own-xsd.html',                name: 'Bring your own XSD',                        publicPage: true, assertText: 'XSD' },
   { code: 'MASK-DEMO',          path: '/mask-demo.html',                         name: 'Masking slide',                             publicPage: true, assertText: 'Same run, two tenants' },
-  { code: 'HELP-CENTER',        path: '/help-center.html',                       name: 'Help center',                               publicPage: true, assertText: 'Help' },
+  { code: 'HELP-CENTER',        path: '/help-center.html',                       name: 'Help center',                               publicPage: true, assertText: 'Help Center' },
+  { code: 'NOT-FOUND',          path: '/not-found.html',                         name: 'Page not found',                            publicPage: true, assertText: 'Page not found' },
 
-  // Signed-in operator surfaces
-  { code: 'ADMIN',              path: '/configuration-users.html',               name: 'Users' },
-  { code: 'AGENTS',             path: '/agents.html',                            name: 'Agents' },
-  { code: 'AI-DRAFTS',          path: '/ai-authoring-drafts.html',               name: 'AI authoring · drafts' },
+  // Signed-in surfaces. `admin` marks a screen an ordinary operator is refused: it is opened
+  // as the administrator, and `proof` is something only a properly loaded screen shows.
+  // The old Agents page (/agents.html) is gone from the application (commit a8d72039ae8e
+  // serves "Page not found" there) and has left the matrix; Scheme definitions moved into
+  // the console and keeps its code at its new address.
+  { code: 'ADMIN',              path: '/configuration-users.html',               name: 'Users (now a tab of User management)',      admin: true, proof: '#ta-rows tr' },
+  { code: 'ADMINISTRATION',     path: '/administration.html',                    name: 'Administration' },
+  { code: 'AI-DRAFTS',         path: '/ai-authoring-drafts.html',               name: 'AI authoring · drafts' },
   { code: 'AI-FROM-UC',         path: '/ai-authoring-from-use-case.html',        name: 'AI authoring · from use case' },
   { code: 'AI-GENERATE',        path: '/ai-authoring-generate.html',             name: 'AI authoring · generate' },
   { code: 'AI-REVIEW',          path: '/ai-authoring-review.html',               name: 'AI authoring · review' },
@@ -178,32 +269,47 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'AN-DASH',            path: '/analytics-dashboard.html',               name: 'Analytics dashboard' },
   { code: 'AN-SUITE-CMP',       path: '/analytics-suite-compare.html',           name: 'Analytics · suite compare' },
   { code: 'AN-SUITE-HEALTH',    path: '/analytics-suite-health.html',            name: 'Analytics · suite health' },
+  { code: 'AN-ENV-CMP',         path: '/analytics-env-compare.html',             name: 'Analytics · environment compare' },
+  { code: 'AN-HEATMAP',         path: '/analytics-pass-fail-heatmap.html',       name: 'Analytics · pass/fail heatmap' },
+  { code: 'API-KEYS',           path: '/api-keys.html',                          name: 'API keys' },
   { code: 'APP-EVENTS',         path: '/application-events.html',                name: 'Application events' },
   { code: 'ATTACKS',            path: '/attacks.html',                           name: 'Attacks' },
+  { code: 'BUSINESS-UC',        path: '/business-use-cases.html',                name: 'Business use cases' },
   { code: 'CFG-API',            path: '/configuration-api-access.html',          name: 'Configuration · API access' },
   { code: 'CFG-APPS',           path: '/configuration-app-configs.html',         name: 'Configuration · App configs' },
   { code: 'CFG-RETENTION',      path: '/configuration-data-retention.html',      name: 'Configuration · Data retention' },
   { code: 'CFG-ENV',            path: '/configuration-environment-defaults.html', name: 'Configuration · Environment defaults' },
   { code: 'CFG-EVENTING',       path: '/configuration-eventing.html',            name: 'Configuration · Eventing' },
   { code: 'CFG-LIST',           path: '/configuration-list-boxes.html',          name: 'Configuration · List boxes' },
+  { code: 'CFG-IMPORT-LIMITS',  path: '/configuration-import-schema-limits.html', name: 'Configuration · Import schema limits' },
+  { code: 'CFG-ONBOARDING',     path: '/configuration-onboarding-journey.html',  name: 'Configuration · Onboarding journey' },
   { code: 'CFG-NOTIFY',         path: '/configuration-notifications.html',       name: 'Configuration · Notifications' },
-  { code: 'CFG-ROLES',          path: '/configuration-user-roles.html',          name: 'Configuration · User roles' },
-  { code: 'CFG-USERS',          path: '/configuration-users.html',               name: 'Configuration · Users' },
+  { code: 'CFG-ROLES',          path: '/configuration-user-roles.html',          name: 'Configuration · User roles (now a tab of User management)', admin: true, proof: '#tar-rows tr' },
+  { code: 'CFG-USERS',          path: '/configuration-users.html',               name: 'Configuration · Users (now a tab of User management)', admin: true, proof: '#ta-rows tr' },
   { code: 'CFG',                path: '/configuration.html',                     name: 'Configuration' },
+  { code: 'CONNECTIONS',        path: '/connections.html',                       name: 'Connections' },
   { code: 'CREATE-SCHEMA',      path: '/create-schema.html',                     name: 'Create schema' },
   { code: 'DATA-ACCESS',        path: '/data-access.html',                       name: 'Data access' },
   { code: 'DATA-FEEDER-FORM',   path: '/data-feeder-form.html',                  name: 'Data feeder form' },
   { code: 'DATA-FEEDERS',       path: '/data-feeders.html',                      name: 'Data feeders' },
+  { code: 'DF-CURRENT-RUNS',    path: '/data-feeder-current-runs.html',          name: 'Data feeder · current runs' },
+  { code: 'DF-PAST-RUNS',       path: '/data-feeder-past-runs.html',             name: 'Data feeder · past runs' },
+  { code: 'DR-ALL',             path: '/data-responders.html',                   name: 'Data responder · all stubs' },
+  { code: 'DR-AUDIT',           path: '/data-responder-audit.html',              name: 'Data responder · audit' },
+  { code: 'DR-DETAIL',          path: '/data-responder-detail.html',             name: 'Data responder · stub detail' },
+  { code: 'DR-FORM',            path: '/data-responder-form.html',               name: 'Data responder · new stub' },
   { code: 'DS-NEW',             path: '/datasets-new.html',                      name: 'Datasets · New' },
   { code: 'DS',                 path: '/datasets.html',                          name: 'Datasets' },
   { code: 'EVENT-FW',           path: '/event-framework.html',                   name: 'Event framework' },
-  { code: 'EXT-SYS',            path: '/external-systems.html',                  name: 'External systems' },
+  { code: 'EXT-SYS',            path: '/external-systems.html',                  name: 'External systems (now Connections)' },
   { code: 'FIELD-RULES',        path: '/field-rules.html',                       name: 'Field rules' },
-  { code: 'IMP-SCHEMES',        path: '/imported-schemes.html',                  name: 'Imported schemes' },
+  { code: 'IMP-SCHEMES',        path: '/imported-schemes.html',                  name: 'Imported schemes (now Scheme definitions)' },
+  { code: 'IMPORT-SCHEME',      path: '/?page=msgImportSchema',                  name: 'Import scheme' },
   { code: 'IMPROVEMENTS',       path: '/improvements.html',                      name: 'Improvements' },
-  { code: 'KAFKA-EP',           path: '/kafka-endpoints.html',                   name: 'Kafka endpoints' },
+  { code: 'KAFKA-EP',           path: '/kafka-endpoints.html',                   name: 'Kafka endpoints (now Connections)' },
   { code: 'MSG-FILES',          path: '/message-data-files.html',                name: 'Message data files' },
-  { code: 'MSG-EXPORT',         path: '/message-designer-export-template.html',  name: 'Message designer · export template' },
+  { code: 'MSG-EXPORT',         path: '/message-designer-export-template.html',  name: 'Message designer · export definition' },
+  { code: 'MSG-IMPORT',         path: '/message-designer-import-definition.html', name: 'Message designer · import definition' },
   { code: 'MSG-SAVED',          path: '/message-designer-saved.html',            name: 'Message designer · saved' },
   { code: 'MSG-REGISTER',       path: '/message-designer-schema-register.html',  name: 'Message designer · schema register' },
   { code: 'MSG',                path: '/message-designer.html',                  name: 'Message designer' },
@@ -217,6 +323,7 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'REP-SCHEDULED',      path: '/reports-scheduled.html',                 name: 'Reports · Scheduled' },
   { code: 'REP-SUITES',         path: '/reports-suites.html',                    name: 'Reports · Suites' },
   { code: 'RB-CREATE',          path: '/rule-bench-create.html',                 name: 'Rule bench · Create' },
+  { code: 'RB-DETAIL',          path: '/rule-bench-detail.html',                 name: 'Rule bench · Rule detail' },
   { code: 'RB-EXISTING',        path: '/rule-bench-existing.html',               name: 'Rule bench · Existing' },
   { code: 'RB-EXPORT',          path: '/rule-bench-export.html',                 name: 'Rule bench · Export' },
   { code: 'RB-STAGE',           path: '/rule-bench-stage.html',                  name: 'Rule bench · Stage' },
@@ -229,10 +336,12 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'SCHEMA-CANVAS',      path: '/schema-canvas.html',                     name: 'Schema canvas' },
   { code: 'SCHEMA-CONVERTER',   path: '/schema-converter.html',                  name: 'Schema converter' },
   { code: 'SCHEMA-TREE',        path: '/schema-tree.html',                       name: 'Schema tree' },
-  { code: 'SCHEME-DEFS',        path: '/scheme-definitions.html',                name: 'Scheme definitions' },
+  { code: 'SCHEME-DEFS',        path: '/?page=schemeDefinitions',                name: 'Scheme definitions' },
+  { code: 'SHELL-DEMO',         path: '/shell-demo.html',                        name: 'Application shell demo' },
   { code: 'SUITE-EVIDENCE',     path: '/suite-evidence.html',                    name: 'Suite evidence' },
   { code: 'TC-FORM',            path: '/test-case-form.html',                    name: 'Test case form' },
   { code: 'TC',                 path: '/test-cases.html',                        name: 'Test cases' },
+  { code: 'TEST-COVERAGE',      path: '/test-coverage.html',                     name: 'Test coverage',                             admin: true },
   { code: 'TR-ACTIVE',          path: '/test-runs-active.html',                  name: 'Test runs · Active' },
   { code: 'TR-ALL',             path: '/test-runs-all.html',                     name: 'Test runs · All' },
   { code: 'TR-NEW',             path: '/test-runs-new.html',                     name: 'Test runs · New' },
@@ -253,6 +362,7 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'UC-STEPS',           path: '/use-case-steps.html',                    name: 'Use case · steps tab' },
   { code: 'UC-TABLES',          path: '/use-case-tables.html',                   name: 'Use case · tables tab' },
   { code: 'UC-TEMPLATES',       path: '/use-case-templates.html',                name: 'Use case · templates' },
+  { code: 'USER-MGMT',          path: '/user-management.html',                   name: 'User management',                           admin: true, proof: '#ta-rows tr' },
 ];
 
 /**
@@ -261,31 +371,33 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
  * the page they linked to, not a sign-in redirect. One function per page keeps
  * adding more pages a single line, and the shape stays consistent across them.
  */
-function signedInPage(key: string, path: string, humanName: string): CaseDef {
+function signedInPage(key: string, path: string, humanName: string, options: { admin?: boolean; proof?: string } = {}): CaseDef {
+  const who = options.admin ? 'administrator' : 'demo operator';
   return {
     key,
-    name: `A signed-in operator can deep-link to the ${humanName} page`,
+    name: `A signed-in ${options.admin ? 'administrator' : 'operator'} can deep-link to the ${humanName} page`,
     objective:
-      `Sign in as the demo operator and open the ${humanName} page directly; confirm its browser title and visible heading match the requested page and the sign-in gate is hidden.`,
+      `Sign in as the ${who} and open the ${humanName} page directly; confirm its browser title and visible heading match the requested page and the sign-in gate is hidden.`,
     description:
-      `Open {{web}}/, sign in as the demo operator, then navigate to {{web}}${path} in the same browser session. The browser title and visible heading must identify ${humanName}, and the sign-in gate (#gate) must stay hidden.`,
+      `Open {{web}}/, sign in as the ${who}, then navigate to {{web}}${path} in the same browser session. The browser title and visible heading must identify ${humanName}, and the sign-in gate (#gate) must stay hidden.${options.admin ? ' An ordinary operator is refused this screen\'s data, so the case uses the administrator.' : ''}`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
     severity: 'medium',
     priority: 'p2',
     preconditions:
-      `Sand Bench web and API containers up; the demo operator identity ({{username}}) is enabled; the ${humanName} page is linked from the console.`,
+      `Sand Bench web and API containers up; the ${options.admin ? 'administrator identity ({{admin_username}})' : 'demo operator identity ({{username}})'} is enabled; the ${humanName} page is linked from the console.`,
     steps: [
-      ...CONSOLE_SIGNIN,
+      ...signInFor(options.admin),
       { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to the ${humanName} page after sign-in` },
       ...pageIdentitySteps(path, humanName),
+      ...proofSteps(options.proof),
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: `the sign-in gate is not shown on the ${humanName} page` },
     ],
-    timeoutSeconds: 60,
+    timeoutSeconds: 90,
     validationRules: UI_RULES,
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'signed-in', 'deep-link'],
-    dataProfile: SIGNIN_DATA,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'signed-in', 'deep-link', ...(options.admin ? ['as-admin'] : [])],
+    dataProfile: options.admin ? ADMIN_DATA : SIGNIN_DATA,
     expected: `The ${humanName} page renders without the sign-in gate — the operator session carried over.`,
     commonFailureCauses:
       'The browser session was not persisted; the pinned staging build does not serve this page as an authenticated route (tracked as a Sand Bench defect, not a test error).',
@@ -320,6 +432,46 @@ function anonymousBlockedFrom(key: string, path: string, humanName: string): Cas
     tags: ['e2e-gui', 'sand-bench', 'playwright', 'security', 'anonymous', 'gated'],
     dataProfile: PUBLIC_READ,
     expected: 'The sign-in gate is shown on the destination page, not the operator page content.',
+    commonFailureCauses:
+      'Application defect seen on commit a8d72039ae8e (2026-11-14): a screen that has its own document (Test cases, Test suites, All test runs, Saved datasets, User management …) is drawn for a visitor who never signed in — the data requests are refused, but the page frame appears, its header reads "Signed in", and the visitor is not taken to the sign-in form (apps/web/public/js/session-cookie.js, expired(), returns early for a browser that never held a session). Screens that live inside the console do show the sign-in form.',
+  };
+}
+
+/**
+ * A page the application no longer has. Its old address must answer with the
+ * application's own "Page not found" page — the same for a visitor and for a
+ * signed-in operator — never with a blank page, another screen or the sign-in
+ * form pretending the page exists.
+ */
+function retiredPage(key: string, path: string, humanName: string, options: { signedIn?: boolean } = {}): CaseDef {
+  return {
+    key,
+    name: `The retired ${humanName} address shows the "Page not found" page${options.signedIn ? ' to a signed-in operator' : ' to a visitor'}`,
+    objective:
+      `Open the old address of the ${humanName} page${options.signedIn ? ' while signed in as the demo operator' : ' without signing in'} and confirm the application answers with its own "Page not found" page — the ${humanName} page was removed from the product, and a stale bookmark is told so plainly.`,
+    description:
+      `${options.signedIn ? 'Sign in as the demo operator, then navigate' : 'Navigate'} to {{web}}${path}. The current application (commit a8d72039ae8e) no longer ships this page; nginx serves the branded not-found document for unknown paths (apps/web/nginx.conf.template, @branded_not_found). The browser title must be "Not found — Sand Bench" and the visible heading "Page not found".`,
+    suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
+    testType: 'ui',
+    method: 'playwright',
+    severity: 'medium',
+    priority: 'p2',
+    preconditions: options.signedIn
+      ? 'Sand Bench web and API containers up; the demo operator identity ({{username}}) is enabled.'
+      : 'Sand Bench web container up.',
+    steps: [
+      ...(options.signedIn ? CONSOLE_SIGNIN : []),
+      { action: 'navigate', value: `{{web}}${path}`, description: `open the old ${humanName} address` },
+      ...pageIdentitySteps('/not-found.html', 'Page not found'),
+      { action: 'wait_for', selector: '#gate', state: 'detached', timeout_ms: 5000, description: 'the sign-in form is not shown in its place', text: 'Check the sign-in form is not on the page' },
+    ],
+    timeoutSeconds: options.signedIn ? 90 : 30,
+    validationRules: UI_RULES,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'retired-page', options.signedIn ? 'signed-in' : 'anonymous'],
+    dataProfile: options.signedIn ? SIGNIN_DATA : PUBLIC_READ,
+    expected: `The old ${humanName} address shows the application's "Page not found" page.`,
+    commonFailureCauses:
+      'The address was brought back (then this case should check the page itself again); the web server lost its branded not-found page and answers with a bare error.',
   };
 }
 
@@ -334,10 +486,12 @@ function elementCase(
   path: string,
   pageName: string,
   check: { name: string; description: string; step: Record<string, unknown> },
-  options: { signedIn?: boolean } = {}
+  options: { signedIn?: boolean; admin?: boolean } = {}
 ): CaseDef {
+  // Signed-in pages are checked once they have settled on the screen that was asked for (its
+  // heading is on show), so the check reads the real page and not a half-drawn or forwarding one.
   const steps = options.signedIn
-    ? [...CONSOLE_SIGNIN, { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${pageName}` }, { action: 'wait', value: '1500', description: 'let the page render' }, check.step]
+    ? [...signInFor(options.admin), { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${pageName}` }, pageIdentitySteps(path, pageName)[0]!, check.step]
     : [{ action: 'navigate', value: `{{web}}${path}`, description: `open ${pageName}` }, check.step];
   return {
     key,
@@ -345,18 +499,18 @@ function elementCase(
     objective:
       `Open ${pageName} and confirm ${check.description} — a structural element check that must hold on every rendered page for the console to be usable and accessible.`,
     description:
-      `${options.signedIn ? 'Sign in as the demo operator and navigate to' : 'Navigate to'} {{web}}${path}; then run the specific element check: ${check.description}. If the check fails, the page is missing a baseline UI structure a reader or screen reader expects.`,
+      `${options.signedIn ? `Sign in as the ${options.admin ? 'administrator' : 'demo operator'} and navigate to` : 'Navigate to'} {{web}}${path}; then run the specific element check: ${check.description}. If the check fails, the page is missing a baseline UI structure a reader or screen reader expects.`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
     severity: 'low',
     priority: 'p3',
-    preconditions: options.signedIn ? 'Sand Bench web and API containers up; demo operator identity enabled.' : 'Sand Bench web container up.',
+    preconditions: options.signedIn ? `Sand Bench web and API containers up; ${options.admin ? 'administrator' : 'demo operator'} identity enabled.` : 'Sand Bench web container up.',
     steps,
-    timeoutSeconds: options.signedIn ? 60 : 30,
+    timeoutSeconds: options.signedIn ? 90 : 30,
     validationRules: UI_RULES,
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:accessibility', 'cat:elements', `elem:${check.name.split(' ').join('-').toLowerCase()}`, options.signedIn ? 'signed-in' : 'public'],
-    dataProfile: options.signedIn ? SIGNIN_DATA : PUBLIC_READ,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:accessibility', 'cat:elements', `elem:${check.name.split(' ').join('-').toLowerCase()}`, options.signedIn ? 'signed-in' : 'public', ...(options.admin ? ['as-admin'] : [])],
+    dataProfile: options.signedIn ? (options.admin ? ADMIN_DATA : SIGNIN_DATA) : PUBLIC_READ,
     expected: `${pageName} passes the "${check.name}" element check.`,
   };
 }
@@ -371,7 +525,8 @@ const ELEMENT_CHECKS: Array<{ code: string; name: string; description: string; s
     code: 'TITLE',
     name: 'page has a title',
     description: 'the <title> element exists and carries non-empty text',
-    step: { action: 'wait_for', selector: 'title', timeout_ms: 10000, description: 'the <title> tag is present' },
+    // A <title> is never drawn on the page, so it is looked for in the document, not on screen.
+    step: { action: 'wait_for', selector: 'head > title:not(:empty)', state: 'attached', timeout_ms: 10000, description: 'the <title> tag is present and not empty', text: 'Check the page has a browser-tab title with text in it' },
   },
   {
     code: 'HEADING',
@@ -410,14 +565,16 @@ function visualSnapshot(
   key: string,
   path: string,
   pageName: string,
-  options: { signedIn?: boolean; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; browserLabel?: string; browserTag?: string; browserNote?: string } = {}
+  options: { signedIn?: boolean; admin?: boolean; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; browserLabel?: string; browserTag?: string; browserNote?: string } = {}
 ): CaseDef {
   const browser = options.browser || 'chromium';
   const browserLabel = options.browserLabel || browser;
   const browserTag = options.browserTag || `browser:${browser}`;
   const browserNote = options.browserNote ? ` ${options.browserNote}` : '';
+  // The picture is taken of the page that was asked for: its own title and heading are
+  // confirmed first, so a sign-in page or a "not found" page is never stored as evidence.
   const steps = options.signedIn
-    ? [...CONSOLE_SIGNIN, { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${pageName}` }, { action: 'wait', value: '2000', description: 'let the page settle before the snapshot' }, { action: 'screenshot', value: `visual-${key.toLowerCase()}`, description: `capture ${pageName} in ${browserLabel}` }]
+    ? [...signInFor(options.admin), { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${pageName}` }, ...pageIdentitySteps(path, pageName), { action: 'wait', value: '1000', description: 'let the page settle before the snapshot' }, { action: 'screenshot', value: `visual-${key.toLowerCase()}`, description: `capture ${pageName} in ${browserLabel}` }]
     : [{ action: 'navigate', value: `{{web}}${path}`, description: `open ${pageName}` }, { action: 'wait', value: '1500', description: 'let the page settle' }, { action: 'screenshot', value: `visual-${key.toLowerCase()}`, description: `capture ${pageName} in ${browserLabel}` }];
   return {
     key,
@@ -425,18 +582,18 @@ function visualSnapshot(
     objective:
       `Capture a Playwright screenshot of ${pageName} in ${browserLabel} as evidence — a reviewer can diff the image across browsers and across runs to spot visual regressions in colors, spacing, labels, buttons and tooltips until automated baseline-diff is wired.`,
     description:
-      `${options.signedIn ? 'Sign in as the demo operator and open' : 'Open'} {{web}}${path} in ${browserLabel} at the standard viewport, let the page settle, and capture a screenshot of the first viewport as evidence. True baseline-diff visual regression is a tracked follow-up (docs/E2E-GUI-COVERAGE-STATUS.md).`,
+      `${options.signedIn ? `Sign in as the ${options.admin ? 'administrator' : 'demo operator'} and open` : 'Open'} {{web}}${path} in ${browserLabel} at the standard viewport, ${options.signedIn ? 'confirm its own title and heading, ' : ''}let the page settle, and capture a screenshot of the first viewport as evidence. True baseline-diff visual regression is a tracked follow-up (docs/E2E-GUI-COVERAGE-STATUS.md).`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
     severity: 'low',
     priority: 'p3',
-    preconditions: `${options.signedIn ? 'Sand Bench web and API up; demo operator identity enabled.' : 'Sand Bench web container up.'}${browserNote}`,
+    preconditions: `${options.signedIn ? `Sand Bench web and API up; ${options.admin ? 'administrator' : 'demo operator'} identity enabled.` : 'Sand Bench web container up.'}${browserNote}`,
     steps,
-    timeoutSeconds: options.signedIn ? 60 : 30,
+    timeoutSeconds: options.signedIn ? 90 : 30,
     validationRules: { browser, viewport: { width: 1440, height: 1000 } },
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:visual', 'elem:screenshot', browserTag, options.signedIn ? 'signed-in' : 'public'],
-    dataProfile: options.signedIn ? SIGNIN_DATA : PUBLIC_READ,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:visual', 'elem:screenshot', browserTag, options.signedIn ? 'signed-in' : 'public', ...(options.admin ? ['as-admin'] : [])],
+    dataProfile: options.signedIn ? (options.admin ? ADMIN_DATA : SIGNIN_DATA) : PUBLIC_READ,
     expected: `${pageName} snapshot in ${browserLabel} is captured.`,
     flakinessNotes: 'This is a human-review snapshot. A baseline-diff visual regression needs a baseline store + diff tool, tracked in docs/E2E-GUI-COVERAGE-STATUS.md.',
   };
@@ -456,7 +613,7 @@ function responsiveCase(
   path: string,
   humanName: string,
   viewport: { width: number; height: number; label: string },
-  options: { signedIn?: boolean; assertText?: string; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; browserLabel?: string; vpTag?: string; browserTag?: string; browserNote?: string } = {}
+  options: { signedIn?: boolean; admin?: boolean; proof?: string; assertText?: string; browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'edge' | 'safari'; browserLabel?: string; vpTag?: string; browserTag?: string; browserNote?: string } = {}
 ): CaseDef {
   const browser = options.browser || 'chromium';
   // Browser is in the name as well as the key: three browser siblings at the
@@ -471,9 +628,10 @@ function responsiveCase(
     : { action: 'wait_for', selector: 'body', timeout_ms: 10000, description: 'the body is painted' };
   const steps = options.signedIn
     ? [
-        ...CONSOLE_SIGNIN,
+        ...signInFor(options.admin),
         { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to ${humanName} after sign-in` },
         ...pageIdentitySteps(path, humanName),
+        ...proofSteps(options.proof),
         { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is not shown — operator reached the page' },
         { action: 'assert_no_horizontal_overflow', description: 'no horizontal scrolling needed at this viewport' },
       ]
@@ -494,12 +652,12 @@ function responsiveCase(
     method: 'playwright',
     severity: 'low',
     priority: 'p3',
-    preconditions: `Sand Bench web container up${options.signedIn ? '; demo operator identity enabled' : ''}; the worker has ${browserLabel} available.${browserNote}`,
+    preconditions: `Sand Bench web container up${options.signedIn ? `; ${options.admin ? 'administrator' : 'demo operator'} identity enabled` : ''}; the worker has ${browserLabel} available.${browserNote}`,
     steps,
-    timeoutSeconds: options.signedIn ? 60 : 30,
+    timeoutSeconds: options.signedIn ? 120 : 30,
     validationRules: { browser, viewport: { width: viewport.width, height: viewport.height } },
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:responsive', vpTag, browserTag, options.signedIn ? 'signed-in' : 'public'],
-    dataProfile: options.signedIn ? SIGNIN_DATA : PUBLIC_READ,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:responsive', vpTag, browserTag, options.signedIn ? 'signed-in' : 'public', ...(options.admin ? ['as-admin'] : [])],
+    dataProfile: options.signedIn ? (options.admin ? ADMIN_DATA : SIGNIN_DATA) : PUBLIC_READ,
     expected: `${humanName} renders at ${viewport.width}x${viewport.height} without horizontal overflow in ${browserLabel}.`,
   };
 }
@@ -525,7 +683,7 @@ function responsiveCase(
  * served; richer "the UC's control X is visible and does Y" needs the
  * sidebar back and real selector discovery per screen.
  */
-function ucGuiAvailability(ucId: string, path: string, humanName: string, options: { publicPage?: boolean; controls?: number } = {}): CaseDef {
+function ucGuiAvailability(ucId: string, path: string, humanName: string, options: { publicPage?: boolean; controls?: number; admin?: boolean; proof?: string } = {}): CaseDef {
   const controlsNote = options.controls && options.controls > 0
     ? ` This UC lists ${options.controls} GUI control${options.controls === 1 ? '' : 's'} in its handbook; checking the specific controls is deferred until the Sand Bench sidebar bundle is restored and real selectors are discovered.`
     : '';
@@ -535,9 +693,10 @@ function ucGuiAvailability(ucId: string, path: string, humanName: string, option
         ...pageIdentitySteps(path, humanName),
       ]
     : [
-        ...CONSOLE_SIGNIN,
+        ...signInFor(options.admin),
         { action: 'navigate', value: `{{web}}${path}`, description: `deep-link to the ${humanName} screen after sign-in` },
         ...pageIdentitySteps(path, humanName),
+        ...proofSteps(options.proof),
         { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the sign-in gate is not shown — the screen was served' },
       ];
   return {
@@ -546,7 +705,7 @@ function ucGuiAvailability(ucId: string, path: string, humanName: string, option
     objective:
       `Reach the screen for ${ucId} (${humanName}) through the console and confirm it is served — the use case\'s entry point is in place for its actor to use.${controlsNote}`,
     description:
-      `${options.publicPage ? 'Open' : 'Sign in as the demo operator and deep-link to'} {{web}}${path} and confirm ${options.publicPage ? 'the page body is served' : 'the sign-in gate is not shown — the screen was served to the signed-in operator'}. This is the GUI-availability probe for ${ucId}; richer flow coverage lives in sandbench-usecase-flow-cases-batch*.ts.${controlsNote}`,
+      `${options.publicPage ? 'Open' : `Sign in as the ${options.admin ? 'administrator' : 'demo operator'} and deep-link to`} {{web}}${path} and confirm ${options.publicPage ? 'the page body is served' : 'the sign-in gate is not shown — the screen was served to the signed-in operator'}. This is the GUI-availability probe for ${ucId}; richer flow coverage lives in sandbench-usecase-flow-cases-batch*.ts.${controlsNote}`,
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -554,12 +713,12 @@ function ucGuiAvailability(ucId: string, path: string, humanName: string, option
     priority: 'p2',
     preconditions: options.publicPage
       ? 'Sand Bench web container up.'
-      : 'Sand Bench web and API containers up; the demo operator identity is enabled.',
+      : `Sand Bench web and API containers up; the ${options.admin ? 'administrator' : 'demo operator'} identity is enabled.`,
     steps,
-    timeoutSeconds: 60,
+    timeoutSeconds: 90,
     validationRules: UI_RULES,
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:auth', `uc:${ucId}`, options.publicPage ? 'public' : 'signed-in'],
-    dataProfile: options.publicPage ? PUBLIC_READ : SIGNIN_DATA,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'cat:auth', `uc:${ucId}`, options.publicPage ? 'public' : 'signed-in', ...(options.admin ? ['as-admin'] : [])],
+    dataProfile: options.publicPage ? PUBLIC_READ : options.admin ? ADMIN_DATA : SIGNIN_DATA,
     expected: options.publicPage
       ? 'The screen\'s shell is served to an anonymous visitor.'
       : 'The signed-in operator reaches the screen without a gate redirect.',
@@ -780,8 +939,9 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       'Sand Bench web + API up; the demo operator identity ({{username}}) is enabled; an Ollama server (or any OpenAI-compatible endpoint) is reachable at E2E_MODEL_BASE_URL (default http://host.docker.internal:11434/v1) with a tool-call-capable model (default qwen3:4b) for the FIRST run; replays after that need no model.',
     steps: [
       { action: 'navigate', value: '/', description: 'open the Sand Bench console at its root' },
-      { action: 'agent_act', value: 'sign in as the demo operator using the username and password shown on the gate', description: 'ask the agent to sign in using the visible gate form' },
-      { action: 'agent_assert', value: 'the sign-in form is no longer shown on the page', description: 'ask the agent to confirm the gate has gone' },
+      // The sign-in page no longer shows any credentials, so the goal names them.
+      { action: 'agent_act', value: 'sign in: type the username "{{username}}" and the password "{{password}}" into the sign-in form, then press the Login button', description: 'ask the agent to sign in using the visible gate form' },
+      { action: 'agent_assert', value: 'the sign-in form is no longer shown and a navigation menu with an "Overview" entry is visible', description: 'ask the agent to confirm the gate has gone and the console is shown' },
     ],
     // The first-run plan on a cold ollama/qwen3:4b takes several minutes on
     // a shared-CPU host; raise the whole-case budget so the initial plan has
@@ -805,7 +965,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'Open the public Help page as an anonymous visitor and confirm it carries its own title and the word "Help" in the body — a visitor should be able to read it before deciding to sign in.',
     description:
-      'Navigate to {{web}}/help.html in a real browser as an anonymous visitor, with no sign-in. The browser title must contain "Help — GARVIQ Labs Sand Bench" and the body must contain the word "Help".',
+      'Navigate to {{web}}/help.html in a real browser as an anonymous visitor, with no sign-in. The browser title must contain "Help — GAVRIQ Labs Sand Bench" and the body must contain the word "Help".',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -814,7 +974,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     preconditions: 'Sand Bench web container up and serving its static pages on {{web}}.',
     steps: [
       { action: 'navigate', value: '{{web}}/help.html', description: 'open the Help page as an anonymous visitor' },
-      { action: 'assert_title', expected: 'Help — GARVIQ Labs Sand Bench', description: 'the browser title names the Help page' },
+      { action: 'assert_title', expected: 'Help — GAVRIQ Labs Sand Bench', description: 'the browser title names the Help page' },
       { action: 'assert_text', expected: 'Help', description: '"Help" appears in the body of the page' },
     ],
     timeoutSeconds: 30,
@@ -829,7 +989,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'Open the public About page as an anonymous visitor and confirm it carries the product\'s hero line, "Good rules survive bad data." — the first thing a prospect reads.',
     description:
-      'Navigate to {{web}}/about.html in a real browser as an anonymous visitor. The page title must contain "About — GARVIQ Labs" and the body must contain the hero copy "Good rules survive bad data.".',
+      'Navigate to {{web}}/about.html in a real browser as an anonymous visitor. The page title must contain "About — GAVRIQ Labs" and the body must contain the hero copy "Good rules survive bad data.".',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -838,7 +998,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     preconditions: 'Sand Bench web container up and serving its static pages on {{web}}.',
     steps: [
       { action: 'navigate', value: '{{web}}/about.html', description: 'open the About page as an anonymous visitor' },
-      { action: 'assert_title', expected: 'About — GARVIQ Labs', description: 'the browser title names the About page' },
+      { action: 'assert_title', expected: 'About — GAVRIQ Labs', description: 'the browser title names the About page' },
       { action: 'assert_text', expected: 'Good rules survive bad data.', description: 'the hero line is on the page' },
     ],
     timeoutSeconds: 30,
@@ -944,8 +1104,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: 'not-the-right-password', description: 'a wrong password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the gate a moment to react to the refusal' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the sign-in gate is still shown — the attempt was refused' },
+      ...gateSays(MSG_REFUSED),
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -974,8 +1133,9 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'navigate', value: '{{web}}/', description: 'open the console' },
       { action: 'wait_for', selector: '#gate #login', timeout_ms: 15000, description: 'the sign-in gate is shown' },
       { action: 'click', selector: '#gate #login', description: 'Sign in on an empty form' },
-      { action: 'wait', value: '2000', description: 'give the gate a moment to react' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the sign-in gate is still shown' },
+      ...gateSays(MSG_INCOMPLETE),
+      { action: 'wait_for', selector: '#gate #username[aria-invalid="true"]', timeout_ms: 5000, description: 'the username box is marked as missing', text: 'Check the username box is marked as needing a value' },
+      { action: 'wait_for', selector: '#gate #password[aria-invalid="true"]', timeout_ms: 5000, description: 'the password box is marked as missing', text: 'Check the password box is marked as needing a value' },
     ],
     timeoutSeconds: 30,
     validationRules: UI_RULES,
@@ -1009,8 +1169,9 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'navigate', value: '{{web}}/', description: 'reload the console in the same browser session' },
-      { action: 'wait', value: '2000', description: 'give the page time to decide between gate and signed-in state' },
+      { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is drawn again — the application confirmed the same session', text: 'Wait until the console menu appears again' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is still hidden after the reload — session survived' },
+      { action: 'wait_for', selector: '#gate #login', state: 'hidden', timeout_ms: 5000, description: 'the Sign in button is not offered again', text: 'Check the Sign in button is not shown' },
     ],
     timeoutSeconds: 60,
     validationRules: UI_RULES,
@@ -1085,11 +1246,11 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   },
   {
     key: 'SB-E2E-GUI-RESET-UNKNOWN-USERNAME-SHOWS-ERROR',
-    name: 'A reset for an unknown username does not advance to the question step',
+    name: 'A reset for an unknown username is refused without revealing that the name is unknown',
     objective:
-      'In the password-reset flow, enter a username that does not exist and confirm the flow does not advance to the security-question step — the reset stops where it should.',
+      'In the password-reset flow, enter a username that does not exist and confirm the form behaves exactly as it would for a real account — it shows the stock security question — and that sending an answer is refused with the usual message. Nobody can use the reset form to find out which usernames exist, and no password is changed.',
     description:
-      'Open the reset card, type an unknown username ("no-such-user") into #reset-username, click #reset-load-question, and confirm the security-question step (#reset-step-2) is not shown within a short wait — the reset is refused for an unknown identity.',
+      'Open the reset card, type an unknown username ("no-such-user") into #reset-username and click #reset-load-question. The application answers with its stock question ("What is the name of your first pet?") for any name it does not know (apps/api/src/modules/identity.ts, loadSecurityQuestion), so the question step (#reset-step-2) appears. Type any answer and an acceptable new password, click #reset-submit, and confirm #reset-err reads "Invalid credentials" and the reset card stays on screen.',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -1104,8 +1265,17 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'wait_for', selector: '#gate #reset-username', timeout_ms: 10000, description: 'the reset username field is shown' },
       { action: 'type', selector: '#gate #reset-username', value: 'no-such-user', description: 'an unknown username' },
       { action: 'click', selector: '#gate #reset-load-question', description: 'ask for the security question' },
-      { action: 'wait', value: '3000', description: 'give the API a moment to respond' },
-      { action: 'wait_for_hidden', selector: '#gate #reset-step-2', timeout_ms: 5000, description: 'the security-question step did not appear — the reset was refused' },
+      // The application never says whether a name exists: it shows the same stock
+      // question it would for anybody, and refuses only when the answer is sent.
+      { action: 'wait_for', selector: '#gate #reset-step-2', timeout_ms: 15000, description: 'the question step is shown, exactly as it would be for a real account' },
+      { action: 'assert_selector_text', selector: '#gate #reset-question-text', expected: 'What is the name of your first pet?', description: 'the stock question is shown — nothing reveals that the name is unknown' },
+      { action: 'type', selector: '#gate #reset-answer', value: 'not-a-real-answer', description: 'any answer' },
+      { action: 'type', selector: '#gate #reset-new-password', value: 'Reset-Probe-2026-Stage!', description: 'a new password that would be acceptable' },
+      { action: 'click', selector: '#gate #reset-submit', description: 'ask for the password to be reset' },
+      { action: 'wait_for', selector: '#gate #reset-err:has-text("Invalid credentials")', timeout_ms: 15000, description: 'the reset is refused', text: 'Wait until the reset form shows the message "Invalid credentials"' },
+      { action: 'assert_selector_text', selector: '#gate #reset-err', expected: 'Invalid credentials', description: 'the refusal is the same one a wrong answer gets' },
+      { action: 'wait_for', selector: '#gate #reset-card', timeout_ms: 5000, description: 'the reset form is still shown — no password was changed' },
+      { action: 'wait_for_hidden', selector: '#gate #signin-card', timeout_ms: 5000, description: 'the form did not return to sign-in as it does after a successful reset' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1115,7 +1285,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       data: 'Username "no-such-user" that must not exist on the deployment.',
       source: 'Literal in the catalog; no real identity involved.',
     },
-    expected: 'The security-question step stays hidden — the reset did not advance for an unknown username.',
+    expected: 'The stock question is shown, the answer is refused with "Invalid credentials", and the reset form stays on screen.',
   },
   {
     key: 'SB-E2E-GUI-LOGIN-ERROR-SHOWN-ON-REFUSAL',
@@ -1136,8 +1306,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: 'not-the-right-password', description: 'a wrong password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the gate a moment to render the error' },
-      { action: 'assert_selector_count_min', selector: '#gate #login-err', value: '1', description: 'the error area is present on the gate' },
+      ...gateSays(MSG_REFUSED),
+      { action: 'wait_for', selector: '#gate #login-err[role="alert"]', timeout_ms: 5000, description: 'the message sits in the area screen readers announce', text: 'Check the message is in the announced error area' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1178,7 +1348,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'From the About page, click the link to Help and confirm the browser lands on the Help page — the two public pages are linked in both directions and the link works.',
     description:
-      'Open {{web}}/about.html, click the anchor whose href is "/help.html", and confirm the Help page then renders — the title contains "Help — GARVIQ Labs Sand Bench".',
+      'Open {{web}}/about.html, click the anchor whose href is "/help.html", and confirm the Help page then renders — the title contains "Help — GAVRIQ Labs Sand Bench".',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -1190,7 +1360,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'wait_for', selector: 'a[href="/help.html"]', timeout_ms: 10000, description: 'the Help link is shown' },
       { action: 'click', selector: 'a[href="/help.html"]', description: 'click the Help link' },
       { action: 'wait', value: '1500', description: 'let the Help page render' },
-      { action: 'assert_title', expected: 'Help — GARVIQ Labs Sand Bench', description: 'landed on the Help page' },
+      { action: 'assert_title', expected: 'Help — GAVRIQ Labs Sand Bench', description: 'landed on the Help page' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1204,7 +1374,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'From the public pitch page, click the About link and confirm the About page is shown — the pitch page\'s navigation to the longer About write-up works.',
     description:
-      'Open {{web}}/pitch.html, click the anchor whose href is "/about.html", and confirm the About page then renders — its title contains "About — GARVIQ Labs".',
+      'Open {{web}}/pitch.html, click the anchor whose href is "/about.html", and confirm the About page then renders — its title contains "About — GAVRIQ Labs".',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -1216,7 +1386,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'wait_for', selector: 'a[href="/about.html"]', timeout_ms: 10000, description: 'the About link is shown' },
       { action: 'click', selector: 'a[href="/about.html"]', description: 'click the About link' },
       { action: 'wait', value: '1500', description: 'let the About page render' },
-      { action: 'assert_title', expected: 'About — GARVIQ Labs', description: 'landed on the About page' },
+      { action: 'assert_title', expected: 'About — GAVRIQ Labs', description: 'landed on the About page' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1299,7 +1469,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'navigate', value: '{{web}}/overview.html', description: 'deep-link to the Overview page after sign-in' },
-      { action: 'wait', value: '2000', description: 'give the Overview page time to render' },
+      ...pageIdentitySteps('/overview.html', 'Overview'),
+      { action: 'wait_for', selector: '.opsc-crumbs b:has-text("Overview")', timeout_ms: 15000, description: 'the console says the screen on show is Overview', text: 'Check the console names the screen "Overview"' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the sign-in gate is not shown on Overview — the operator stays signed in' },
     ],
     timeoutSeconds: 60,
@@ -1341,9 +1512,14 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   /* Signed-in deep links — one case per operator page                      */
   /* ---------------------------------------------------------------------- */
 
-  signedInPage('SB-E2E-GUI-SIGNED-IN-ADMIN', '/configuration-users.html', 'Users'),
-  signedInPage('SB-E2E-GUI-SIGNED-IN-AGENTS', '/agents.html', 'Agents'),
-  signedInPage('SB-E2E-GUI-SIGNED-IN-SCHEME-DEFINITIONS', '/scheme-definitions.html', 'Scheme Definitions'),
+  // Users is now a tab of User management, which only the administrator may read.
+  signedInPage('SB-E2E-GUI-SIGNED-IN-ADMIN', '/configuration-users.html', 'Users', { admin: true, proof: '#ta-rows tr' }),
+  // The Agents page was removed from the application: its old address now answers with the
+  // application's own "Page not found" page, signed in or not. The case keeps its key and
+  // checks exactly that, so a stale bookmark is seen to be handled, not silently broken.
+  retiredPage('SB-E2E-GUI-SIGNED-IN-AGENTS', '/agents.html', 'Agents', { signedIn: true }),
+  // Scheme definitions moved from its own document into the console.
+  signedInPage('SB-E2E-GUI-SIGNED-IN-SCHEME-DEFINITIONS', '/?page=schemeDefinitions', 'Scheme Definitions'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-TEST-CASES', '/test-cases.html', 'Test cases'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-TEST-CASE-FORM', '/test-case-form.html', 'Test case form'),
   signedInPage('SB-E2E-GUI-SIGNED-IN-TEST-SUITES', '/test-suites.html', 'Test suites'),
@@ -1427,7 +1603,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'After a sign-in with a wrong password, confirm the username field is still shown and still accepts typing — the operator can correct their mistake and try again without reloading the page.',
     description:
-      'Open {{web}}/, type the demo username, type a wrong password, click Sign in, wait for the refusal, then type a different value into the username field and confirm the field keeps the new value.',
+      'Open {{web}}/, type the demo username, type a wrong password, click Sign in and wait for the refusal. The username field and the Sign in button must be usable again; the operator then clears the username and clicks Sign in, and the form must react to the change by asking for a username ("Enter a username and password.", username box marked).',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -1440,10 +1616,13 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: 'not-the-right-password', description: 'a wrong password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the refusal time to render' },
-      { action: 'wait_for', selector: '#gate #username', timeout_ms: 5000, description: 'the username field is still on the gate' },
-      { action: 'type', selector: '#gate #username', value: 'another-attempt', description: 'the operator corrects their typing' },
-      { action: 'wait_for', selector: '#gate #username', timeout_ms: 3000, description: 'the field is still responsive' },
+      ...gateSays(MSG_REFUSED),
+      { action: 'wait_for', selector: '#gate #username:not([disabled])', timeout_ms: 5000, description: 'the username field is still on the gate and can be typed into' },
+      { action: 'wait_for', selector: '#gate #login:not([disabled])', timeout_ms: 5000, description: 'the Sign in button is ready for another attempt' },
+      { action: 'type', selector: '#gate #username', value: '', description: 'the operator clears the username to correct it' },
+      { action: 'click', selector: '#gate #login', description: 'Sign in again with the username now empty' },
+      ...gateSays(MSG_INCOMPLETE),
+      { action: 'wait_for', selector: '#gate #username[aria-invalid="true"]', timeout_ms: 5000, description: 'the form took the new (empty) username — it asks for one', text: 'Check the username box is marked as needing a value' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1555,8 +1734,22 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       'Sand Bench web and API containers up; the demo operator identity ({{username}}) exists; an Ollama endpoint is reachable at E2E_MODEL_BASE_URL for the FIRST run.',
     steps: [
       { action: 'navigate', value: '/', description: 'open the sign-in gate' },
-      { action: 'agent_act', value: 'try to sign in as the demo operator but use the password "not-the-right-password" instead of the real one', description: 'ask the agent to attempt a wrong-password sign-in' },
-      { action: 'agent_assert', value: 'the sign-in form is still shown — the console refused to sign the operator in', description: 'ask the agent to confirm the refusal' },
+      { action: 'agent_act', value: 'try to sign in: type the username "{{username}}" and the password "not-the-right-password" into the sign-in form, then press the Login button', description: 'ask the agent to attempt a wrong-password sign-in' },
+      { action: 'agent_assert', value: 'the sign-in form is still shown and it displays the message "Sign-in failed. Check the username and password."', description: 'ask the agent to confirm the refusal' },
+    ],
+    // One wrong password counts against the operator's account; a correct sign-in afterwards
+    // clears it, so the next case starts from the same state this one did.
+    cleanupSteps: [
+      {
+        action: 'request',
+        method: 'POST',
+        url: '{{api}}/api/v1/session/login',
+        body: { username: '{{username}}', password: '{{password}}' },
+        expected_status: 200,
+        description: 'restore the sign-in failure count: the operator signs in correctly',
+        text: 'Sign in correctly as the same operator, so the wrong password used above no longer counts against the account',
+        expected: 'The sign-in is accepted; the account is back to no failed attempts.',
+      },
     ],
     timeoutSeconds: 900,
     tags: ['e2e-gui', 'sand-bench', 'tester-army', 'agent', 'natural-language', 'ollama', 'negative'],
@@ -1593,8 +1786,9 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '<script>window.sbXss=1</script>', description: 'a script-tag payload as the username' },
       { action: 'type', selector: '#gate #password', value: 'anything', description: 'any password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the console time to react' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the gate is still shown — not navigated away by an injection' },
+      ...gateSays(MSG_REFUSED),
+      { action: 'wait_for', selector: '#gate script', state: 'detached', timeout_ms: 5000, description: 'the payload was not turned into a script element inside the sign-in form', text: 'Check no script element was added to the sign-in form' },
+      { action: 'assert_title', expected: 'Sand Bench · GAVRIQ Labs', description: 'still on the sign-in page — nothing navigated away' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1625,8 +1819,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: "' OR 1=1 --", description: 'a SQL-injection payload as the username' },
       { action: 'type', selector: '#gate #password', value: 'anything', description: 'any password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the console time to react' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the gate is still shown — the injection was refused' },
+      ...gateSays(MSG_REFUSED),
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1657,8 +1850,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '   ', description: 'three spaces as the username' },
       { action: 'type', selector: '#gate #password', value: 'anything', description: 'any password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '2000', description: 'give the gate a moment to react' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the gate is still shown' },
+      ...gateSays(MSG_INCOMPLETE),
+      { action: 'wait_for', selector: '#gate #username[aria-invalid="true"]', timeout_ms: 5000, description: 'the username box is marked as missing — spaces do not count as a name', text: 'Check the username box is marked as needing a value' },
     ],
     timeoutSeconds: 30,
     validationRules: UI_RULES,
@@ -1689,8 +1882,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'the demo username' },
       { action: 'type', selector: '#gate #password', value: '   ', description: 'three spaces as the password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '2000', description: 'give the gate a moment to react' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the gate is still shown' },
+      ...gateSays(MSG_REFUSED),
     ],
     timeoutSeconds: 30,
     validationRules: UI_RULES,
@@ -1779,7 +1971,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'demo operator password' },
       { action: 'press_key', selector: '#gate #password', value: 'Enter', description: 'press Enter in the password field' },
-      { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'the gate hides — the Enter key submitted the form' },
+      ...CONSOLE_SHOWN,
     ],
     timeoutSeconds: 60,
     validationRules: UI_RULES,
@@ -1795,7 +1987,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'Type a password, reload the page, and confirm the password field is empty afterwards — a reload must not keep a password visible to the next operator at the same screen.',
     description:
-      'Open {{web}}/, type a password into #gate #password, reload the page by navigating to {{web}}/, then confirm the password field is present and empty — the browser should not persist the value past a reload.',
+      'Open {{web}}/, type a password into #gate #password, reload the page by navigating to {{web}}/, then type only a username and press Sign in. The form must answer "Enter a username and password." and mark the password box as missing — its own proof that nothing was kept in the password box across the reload.',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -1808,7 +2000,13 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #password', value: 'not-a-real-password', description: 'any password' },
       { action: 'navigate', value: '{{web}}/', description: 'reload the console' },
       { action: 'wait_for', selector: '#gate #password', timeout_ms: 15000, description: 'the password field is shown after the reload' },
-      { action: 'wait_for', selector: '#gate #password:not([value])', timeout_ms: 5000, description: 'the password field is empty — no value attribute lingers from the previous visit' },
+      // The form itself says whether the password box is empty: with a name typed and
+      // nothing in the password box it asks for a password instead of trying to sign in.
+      { action: 'type', selector: '#gate #username', value: 'reload-check', description: 'a made-up name, so only the password box is in question' },
+      { action: 'click', selector: '#gate #login', description: 'Sign in without retyping the password' },
+      ...gateSays(MSG_INCOMPLETE),
+      { action: 'wait_for', selector: '#gate #password[aria-invalid="true"]', timeout_ms: 5000, description: 'the password box is marked as missing — nothing was kept from before the reload', text: 'Check the password box is marked as needing a value' },
+      { action: 'wait_for', selector: '#gate #username:not([aria-invalid="true"])', timeout_ms: 5000, description: 'only the password is asked for', text: 'Check the username box is not marked' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -1932,13 +2130,18 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     priority: 'p3',
     preconditions: 'Sand Bench web container up.',
     steps: [
+      // The page fills its family list from the application's catalogue, which answers
+      // signed-in users only — so the operator signs in first and the list is waited for.
+      ...CONSOLE_SIGNIN,
       { action: 'navigate', value: '{{web}}/reference.html', description: 'open the reference page' },
+      ...pageIdentitySteps('/reference.html', 'ISO 20022 reference'),
+      { action: 'wait_for', selector: 'body:has-text("pacs.008")', timeout_ms: 20000, description: 'the family list has been filled in', text: 'Wait until the page lists the pacs.008 message' },
       { action: 'assert_text', expected: 'pacs.008', description: 'the pacs.008 message family is on the page' },
     ],
-    timeoutSeconds: 30,
+    timeoutSeconds: 90,
     validationRules: UI_RULES,
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'public', 'content', 'iso20022'],
-    dataProfile: PUBLIC_READ,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'signed-in', 'content', 'iso20022'],
+    dataProfile: SIGNIN_DATA,
     expected: 'The reference page body contains "pacs.008".',
   },
   {
@@ -2047,10 +2250,10 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
 
   browserCompat('SB-E2E-GUI-GATE-ON-FIREFOX', '/', 'firefox', 'Sand Bench', 'Sign in'),
   browserCompat('SB-E2E-GUI-GATE-ON-WEBKIT', '/', 'webkit', 'Sand Bench', 'Sign in'),
-  browserCompat('SB-E2E-GUI-ABOUT-ON-FIREFOX', '/about.html', 'firefox', 'About — GARVIQ Labs', 'Good rules survive bad data.'),
-  browserCompat('SB-E2E-GUI-ABOUT-ON-WEBKIT', '/about.html', 'webkit', 'About — GARVIQ Labs', 'Good rules survive bad data.'),
-  browserCompat('SB-E2E-GUI-HELP-ON-FIREFOX', '/help.html', 'firefox', 'Help — GARVIQ Labs Sand Bench', 'Help'),
-  browserCompat('SB-E2E-GUI-HELP-ON-WEBKIT', '/help.html', 'webkit', 'Help — GARVIQ Labs Sand Bench', 'Help'),
+  browserCompat('SB-E2E-GUI-ABOUT-ON-FIREFOX', '/about.html', 'firefox', 'About — GAVRIQ Labs', 'Good rules survive bad data.'),
+  browserCompat('SB-E2E-GUI-ABOUT-ON-WEBKIT', '/about.html', 'webkit', 'About — GAVRIQ Labs', 'Good rules survive bad data.'),
+  browserCompat('SB-E2E-GUI-HELP-ON-FIREFOX', '/help.html', 'firefox', 'Help — GAVRIQ Labs Sand Bench', 'Help'),
+  browserCompat('SB-E2E-GUI-HELP-ON-WEBKIT', '/help.html', 'webkit', 'Help — GAVRIQ Labs Sand Bench', 'Help'),
   browserCompat('SB-E2E-GUI-NOT-PRODUCTION-ON-FIREFOX', '/not-production.html', 'firefox', 'Not production — Sand Bench', 'Sand Bench'),
   browserCompat('SB-E2E-GUI-NOT-PRODUCTION-ON-WEBKIT', '/not-production.html', 'webkit', 'Not production — Sand Bench', 'Sand Bench'),
 
@@ -2115,8 +2318,10 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     steps: [
       ...CONSOLE_SIGNIN,
       { action: 'navigate', value: '{{web}}/', description: 'first reload' },
+      { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is drawn again after the first reload', text: 'Wait until the console menu appears again' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'gate still hidden after first reload' },
       { action: 'navigate', value: '{{web}}/', description: 'second reload' },
+      { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is drawn again after the second reload', text: 'Wait until the console menu appears a second time' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'gate still hidden after second reload' },
     ],
     timeoutSeconds: 60,
@@ -2143,6 +2348,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'navigate', value: '{{web}}/about.html', description: 'visit the About page while signed in' },
       { action: 'assert_text', expected: 'Good rules survive bad data.', description: 'the About page rendered' },
       { action: 'navigate', value: '{{web}}/', description: 'return to the console' },
+      { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is drawn — the operator is still signed in', text: 'Wait until the console menu appears again' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is still hidden — the operator is still signed in' },
     ],
     timeoutSeconds: 60,
@@ -2204,7 +2410,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'demo operator password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'the gate hides — sign-in finished the journey' },
+      ...CONSOLE_SHOWN,
     ],
     timeoutSeconds: 120,
     validationRules: UI_RULES,
@@ -2231,11 +2437,11 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: 'not-the-right-password', description: 'a wrong password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in (will be refused)' },
-      { action: 'wait', value: '3000', description: 'wait for the refusal' },
-      { action: 'wait_for', selector: '#gate #login', timeout_ms: 5000, description: 'the gate is still shown — first attempt refused' },
+      ...gateSays(MSG_REFUSED),
+      { action: 'wait_for', selector: '#gate #login:not([disabled])', timeout_ms: 5000, description: 'the Sign in button is ready for another attempt' },
       { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'the real demo password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in again, this time correctly' },
-      { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'the gate hides on the second attempt' },
+      ...CONSOLE_SHOWN,
     ],
     timeoutSeconds: 90,
     validationRules: UI_RULES,
@@ -2266,7 +2472,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'demo operator password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'the gate hides — signed in after abandoning reset' },
+      ...CONSOLE_SHOWN,
     ],
     timeoutSeconds: 90,
     validationRules: UI_RULES,
@@ -2288,16 +2494,21 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     priority: 'p2',
     preconditions: 'Sand Bench web and API up; demo identity enabled; the Overview and Admin pages are served to signed-in operators.',
     steps: [
-      ...CONSOLE_SIGNIN,
+      // Users is an administration screen: only the administrator can walk this whole path.
+      ...ADMIN_SIGNIN,
       { action: 'navigate', value: '{{web}}/overview.html', description: 'deep-link to Overview' },
+      ...pageIdentitySteps('/overview.html', 'Overview'),
+      { action: 'wait_for', selector: '.opsc-sidebar', timeout_ms: 30000, description: 'the console menu is drawn on Overview — still signed in', text: 'Wait until the console menu appears' },
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is hidden on Overview' },
       { action: 'navigate', value: '{{web}}/configuration-users.html', description: 'deep-link to Users' },
+      ...pageIdentitySteps('/configuration-users.html', 'Users'),
+      ...proofSteps('#ta-rows tr'),
       { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 10000, description: 'the gate is hidden on Admin — session carried over' },
     ],
-    timeoutSeconds: 90,
+    timeoutSeconds: 120,
     validationRules: UI_RULES,
-    tags: ['e2e-gui', 'sand-bench', 'playwright', 'journey', 'deep-link'],
-    dataProfile: SIGNIN_DATA,
+    tags: ['e2e-gui', 'sand-bench', 'playwright', 'journey', 'deep-link', 'as-admin'],
+    dataProfile: ADMIN_DATA,
     expected: 'The operator reaches Overview AND Admin without re-signing-in.',
   },
 
@@ -2346,12 +2557,15 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     preconditions:
       'Sand Bench web container up; an Ollama endpoint is reachable at E2E_MODEL_BASE_URL for the FIRST run.',
     steps: [
+      // The reference page fills its list for signed-in users only, so the agent signs in first.
+      { action: 'navigate', value: '/', description: 'open the sign-in page' },
+      { action: 'agent_act', value: 'sign in: type the username "{{username}}" and the password "{{password}}" into the sign-in form, then press the Login button', description: 'ask the agent to sign in' },
       { action: 'navigate', value: '/reference.html', description: 'open the reference page' },
       { action: 'agent_assert', value: 'the reference page lists at least one ISO 20022 message family whose name starts with "pacs."', description: 'ask the agent to confirm a pacs-family message is listed' },
     ],
     timeoutSeconds: 900,
-    tags: ['e2e-gui', 'sand-bench', 'tester-army', 'agent', 'natural-language', 'ollama', 'public', 'content'],
-    dataProfile: PUBLIC_READ,
+    tags: ['e2e-gui', 'sand-bench', 'tester-army', 'agent', 'natural-language', 'ollama', 'signed-in', 'content'],
+    dataProfile: SIGNIN_DATA,
     expected: 'The agent reads the page and confirms at least one pacs-family listing.',
     commonFailureCauses:
       'Ollama is not reachable; the chosen model is not tool-call-capable; the reference page lost its pacs listings.',
@@ -2388,8 +2602,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     expected: 'The Help page carries a top heading titled Help.',
   },
   anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-ADMIN', '/configuration-users.html', 'Users'),
-  anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-AGENTS', '/agents.html', 'Agents'),
-  anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-SCHEME-DEFS', '/scheme-definitions.html', 'Scheme Definitions'),
+  retiredPage('SB-E2E-GUI-ANON-BLOCKED-AGENTS', '/agents.html', 'Agents'),
+  anonymousBlockedFrom('SB-E2E-GUI-ANON-BLOCKED-SCHEME-DEFS', '/?page=schemeDefinitions', 'Scheme Definitions'),
   headerCheck('SB-E2E-GUI-GATE-HAS-FRAME-OPTIONS', '/', 'x-frame-options', 'SAMEORIGIN',
     'confirms the browser refuses to render the gate inside a frame on another site, blocking clickjacking.'),
   headerCheck('SB-E2E-GUI-ABOUT-HAS-FRAME-OPTIONS', '/about.html', 'x-frame-options', 'SAMEORIGIN',
@@ -2402,7 +2616,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
     objective:
       'After a refused sign-in, confirm the username field still holds what the operator typed — the operator fixes the password, not re-enters the whole identity.',
     description:
-      'Open {{web}}/, type the demo username and a wrong password, click Sign in, wait for the refusal, then confirm the username field still has the demo username as its value.',
+      'Open {{web}}/, type the demo username and a wrong password, click Sign in and wait for the refusal ("Sign-in failed. Check the username and password."). Then empty the password box and click Sign in again: the form must ask for a password only ("Enter a username and password.", password box marked, username box not marked) — its own proof that the username is still in place.',
     suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
     testType: 'ui',
     method: 'playwright',
@@ -2415,8 +2629,15 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: 'not-the-right-password', description: 'a wrong password' },
       { action: 'click', selector: '#gate #login', description: 'Sign in' },
-      { action: 'wait', value: '3000', description: 'give the refusal time to render' },
-      { action: 'wait_for', selector: `#gate #username[value="{{username}}"]`, timeout_ms: 5000, description: 'the username field still carries what the operator typed' },
+      ...gateSays(MSG_REFUSED),
+      { action: 'wait_for', selector: '#gate #login:not([disabled])', timeout_ms: 5000, description: 'the Sign in button is ready for another attempt' },
+      // The form itself says whether the name is still there: with the password box
+      // emptied it asks for a password only, and leaves the username box unmarked.
+      { action: 'type', selector: '#gate #password', value: '', description: 'empty the password box, leave the username alone' },
+      { action: 'click', selector: '#gate #login', description: 'Sign in with the password box empty' },
+      ...gateSays(MSG_INCOMPLETE),
+      { action: 'wait_for', selector: '#gate #password[aria-invalid="true"]', timeout_ms: 5000, description: 'the password box is the one marked as missing', text: 'Check the password box is marked as needing a value' },
+      { action: 'wait_for', selector: '#gate #username:not([aria-invalid="true"])', timeout_ms: 5000, description: 'the username box is not marked — it still holds what the operator typed', text: 'Check the username box is not marked as missing' },
     ],
     timeoutSeconds: 45,
     validationRules: UI_RULES,
@@ -2495,7 +2716,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       { action: 'type', selector: '#gate #username', value: '{{username}}', description: 'demo operator username' },
       { action: 'type', selector: '#gate #password', value: '{{password}}', description: 'demo operator password' },
       { action: 'press_key', selector: '#gate #username', value: 'Enter', description: 'press Enter in the username field' },
-      { action: 'wait_for_hidden', selector: '#gate', timeout_ms: 20000, description: 'the gate hides' },
+      ...CONSOLE_SHOWN,
     ],
     timeoutSeconds: 60,
     validationRules: UI_RULES,
@@ -2855,8 +3076,40 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
 
   /* ----- cat:localization — language declaration + content language ---- */
 
-  headerCheck('SB-E2E-GUI-LOCALIZATION-CONTENT-LANGUAGE', '/', 'content-language', 'en',
-    'confirms the server declares an English page via the Content-Language response header. If the deployment adds other locales later, this is the hook that proves they are advertised.'),
+  // The application states its language in the page itself (<html lang="en">) and sends no
+  // Content-Language response header (apps/web/nginx.conf.template adds none), so the
+  // declaration is checked where it really is: in the document every visitor is served.
+  {
+    key: 'SB-E2E-GUI-LOCALIZATION-CONTENT-LANGUAGE',
+    name: 'The sign-in page declares English as its content language',
+    objective:
+      'Fetch the sign-in page and confirm the document it serves declares English as its language — browsers, translators and screen readers are told which language the content is in. If other languages are added later, this is the check that shows they are announced.',
+    description:
+      'GET {{web}}/ must answer 200 as HTML whose root element is <html lang="en">. The application declares its content language in the document; it does not send a Content-Language header.',
+    suiteKey: SANDBENCH_E2E_GUI_SUITE.key,
+    testType: 'ui',
+    method: 'http',
+    severity: 'medium',
+    priority: 'p2',
+    preconditions: 'Sand Bench web container up and serving its pages on {{web}}.',
+    steps: [
+      {
+        action: 'request',
+        method: 'GET',
+        url: '{{web}}/',
+        expected_status: 200,
+        expect_headers: [{ name: 'content-type', contains: 'text/html' }],
+        expected_body_contains: '<html lang="en">',
+        description: 'fetch the sign-in page and read its language declaration',
+        text: 'Ask the web console for its sign-in page',
+        expected: 'The page is served, and its first line declares the language as English.',
+      },
+    ],
+    timeoutSeconds: 30,
+    tags: ['e2e-gui', 'sand-bench', 'http', 'cat:localization', 'lang'],
+    dataProfile: PUBLIC_READ,
+    expected: 'The sign-in page is served with English declared as its language.',
+  },
 
   /* ----- cat:component — DOCUMENTED NOT APPLICABLE in this engine ----- */
   /* The engine's catalog model drives real-browser full-page cases through  */
@@ -2910,7 +3163,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   ucGuiAvailability('UC-configurationEnvironmentDefaults', '/configuration-environment-defaults.html', 'Configuration · Environment defaults'),
   ucGuiAvailability('UC-configurationEventing', '/configuration-eventing.html', 'Configuration · Eventing', { controls: 3 }),
   ucGuiAvailability('UC-configurationNotifications', '/configuration-notifications.html', 'Configuration · Notifications'),
-  ucGuiAvailability('UC-configurationUserRoles', '/configuration-user-roles.html', 'Configuration · User roles'),
+  ucGuiAvailability('UC-configurationUserRoles', '/configuration-user-roles.html', 'Configuration · User roles', { admin: true, proof: '#tar-rows tr' }),
 
   // Datasets
   ucGuiAvailability('UC-dsAll', '/datasets.html', 'Datasets · All'),
@@ -2925,7 +3178,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
 
   // Message schema / data files / imports / exports
   ucGuiAvailability('UC-msgCreateSchema', '/create-schema.html', 'Create schema', { controls: 3 }),
-  ucGuiAvailability('UC-msgImportSchema', '/imported-schemes.html', 'Import schema (operator reaches it from Imported schemes)', { controls: 2 }),
+  ucGuiAvailability('UC-msgImportSchema', '/?page=msgImportSchema', 'Import schema (Message Schemes > Import Scheme in the console)', { controls: 2 }),
   ucGuiAvailability('UC-msgSchemaCanvas', '/schema-canvas.html', 'Schema canvas', { controls: 3 }),
   ucGuiAvailability('UC-msgSchemaRegister', '/message-designer-schema-register.html', 'Schema register'),
   ucGuiAvailability('UC-msgViewSaved', '/message-designer-saved.html', 'View saved definitions'),
@@ -2942,7 +3195,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
 
   // Scheme definitions (served via nginx rewrite — the route resolves even
   // though no static /scheme-definitions.html lives in the html dir).
-  ucGuiAvailability('UC-schemeDefinitions', '/scheme-definitions.html', 'Scheme Definitions'),
+  ucGuiAvailability('UC-schemeDefinitions', '/?page=schemeDefinitions', 'Scheme Definitions'),
 
   // Reports (deployment uses /reports-* URLs, not /rep-*)
   ucGuiAvailability('UC-repAll', '/reports-all.html', 'Reports · All'),
@@ -2973,10 +3226,10 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   ucGuiAvailability('UC-useCaseTemplates', '/use-case-templates.html', 'Use case templates'),
 
   // Users and roles (operator surfaces live under Configuration)
-  ucGuiAvailability('UC-users', '/configuration-users.html', 'Users (admin surface under Configuration)'),
-  ucGuiAvailability('UC-userCreate', '/configuration-users.html', 'Create user (modal on Configuration · Users)'),
-  ucGuiAvailability('UC-roles', '/configuration-user-roles.html', 'Roles (admin surface under Configuration)'),
-  ucGuiAvailability('UC-roleCreate', '/configuration-user-roles.html', 'Create role (modal on Configuration · User roles)'),
+  ucGuiAvailability('UC-users', '/configuration-users.html', 'Users (tab of User management under Configuration)', { admin: true, proof: '#ta-rows tr' }),
+  ucGuiAvailability('UC-userCreate', '/configuration-users.html', 'Create user (on the Users tab of User management)', { admin: true, proof: '#ta-rows tr' }),
+  ucGuiAvailability('UC-roles', '/configuration-user-roles.html', 'Roles (tab of User management under Configuration)', { admin: true, proof: '#tar-rows tr' }),
+  ucGuiAvailability('UC-roleCreate', '/configuration-user-roles.html', 'Create role (on the User roles tab of User management)', { admin: true, proof: '#tar-rows tr' }),
 
   /* ---------------------------------------------------------------------- */
   /* Remaining HTML pages the Sand Bench deployment serves that no UC in    */
@@ -3090,6 +3343,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
           { width: v.width, height: v.height, label: v.label },
           {
             signedIn: !p.publicPage,
+            admin: p.admin,
+            proof: p.proof,
             assertText: p.assertText,
             vpTag: v.tag,
             browser: b.name,
@@ -3113,7 +3368,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         p.path,
         p.name,
         c,
-        { signedIn: !p.publicPage }
+        { signedIn: !p.publicPage, admin: p.admin }
       )
     )
   ),
@@ -3130,6 +3385,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         p.name,
         {
           signedIn: !p.publicPage,
+          admin: p.admin,
           browser: b.name,
           browserLabel: b.label,
           browserTag: b.tag,
@@ -3154,7 +3410,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       objective: string;
       description: string;
       selector: string;
-      step: Record<string, unknown>;
+      step: Record<string, unknown> | Array<Record<string, unknown>>;
       severity: CaseDef['severity'];
       priority: CaseDef['priority'];
       elemTag: string;
@@ -3166,7 +3422,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         objective: 'Confirm the username input on the gate carries autocomplete="username" — password managers and the browser\'s built-in credential helper need this to offer the right identity.',
         description: 'Open {{web}}/, locate the gate\'s username field, and confirm its autocomplete attribute is "username".',
         selector: '#gate #username',
-        step: { action: 'assert_attribute', selector: '#gate #username', value: 'autocomplete', expected: 'username', description: 'autocomplete="username" is set' },
+        step: { action: 'wait_for', selector: '#gate #username[autocomplete="username"]', timeout_ms: 5000, description: 'autocomplete="username" is set', text: 'Check the username box is marked as a username for password managers' },
         severity: 'medium',
         priority: 'p2',
         elemTag: 'elem:autocomplete',
@@ -3177,18 +3433,23 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         objective: 'Confirm the password input on the gate carries autocomplete="current-password" — password managers must know to offer the stored password here, not a new one.',
         description: 'Open {{web}}/, locate the gate\'s password field, and confirm its autocomplete attribute is "current-password".',
         selector: '#gate #password',
-        step: { action: 'assert_attribute', selector: '#gate #password', value: 'autocomplete', expected: 'current-password', description: 'autocomplete="current-password" is set' },
+        step: { action: 'wait_for', selector: '#gate #password[type="password"][autocomplete="current-password"]', timeout_ms: 5000, description: 'autocomplete="current-password" is set on the masked password box', text: 'Check the password box is marked as the current password for password managers' },
         severity: 'medium',
         priority: 'p2',
         elemTag: 'elem:autocomplete',
       },
       {
         code: 'LOGIN-BUTTON-TYPE',
-        name: 'The Sign in button is a submit button, not a plain button',
-        objective: 'Confirm the Sign in button has type="submit" or is a submit input — Enter in a form field must submit through the standard mechanism, not a JavaScript handler alone.',
-        description: 'Open {{web}}/, locate the Sign in button, and confirm its type attribute equals "submit".',
+        name: 'The Sign in control is a real, named button and the Enter key presses it',
+        objective: 'Confirm the Sign in control is a true button that assistive technology announces as "Sign in", and that pressing Enter in the password box sends the form just as a click would — a keyboard-only user can sign in without a mouse.',
+        description: 'Open {{web}}/ and confirm the Sign in control is a <button type="button"> whose accessible name is "Sign in" (the current sign-in page has no <form>; apps/web/public/js/live-bind.js wires both the click and the Enter key to the same sign-in). Then press Enter in the empty password box and confirm the form answers "Enter a username and password." — Enter reached the same handler as the button.',
         selector: '#gate #login',
-        step: { action: 'assert_attribute', selector: '#gate #login', value: 'type', expected: 'submit', description: 'type="submit" is set' },
+        step: [
+          { action: 'wait_for', selector: '#gate button#login[type="button"][aria-label="Sign in"]', timeout_ms: 5000, description: 'the control is a button element named "Sign in"', text: 'Check the Sign in control is a button that is announced as "Sign in"' },
+          { action: 'press_key', selector: '#gate #password', value: 'Enter', description: 'press Enter in the empty password box' },
+          { action: 'wait_for', selector: '#gate #login-err:has-text("Enter a username and password.")', timeout_ms: 10000, description: 'the form answered — Enter pressed the Sign in button', text: 'Wait until the sign-in form shows the message "Enter a username and password."' },
+          { action: 'assert_selector_text', selector: '#gate #login-err', expected: 'Enter a username and password.', description: 'the answer is the one a click on an empty form gets' },
+        ],
         severity: 'medium',
         priority: 'p2',
         elemTag: 'elem:button-type',
@@ -3196,14 +3457,14 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
       {
         code: 'LOGIN-ERROR-ARIA-LIVE',
         name: 'The gate\'s error container announces to screen readers',
-        objective: 'Confirm the sign-in error container has an aria-live attribute — a screen reader must be told when a refusal message appears.',
-        description: 'Open {{web}}/, locate the gate\'s error container, and confirm the aria-live attribute is set (any value — polite or assertive).',
+        objective: 'Confirm the area where the sign-in form writes its refusal message is marked as an alert — a screen reader reads a refusal out the moment it appears.',
+        description: 'Open {{web}}/, locate the gate\'s error container and confirm it carries role="alert" (which assistive technology treats as an assertive live region; the page sets the role rather than a separate aria-live attribute).',
         selector: '#gate #login-err',
-        step: { action: 'assert_attribute_exists', selector: '#gate #login-err', value: 'aria-live', description: 'aria-live is set' },
+        step: { action: 'wait_for', selector: '#gate p#login-err[role="alert"]', state: 'attached', timeout_ms: 5000, description: 'the error area is an alert region', text: 'Check the error area is marked as an alert for screen readers' },
         severity: 'medium',
         priority: 'p2',
         elemTag: 'elem:aria-live',
-        commonFailureCauses: 'The gate does not yet announce errors to assistive tech; add aria-live="polite" to the error container to fix.',
+        commonFailureCauses: 'The error area lost its alert role, so a refusal message is no longer read out by assistive technology.',
       },
       {
         code: 'FORGOT-LINK-HAS-ROLE',
@@ -3232,7 +3493,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         steps: [
           { action: 'navigate', value: '{{web}}/', description: `open the console in ${b.label}` },
           { action: 'wait_for', selector: c.selector, timeout_ms: 15000, description: `the ${c.selector} element is on the page` },
-          c.step,
+          ...(Array.isArray(c.step) ? c.step : [c.step]),
         ],
         timeoutSeconds: 30,
         validationRules: { browser: b.name, viewport: { width: 1440, height: 1000 } },
@@ -3301,7 +3562,11 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
         steps: [
           { action: 'navigate', value: '{{web}}/', description: `open the console in ${b.label}` },
           { action: 'wait_for', selector: c.selector, timeout_ms: 10000, description: `the ${c.selector} element is painted` },
-          { action: 'assert_computed_style_matches', selector: c.selector, value: c.prop, expected: c.regex, description: `${c.prop} on ${c.selector} matches the brand paint check` },
+          // The pattern travels in must_contain as well: the Test cases screen rewrites
+          // `expected` into a sentence, and the runner has to compare against the pattern,
+          // not the sentence (runner change requested 2026-11-14: these style checks read
+          // must_contain first, as the text checks already do).
+          { action: 'assert_computed_style_matches', selector: c.selector, value: c.prop, expected: c.regex, must_contain: c.regex, expected_text: `The ${c.prop} the browser actually applies to it passes the check.`, description: `${c.prop} on ${c.selector} matches the brand paint check`, text: `Read the ${c.prop} the browser applies to ${c.selector === 'body' ? 'the page' : 'the Sign in button'}` },
         ],
         timeoutSeconds: 30,
         validationRules: { browser: b.name, viewport: { width: 1440, height: 1000 } },
