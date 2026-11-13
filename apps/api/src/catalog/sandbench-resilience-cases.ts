@@ -19,6 +19,18 @@
  * Policy changes capture their starting values and verify exact restoration
  * in unconditional cleanup. These application-wide policies require an
  * isolated target when another case could change the same channel.
+ *
+ * STATUS against Sand Bench main (commit a8d72039ae8e, rebaselined 2026-11-13):
+ * the capability is NOT in the application. Neither /api/v1/integrations[/:channel]
+ * nor /api/v1/generated-messages/:id/dispatch is registered (the router answers
+ * 404 "Route … not found"), and nothing in apps/api/src implements a per-channel
+ * policy store. The application team tracks it as improvements/new/IMP-RES001.md
+ * ("ship /api/v1/integrations/* and /api/v1/generated-messages/:id/dispatch"),
+ * whose acceptance criterion is that these very cases pass. They are therefore
+ * kept as the acceptance tests and fail until the capability ships; nothing here
+ * is loosened to make them pass. The one thing aligned with the current build is
+ * the set-up step that stores a generated message: it uses the route that exists
+ * today (POST /api/v1/generated-messages with a batch number of its own).
  */
 import { type CaseDef, type SuiteDef, tagSource } from './types.js';
 
@@ -134,8 +146,8 @@ for (const ch of CHANNELS) {
 C.push({
   key: 'SBE-RES-DISPATCH-MALFORMED-REQUEST',
   name: 'Dispatch rejects a malformed request (no channel) with a clean 400',
-  objective: 'Confirm the dispatch endpoint rejects an obviously invalid body cleanly rather than 5xx.',
-  description: 'POST /api/v1/generated-messages/some-id/dispatch with an empty body returns 400.',
+  objective: 'Confirm that asking for a delivery without saying which channel to use is refused as an invalid request, with a clear reason, rather than failing inside the application.',
+  description: 'POST /api/v1/generated-messages/does-not-exist/dispatch with an empty body (no channel) returns 400 with a validation error. The router\'s own 404 "Route not found" — what the current build answers, because the dispatch route does not exist — is not that refusal and does not pass.',
   suiteKey: SANDBENCH_RESILIENCE_SUITE.key, testType: 'integration', method: 'http',
   severity: 'high', priority: 'p1',
   preconditions: 'Sand Bench feat/portal-features deployed.',
@@ -143,12 +155,13 @@ C.push({
     API_LOGIN,
     { action: 'request', method: 'POST', url: '{{api}}/api/v1/generated-messages/does-not-exist/dispatch',
       headers: BEARER, body: {},
-      expected_status: [400, 404],
-      description: 'dispatch with no channel' },
+      expected_status: 400,
+      expected_body_not_contains: 'Route POST:',
+      description: 'dispatch with no channel is refused as invalid' },
   ],
   tags: ['integration', 'resilience', 'dispatch', 'malformed-request', 'error-handling'],
   dataProfile: { profile: 'adversarial', data: 'An empty request body.', source: 'inline' },
-  expected: '400 (validation) or 404 (unknown id).',
+  expected: '400 (validation: channel is required).',
 });
 
 /* -------------------- retry/timeout/fatal/rollback -------------------- */
@@ -292,13 +305,20 @@ C.push({
 
 for (const c of C) {
   const steps = c.steps as Record<string, any>[];
-  // The supported generation route persists the row and deposits its file.
-  // POST /generated-messages has never been a generation route in this pin.
+  // Storing a generated message: the route the current application has is
+  // POST /api/v1/generated-messages {messageTypeCode, count, seed, batchNumber}
+  // → 200 {stored, batchNumber, ids}. A batch number of the case's own is
+  // required in practice: without one the application reuses its default batch
+  // "B001" and fails internally (500) on every call after the first (defect).
   for (const step of steps) {
     if (step.method === 'POST' && step.url === '{{api}}/api/v1/generated-messages') {
-      step.url = '{{api}}/api/v1/generated-messages/to-ftp';
+      const body = { ...(step.body as Record<string, unknown>) };
+      delete body.filename; // not a field of the generation route
+      step.body = { ...body, batchNumber: `TE-${String(body.seed)}` };
       step.expected_status = 200;
-      step.expect_json = [{ path: 'ok', equals: true }, { path: 'stored', equals: 1 }, { path: 'ids', min_length: 1, max_length: 1 }, { path: 'ids.0', exists: true }];
+      step.expect_json = [{ path: 'stored', equals: 1 }, { path: 'batchNumber', equals: `TE-${String(body.seed)}` }, { path: 'ids', min_length: 1, max_length: 1 }, { path: 'ids.0', exists: true }];
+      step.text = 'Generate and store one test message to deliver';
+      step.expected = 'One message is stored under a batch number unique to this run.';
     }
   }
   const policyUrls = [...new Set(steps.filter(s => s.method === 'PUT' && /\/integrations\/(api|mq|kafka|ftp)$/.test(s.url || '')).map(s => s.url as string))];
@@ -324,12 +344,16 @@ for (const c of C) {
     }
     c.preconditions += ' Use an isolated target: channel policies are application-wide and must not be changed concurrently.';
   }
-  if (steps.some(s => s.method === 'POST' && s.url === '{{api}}/api/v1/generated-messages/to-ftp')) {
+  if (steps.some(s => s.method === 'POST' && s.url === '{{api}}/api/v1/generated-messages')) {
     c.atomicityNote = {
       reason: 'no-cleanup-endpoint',
-      detail: 'The pinned application exposes no delete operation for generated message rows or deposited output through its API. Settings cleanup restores and verifies captured settings, but generated output requires a disposable target; this case does not claim complete baseline restoration.',
+      detail: 'The application exposes no delete operation for a stored generated message. Settings cleanup restores and verifies captured settings; the one generated message sits in a batch of its own that no other case reads. This case does not claim complete baseline restoration.',
     };
   }
+  // Every case here needs the delivery-policy capability, which the current build lacks.
+  c.preconditions = c.preconditions.replace('Sand Bench feat/portal-features deployed', 'The application build includes the delivery-policy capability (per-channel time limit, retries, roll-back and duplicate protection, with the on-demand delivery of a stored message)');
+  c.tags = [...c.tags, 'pending-capability'];
+  c.commonFailureCauses = 'The application build under test does not include the delivery-policy capability: the addresses these steps call do not exist yet, so the application answers "not found". The application team tracks the capability as improvement IMP-RES001; these cases are its acceptance tests.';
 }
 
 export const SANDBENCH_RESILIENCE_CASES: CaseDef[] = tagSource(FILE, C);

@@ -100,13 +100,78 @@ describe('complete Sand Bench catalog', () => {
   });
 
   it('checks the actual event code instead of trusting an ignored filter or an old unrelated event', () => {
-    for (const c of SANDBENCH_EVENT_RT_CASES.filter(c => c.suiteKey === 'sb-event-emission')) {
-      const verification = (c.steps as Step[]).find(step => step.url === '{{api}}/api/v1/events?limit=500');
-      assert.ok(verification, `${c.key}: missing event verification`);
-      const match = verification.expect_json?.find((entry: Step) => entry.some)?.some;
-      assert.ok(match?.eventCode, `${c.key}: no exact event code`);
-      assert.equal(match['actor.userId'], '{{event_actor_id}}', `${c.key}: does not verify its own actor`);
-      assert.deepEqual(match.occurredAt, { at_or_after: '{{ts}}' }, `${c.key}: an older event could satisfy the check`);
+    // What ties the event to THIS case, per event: the person who acted, and the record or
+    // message the case itself just created. A value written as {{name}} must be one an earlier
+    // step of the same case captured. Events nobody is signed in for carry no actor.
+    const tiedTo: Record<string, string[]> = {
+      'biz.session.login.success': ['actor.userId'],
+      'biz.session.login.failure': ['outcome'],
+      'biz.console.bootstrap': ['actor.userId'],
+      'biz.schema.uploaded': ['actor.userId', 'entity.id', 'entity.name'],
+      'biz.file.generated': ['actor.userId'],
+      'biz.run.started': ['actor.userId', 'entity.name', 'telemetry.channel'],
+      'biz.run.completed': ['actor.userId', 'entity.id'],
+      'biz.run.rejected': ['actor.userId', 'entity.name', 'error.code'],
+      'biz.dataset.created': ['actor.userId', 'entity.id'],
+      'biz.case.created': ['actor.userId', 'entity.id'],
+      'biz.suite.created': ['actor.userId', 'entity.id'],
+      'biz.rule.created': ['actor.userId', 'entity.id', 'entity.name'],
+      'biz.eventing.configured': ['actor.userId'],
+      'tec.inbound.accepted': [],
+      'tec.delivery.succeeded': ['entity.name', 'payload.uetr'],
+      'tec.delivery.simulated': ['entity.name', 'payload.uetr'],
+    };
+    const cases = SANDBENCH_EVENT_RT_CASES.filter(c => c.suiteKey === 'sb-event-emission');
+    const codeOf = (key: string) => key.replace(/^SBE-EV-/, '').toLowerCase().replace(/-/g, '.');
+    assert.deepEqual(cases.map(c => codeOf(c.key)).sort(), Object.keys(tiedTo).sort(), 'every event case is pinned here, and nothing else');
+
+    for (const c of cases) {
+      const code = codeOf(c.key);
+      const steps = c.steps as Step[];
+      const verifyIndex = steps.findIndex(step => /\/api\/v1\/events\?/.test(String(step.url)) && step.expect_json?.some((entry: Step) => entry.some));
+      assert.ok(verifyIndex > 0, `${c.key}: missing event verification`);
+      const verification = steps[verifyIndex]!;
+
+      // The event list ignores `code`: it filters on class, screenId, assetId and limit only.
+      const query = new URL(String(verification.url).replace('{{api}}', 'http://application')).searchParams;
+      assert.equal(query.has('code'), false, `${c.key}: relies on a filter the application ignores`);
+      assert.equal(query.get('class'), code.startsWith('tec.') ? 'technical' : 'business', `${c.key}: does not ask for the event's own class`);
+      assert.equal(query.get('limit'), '500', `${c.key}: does not read the widest window`);
+      for (const name of query.keys()) assert.ok(['class', 'screenId', 'assetId', 'limit'].includes(name), `${c.key}: unknown filter ${name}`);
+
+      // One entry must carry the exact code, the time bound and everything that ties it to this case.
+      assert.equal(verification.expect_json.filter((entry: Step) => entry.some).length, 1, `${c.key}: the event must be matched in one entry`);
+      const match = verification.expect_json.find((entry: Step) => entry.some).some;
+      assert.equal(match.eventCode, code, `${c.key}: no exact event code`);
+      const captured = new Set(steps.slice(0, verifyIndex).flatMap(step => Object.keys(step.save || {})));
+      for (const path of tiedTo[code]!) {
+        assert.ok(match[path] !== undefined && match[path] !== '', `${c.key}: does not match ${path}`);
+        for (const [, name] of String(match[path]).matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)) {
+          if (name === 'rand' || name === 'ts') continue;
+          assert.ok(captured.has(name!), `${c.key}: ${path} uses {{${name}}}, which no earlier step captured`);
+        }
+      }
+      if (tiedTo[code]!.includes('actor.userId')) {
+        assert.equal(match['actor.userId'], '{{event_actor_id}}', `${c.key}: does not verify its own actor`);
+      }
+      for (const path of ['entity.id', 'payload.uetr']) {
+        if (tiedTo[code]!.includes(path)) assert.match(String(match[path]), /^\{\{\w+\}\}$/, `${c.key}: ${path} is not the record this case just created`);
+      }
+
+      // Only events recorded after the action count, by the application's own clock.
+      assert.deepEqual(match.occurredAt, { at_or_after: '{{event_since}}' }, `${c.key}: an older event could satisfy the check`);
+      const clockIndex = steps.findIndex(step => step.url === '{{api}}/api/v1/ux/clock' && step.save?.event_since === 'epochMs');
+      assert.ok(clockIndex >= 0 && clockIndex < verifyIndex - 1, `${c.key}: the application clock is not read before the action`);
+
+      // The action is real: every step has exactly one acceptable answer and none is tolerated.
+      for (const step of steps) {
+        assert.equal(typeof (step.expected_status ?? 200), 'number', `${c.key}: a step accepts more than one answer`);
+        assert.ok(!step.allow_failure, `${c.key}: a step may fail without failing the case`);
+      }
+
+      // What the action created is removed again, where the application can remove it.
+      const createsRecord = tiedTo[code]!.includes('entity.id') || code.startsWith('tec.delivery.');
+      if (createsRecord) assert.ok((c.cleanupSteps || []).length > 0, `${c.key}: creates a record but never removes it`);
     }
   });
 });
