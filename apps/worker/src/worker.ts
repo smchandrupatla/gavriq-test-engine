@@ -63,8 +63,34 @@ async function api(path: string, opts: RequestInit = {}) {
   });
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof body === 'object' ? JSON.stringify(body) : String(body));
+  if (!res.ok) {
+    const err = new Error(typeof body === 'object' ? JSON.stringify(body) : String(body)) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return body;
+}
+
+/**
+ * For the calls that record a verdict or close a run. A control plane that is
+ * busy for a moment (no answer, or a 5xx / 429) is asked again, so a case that
+ * ran does not lose its result and an execution is not left "running" for the
+ * abandoned-run sweep to mark as an error. An answer that says no — a cancelled
+ * run, a result the evidence gate refuses — is final and is not repeated.
+ */
+async function apiDurable(path: string, opts: RequestInit = {}, attempts = 5) {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await api(path, opts);
+    } catch (err) {
+      last = err;
+      const status = (err as { status?: number }).status;
+      if (status !== undefined && status < 500 && status !== 429 && status !== 408) throw err;
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+  throw last;
 }
 
 async function register() {
@@ -145,6 +171,19 @@ function caseTimeoutMs(settings: EngineSettings, testType: string | undefined): 
   const minutes = settings.test_type_timeout_minutes?.[key];
   if (Number.isFinite(minutes) && (minutes as number) > 0) return (minutes as number) * 60_000;
   return DEFAULT_CASE_TIMEOUT_MS;
+}
+
+/**
+ * The time limit of one case. The per-type limits are set for catalogue cases —
+ * a handful of requests, one screen. A case of the application team's SIT suite
+ * carries its own budget (set at import from what kind of test it is: a whole
+ * business journey takes many minutes), and that budget applies when it is the
+ * longer one; otherwise every journey would be cut off at the limit of its type.
+ */
+function caseLimitMs(settings: EngineSettings, tc: any): number {
+  const byType = caseTimeoutMs(settings, tc?.test_type || 'other');
+  const own = Number(tc?.timeout_seconds) > 0 ? Number(tc.timeout_seconds) * 1000 : 0;
+  return isSitScript(tc?.script) ? Math.max(byType, own) : byType;
 }
 
 function failureLimitOf(settings: EngineSettings): number {
@@ -550,7 +589,7 @@ async function runJob(execution: any) {
     );
 
     try {
-      await api(`/api/v1/executions/${execution.id}/results`, {
+      await apiDurable(`/api/v1/executions/${execution.id}/results`, {
         method: 'POST',
         body: JSON.stringify({
           test_case_id: caseId,
@@ -612,7 +651,7 @@ async function runJob(execution: any) {
       if (group.length > 1) {
         const started = new Date().toISOString();
         // Each case keeps its own time limit; together they are the file's.
-        const limitMs = Math.min(4 * 3_600_000, group.reduce((n, g) => n + caseTimeoutMs(settings, g.tc?.test_type || 'other'), 0));
+        const limitMs = Math.min(4 * 3_600_000, group.reduce((n, g) => n + caseLimitMs(settings, g.tc), 0));
         const groupSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
         const perTest = Math.max(...group.map((g) => Number(g.tc?.timeout_seconds) || 120));
         const outcomes = await runSitGroup({
@@ -655,8 +694,8 @@ async function runJob(execution: any) {
     done.add(caseId);
     const started = new Date().toISOString();
     const testType = tc?.test_type || 'other';
-    const caseLimitMs = caseTimeoutMs(settings, testType);
-    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(caseLimitMs)]);
+    const limitMs = caseLimitMs(settings, tc);
+    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
     let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal, lane);
     // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
     if (cancel.signal.aborted) return stopped();
@@ -668,8 +707,8 @@ async function runJob(execution: any) {
         status: 'timed_out',
         verdict: 'fail',
         classification: 'timeout',
-        message: `Timed out after ${Math.round(caseLimitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
-        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(caseLimitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
+        message: `Timed out after ${Math.round(limitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
+        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(limitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
       };
     }
     const next = await report(caseId, tc, started, result);
@@ -680,7 +719,7 @@ async function runJob(execution: any) {
     clearInterval(watch);
   }
 
-  await api(`/api/v1/executions/${execution.id}/complete`, {
+  await apiDurable(`/api/v1/executions/${execution.id}/complete`, {
     method: 'POST',
     body: JSON.stringify({
       status: anyFailed ? 'failed' : 'passed',

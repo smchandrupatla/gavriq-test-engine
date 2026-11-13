@@ -58,6 +58,23 @@ export function sitMetaFor(fileKey: string): SitMeta {
   return { suite: `sit-${fileKey.toLowerCase()}`, type: by.type, method: by.method, tags: by.tags || [] };
 }
 
+/**
+ * How long one test of a file may run, in seconds. The suite sets no limit of its
+ * own — a test runs as long as it needs — so the budget has to come from what
+ * kind of test it is: a business use case is a whole end-to-end journey through
+ * the console (scheme, rules, dataset, suite, run, evidence pack) and takes many
+ * minutes; a soak or burst holds load for its configured duration; a screen
+ * check opens a browser; an API check is a few requests. Cases with a long
+ * budget are tagged `cat:long-running`, which also keeps them out of the run
+ * planner's 30-minute sizing.
+ */
+export function sitTimeoutFor(fileKey: string, meta: Pick<SitMeta, 'type' | 'method'>): { seconds: number; longRunning: boolean } {
+  if (/business-use-case|e2e/.test(fileKey) || meta.type === 'acceptance' || meta.type === 'e2e') return { seconds: 1800, longRunning: true };
+  if (meta.type === 'performance') return { seconds: 900, longRunning: true };
+  if (meta.method !== 'http') return { seconds: 420, longRunning: false };
+  return { seconds: 240, longRunning: false };
+}
+
 /** Whether a file shares its suite with other files (the description says so). */
 export const sharesSuite = (fileKey: string) => !!CATEGORY[fileKey];
 

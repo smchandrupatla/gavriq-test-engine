@@ -1,68 +1,98 @@
-# Parallel-safe user pool
+# Signing in from parallel cases: identity lanes
 
-Sand Bench enforces one active session per user: a second login from the same
-identity invalidates the first. A catalog that logs every case in as
-`operator.acme` therefore cannot run in parallel — the Nth case silently kicks
-out the (N-1)th. The engine's catalog carries a per-case pool slot so parallel
-runs each hold their own token.
+Cases run in parallel. On Sand Bench that only works if no two cases that run at
+the same time are signed in as the same user, because of how the application
+treats identities (verified against Sand Bench main `a8d72039`, November 2026):
 
-## Engine side (this repo) — ready today
+- **Signing out ends every session of that user**, on every browser and device.
+- A user holds at most five sessions; a sixth sign-in ends the oldest.
+- Five wrong passwords for one account inside fifteen minutes lock it for fifteen
+  minutes. Fifty failed sign-ins from one client address block that address
+  (HTTP 429) for fifteen minutes. Self-registration counts every attempt: ten an
+  hour per address.
+- **Only the built-in administrator is administrator-equivalent.** A role cannot
+  make another user one; an ordinary user gets 403 on administration routes.
+- A user created by an administrator starts with "must change password": the
+  console shows the forced-password card instead of the application.
 
-- `apps/api/src/catalog/user-pool.ts` provides `pickUser(caseKey)` and
-  `pickAdmin(caseKey)`, which pick a pool slot from a stable hash of the case
-  key, and `userLoginStep` / `adminLoginStep` / `userBearer` / `adminBearer`
-  helpers that build the login step and the Authorization header bound to that
-  slot.
-- The Sand Bench environment seeded by `apps/api/src/seed-realistic-catalog.ts`
-  carries `pool_user_0..pool_user_7`, `pool_admin_0..pool_admin_1`, and the
-  matching `pool_pass_*` / `pool_adminpass_*` secret_env mappings. Pool size:
-  **8 operator slots, 2 admin slots** (`POOL_SIZE` / `ADMIN_POOL_SIZE`).
-- Until the Sand Bench side ships the extra identities, every pool slot falls
-  back to the single demo user — the plumbing is live, but real parallelism
-  only starts when the pool exists on the application side.
-- The `tests/engine-catalog.test.ts` lint forbids hard-coded `admin` /
-  `operator.acme` / etc. in step bodies — any new login must go through a
-  `{{var}}` or a pool slot.
+An earlier design hashed each case key onto a small pool of users. Two cases with
+the same slot then ended each other's sessions whenever they overlapped, and one
+load case that hammers the sign-in with bad credentials blocked the worker's
+address for every other case. That design is gone.
 
-## Sand Bench side — seeded automatically at staging deploy
+## How it works now
 
-The staging deploy script (`deploy/staging/deploy.mjs`) seeds the pool through
-the Sand Bench admin API as part of its `seed` phase — the same script that
-imports the baseline ISO schema. 10 users are created (idempotent; a repeat
-seed is a no-op):
+### Operators — one lane per running execution
 
-**Operator pool** — 8 users, `pool.op0` … `pool.op7` (slot 0..7, used by
-`pickUser(key)`).
+- An environment lists a pool of operators in `config.vars`: `pool_user_0` …
+  `pool_user_N` with `pool_pass_0` … `pool_pass_N`.
+- When a worker claims an execution, the engine gives it the lowest lane no other
+  running execution on that environment holds and stores it as
+  `metadata.identity_lane` (`apps/api/src/routes/executions.ts`,
+  `leaseIdentityLane`). With every lane taken the execution stays queued rather
+  than share an identity.
+- The worker resolves `{{username}}` / `{{password}}` to that lane's pool entry
+  for every case of the execution (`apps/worker/src/identity-lane.ts`). An
+  execution's cases run one after another, so within a lane nothing overlaps.
+- The lane is free again when the execution ends.
 
-**Admin pool** — 2 users, `pool.adm0` … `pool.adm1` (slot 0..1, used by
-`pickAdmin(key)`).
+Cases keep writing `{{username}}`, `{{password}}` and `{{token}}`. Nothing is
+renamed at seed time and no case names a user.
 
-All pool users share the demo password that already protects the stock
-`operator` / `admin` accounts (`password` on dev and staging). The engine's
-seed-time environment registration maps the pool vars to those usernames and
-every `pool_pass_*` / `pool_adminpass_*` secret_env entry to a single
-process-env variable (`SB_STAGING_PASSWORD` for staging, `SB_DEMO_PASSWORD`
-for the dev/local environment), which `compose.yaml` passes to the worker
-with a default of `password`. No per-user passwords to manage.
+### Administrator — one shared session per worker
 
-Sand Bench removed functional-access-profile enforcement (any authenticated
-session holds every permission on the current build), so no role is assigned
-at creation — if role checks are ever reinstated, give every pool user the
-Rule Analyst profile (`fap_acme_rule_analyst`), and the two admin users the
-Tenant Administrator profile (`fap_acme_tenant_admin`).
+Cases that need administrator rights sign in with `{{admin_username}}` /
+`{{admin_password}}` and save `{{adminToken}}`. At seed time every such sign-in
+step is marked `reuse_session` (`apps/api/src/catalog/sandbench-identity.ts`): the
+HTTP runner keeps one administrator session for the life of the worker and hands
+it to each case after checking it is still alive. **No case may sign the
+administrator out** — that would end the session under every other case; a
+catalogue test fails if one does.
 
-To re-seed on an existing staging stack: `node deploy/staging/deploy.mjs seed`.
+The application team's SIT suite also signs in as the administrator, file by
+file. SIT executions therefore never overlap on an environment
+(`metadata.serial_group = 'sit'`); everything else keeps running beside them.
 
-## Catalog authoring
+### Sign-ins that are meant to fail
 
-New cases that need a login call `userLoginStep(key)` or `adminLoginStep(key)`
-from `apps/api/src/catalog/user-pool.ts` and reference the returned bearer via
-`userBearer(key)` / `adminBearer(key)`. Existing cases that still use the
-single `{{username}}` / `{{admin_username}}` template keep working during the
-migration — the pool fallback resolves them to the single demo user. The
-engine-catalog lint forbids any new hard-coded persona name in step bodies.
+A sign-in a case expects to be refused is sent from a made-up client address of
+its own (`X-Forwarded-For`, in the benchmarking range 198.18.0.0/15) so the
+refusal is counted against that address, never the worker's. The same goes for
+self-registration, for load cases that hammer the sign-in (`headers` in the
+runner options) and for browser cases that type a wrong password
+(`extra_http_headers`). A case that gives the lane operator a wrong password signs
+in correctly afterwards, which clears the account's failure count. All of this is
+applied to the whole catalogue by `applySandbenchIdentityRules`; authors do not
+write it.
 
-Pool size can be grown by changing `POOL_SIZE` in
-`apps/api/src/catalog/user-pool.ts` — the seed picks up the new count on next
-`npm run seed`. Growing it requires seeding matching extra users Sand Bench
-side.
+### A case that changes an identity
+
+A case that must really change an identity's state — change or reset its
+password, lock it, deactivate it, use up its sessions — creates its own throwaway
+user through the administration API and removes it in cleanup
+(`POST /api/v1/admin/tenants/tenant_default/users`, delete with `If-Match`). It
+never does that to its lane operator or to the administrator.
+
+## The pool on staging
+
+`deploy/staging/deploy.mjs seed` calls `ensureStagingUserPool`
+(`deploy/staging/user-pool.mjs`): twelve operators, `pool.op0` … `pool.op11`. Each
+is created with a throwaway password and then sets the pool password itself,
+which clears "must change password" — so a browser sign-in opens the console. The
+seed can be repeated: an operator that already signs in with the pool password is
+left alone; one whose password has drifted is reset and taken through the first
+sign-in again.
+
+The pool password is a fictional, staging-only value of at least twelve
+characters (the application's minimum for a password a user sets). The
+environment registers it under `pool_pass_N`, and maps the same keys to the
+worker variable `SB_STAGING_POOL_PASSWORD` (set in `compose.yaml`) for a
+deployment that rotates it.
+
+A worker with five slots holds lanes 0–4. The remaining lanes are for a second
+worker and for author-time harness runs — `dev/scripts/run-catalog-local.ts`
+signs in as the last lane unless `--lane` says otherwise, and two harness runs at
+the same time must use different lanes.
+
+To add lanes: raise `STAGING_POOL_OPERATORS`, then `node deploy/staging/deploy.mjs
+seed` and `register`.
