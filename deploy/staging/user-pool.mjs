@@ -25,7 +25,13 @@ import { randomBytes } from 'node:crypto';
 
 /** Fictional, staging-only. At least 12 characters: the application's minimum for a password a user sets. */
 export const STAGING_POOL_PASSWORD = 'SandBench-Pool-Stage-01';
-export const STAGING_POOL_OPERATORS = 8;
+/**
+ * How many lanes staging has. The engine leases the lowest free lane first, so a
+ * worker with five slots holds lanes 0–4; the higher ones are spare for a second
+ * worker and for author-time harness runs (dev/scripts/run-catalog-local.ts
+ * defaults to the last lane), which must not share an identity with a live run.
+ */
+export const STAGING_POOL_OPERATORS = 12;
 
 const TENANT = 'tenant_default';
 

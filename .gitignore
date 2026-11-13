@@ -15,3 +15,8 @@ evidence/
 infra-agent.pid
 # Record agent pid file (scripts/start-record-agent.ps1); its logs are covered by *.log
 record-agent.pid
+
+# Scratch written by the author-time harness (dev/scripts/run-catalog-local.ts)
+.tmp/harness-evidence/
+.tmp/lane*/
+.tmp/*.json

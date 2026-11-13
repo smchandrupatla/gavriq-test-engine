@@ -182,7 +182,11 @@ export async function testCaseRoutes(app: FastifyInstance) {
        LEFT JOIN LATERAL (
          SELECT array_agg(s.test_suite_id::text ORDER BY s.sort_order) AS suite_ids FROM test_case_suites s WHERE s.test_case_id = tc.id
        ) m ON true
-       ${where} ORDER BY tc.updated_at DESC LIMIT ${limit} OFFSET ${offset}`,
+       -- tc.id breaks ties. A seed stamps thousands of rows with one updated_at; without a
+       -- total order, paging with OFFSET repeats some rows and skips others, and a client
+       -- that pages through the catalogue to see what is registered (the application side's
+       -- SIT registration does) concludes that existing cases are missing and adds them again.
+       ${where} ORDER BY tc.updated_at DESC, tc.id LIMIT ${limit} OFFSET ${offset}`,
       params
     );
     const countRes = await query(`SELECT count(*)::int AS total FROM test_cases tc ${where}`, params.slice(0, -1));

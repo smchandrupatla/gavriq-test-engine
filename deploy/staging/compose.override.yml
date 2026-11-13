@@ -56,6 +56,11 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - sbe-shared-ftp:/ftp
+      # The published API description. The product's shipped image carries docs/api
+      # (deploy/client/Dockerfile.app: `COPY docs/api docs/api`); the development
+      # Dockerfile this stack is built from does not, and GET /api/v1/openapi.json
+      # then fails with a server error. Staging serves it from the pinned export.
+      - ./docs/api:/app/docs/api:ro
 
   worker:
     image: sand-bench-staging-app:${SBE_STAGING_TAG}
@@ -78,6 +83,18 @@ services:
         SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
     ports: !override
       - "127.0.0.1:${STAGING_WEB_PORT:-18080}:80"
+    volumes: !reset []
+
+  # Sand Bench Aurora: the second web portal of the product, against the same API.
+  # The application team's SIT suite has cases for it (SIT_AURORA_BASE).
+  web-aurora:
+    image: sand-bench-staging-web-aurora:${SBE_STAGING_TAG}
+    build:
+      args:
+        SBE_VERSION: ${SBE_STAGING_VERSION:-0.0.0-staging}
+        SBE_BUILD_COMMIT: ${SBE_STAGING_COMMIT:-unknown}
+    ports: !override
+      - "127.0.0.1:${STAGING_AURORA_PORT:-18100}:80"
     volumes: !reset []
 
   dbviewer:

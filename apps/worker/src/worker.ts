@@ -11,7 +11,7 @@ import { runHttp } from './runners/http.js';
 import { validateCaseShape } from './case-shape.js';
 import { withIdentityLane } from './identity-lane.js';
 import { runPerformance } from './runners/performance.js';
-import { runSit, isSitScript } from './runners/sit.js';
+import { runSit, runSitGroup, isSitScript, sitSourceRoot, sitTestOf } from './runners/sit.js';
 import { runE2E } from './runners/e2e.js';
 import { closeBrowserPool } from './runners/playwright.js';
 import { ensureEvidence, evidencePreflight, publishEvidence, secretValues } from './evidence.js';
@@ -310,6 +310,8 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
         vars,
         timeoutSeconds: tc?.timeout_seconds || 120,
         signal,
+        // The suite of the commit deployed on this environment, when the worker has it.
+        sourceRoot: sitSourceRoot(env?.config?.deployment?.commit),
       });
       return {
         status: r.status === 'skipped' ? 'skipped' : r.status,
@@ -525,29 +527,12 @@ async function runJob(execution: any) {
     await api(`/api/v1/executions/${execution.id}/complete`, { method: 'POST', body: JSON.stringify({ status: 'cancelled' }) }).catch(() => undefined);
   };
 
-  try {
-  for (const caseId of caseIds) {
-    if (cancel.signal.aborted) return stopped();
-    const tc = await fetchTestCase(caseId);
-    const started = new Date().toISOString();
-    const testType = tc?.test_type || 'other';
-    const caseLimitMs = caseTimeoutMs(settings, testType);
-    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(caseLimitMs)]);
-    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal, lane);
-    // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
-    if (cancel.signal.aborted) return stopped();
-    // The per-test-type timeout fired instead: the case is killed and recorded as timed out,
-    // regardless of what status the runner itself returned on abort, and the run continues.
-    if (caseSignal.aborted && result.status !== 'passed' && result.status !== 'skipped') {
-      result = {
-        ...result,
-        status: 'timed_out',
-        verdict: 'fail',
-        classification: 'timeout',
-        message: `Timed out after ${Math.round(caseLimitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
-        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(caseLimitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
-      };
-    }
+  /**
+   * Record one case's verdict: evidence first, then the result. Answers what the
+   * run should do next — carry on, stop because it was cancelled, or stop because
+   * too many cases in a row failed.
+   */
+  const report = async (caseId: string, tc: any, started: string, result: RunnerResult): Promise<'next' | 'cancelled' | 'circuit'> => {
     if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
     if (result.status === 'passed') consecutiveFailures = 0;
     else if (result.status !== 'skipped') consecutiveFailures++;
@@ -583,7 +568,7 @@ async function runJob(execution: any) {
       });
     } catch (err) {
       // The API refuses results for a cancelled run (409): same outcome as the watcher noticing.
-      if (String((err as Error).message).includes('execution_cancelled')) return stopped();
+      if (String((err as Error).message).includes('execution_cancelled')) return 'cancelled';
       throw err;
     }
 
@@ -592,8 +577,104 @@ async function runJob(execution: any) {
     if (consecutiveFailures >= failureLimit) {
       circuitBroken = true;
       console.log(`[worker] ${execution.key} circuit breaker: ${consecutiveFailures} consecutive failures (limit ${failureLimit}) — stopping`);
-      break;
+      return 'circuit';
     }
+    return 'next';
+  };
+
+  const fetched = new Map<string, any>();
+  const caseOf = async (id: string) => {
+    if (!fetched.has(id)) fetched.set(id, await fetchTestCase(id));
+    return fetched.get(id);
+  };
+  const done = new Set<string>();
+  const sitSource = sitSourceRoot(env?.config?.deployment?.commit);
+
+  try {
+  run: for (const caseId of caseIds) {
+    if (done.has(caseId)) continue;
+    if (cancel.signal.aborted) return stopped();
+    const tc = await caseOf(caseId);
+
+    // A SIT file is run ONCE for every case of this execution that is one of its
+    // tests: the file's tests share a signed-in session and a browser, and the
+    // application caps sessions per user, so a sign-in per case would end the
+    // sessions of the cases before it (and take far longer).
+    const sit = sitTestOf(tc?.script);
+    if (sit) {
+      const group: Array<{ id: string; tc: any; name?: string }> = [];
+      for (const otherId of caseIds) {
+        if (done.has(otherId)) continue;
+        const other = otherId === caseId ? tc : await caseOf(otherId);
+        const o = sitTestOf(other?.script);
+        if (o && o.file === sit.file) group.push({ id: otherId, tc: other, name: o.name });
+      }
+      if (group.length > 1) {
+        const started = new Date().toISOString();
+        // Each case keeps its own time limit; together they are the file's.
+        const limitMs = Math.min(4 * 3_600_000, group.reduce((n, g) => n + caseTimeoutMs(settings, g.tc?.test_type || 'other'), 0));
+        const groupSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
+        const perTest = Math.max(...group.map((g) => Number(g.tc?.timeout_seconds) || 120));
+        const outcomes = await runSitGroup({
+          file: sit.file,
+          tests: group.map((g) => ({ id: g.id, name: g.name })),
+          baseUrl,
+          vars: withIdentityLane(buildVars(env), lane),
+          timeoutSeconds: perTest,
+          signal: groupSignal,
+          sourceRoot: sitSource,
+        });
+        // The result of a file that was cut short by a run cancel is not a verdict: nothing is reported.
+        if (cancel.signal.aborted) return stopped();
+        for (const g of group) {
+          done.add(g.id);
+          const r = outcomes.get(g.id)!;
+          const timedOut = groupSignal.aborted && r.status !== 'passed' && r.status !== 'skipped';
+          const next = await report(g.id, g.tc, started, {
+            status: timedOut ? 'timed_out' : r.status === 'skipped' ? 'skipped' : r.status,
+            verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+            duration_ms: r.duration_ms,
+            message: timedOut ? `Timed out: the SIT file ${sit.file} was stopped after ${Math.round(limitMs / 60_000)} minute(s) before this test finished` : r.message,
+            remarks: [
+              `Ran ${sit.file} once for the ${group.length} cases of this run that are tests of it.`,
+              ...(r.remarks || []),
+              r.status === 'passed' ? `Result: passed — ${r.message}.` : `Result: ${timedOut ? 'timed out' : r.status} — ${r.message}.`,
+            ],
+            classification: timedOut ? 'timeout' : r.classification || null,
+            metrics: r.metrics || {},
+            evidence: [],
+            output: r.output,
+          });
+          if (next === 'cancelled') return stopped();
+          if (next === 'circuit') break run;
+        }
+        continue;
+      }
+    }
+
+    done.add(caseId);
+    const started = new Date().toISOString();
+    const testType = tc?.test_type || 'other';
+    const caseLimitMs = caseTimeoutMs(settings, testType);
+    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(caseLimitMs)]);
+    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal, lane);
+    // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
+    if (cancel.signal.aborted) return stopped();
+    // The per-test-type timeout fired instead: the case is killed and recorded as timed out,
+    // regardless of what status the runner itself returned on abort, and the run continues.
+    if (caseSignal.aborted && result.status !== 'passed' && result.status !== 'skipped') {
+      result = {
+        ...result,
+        status: 'timed_out',
+        verdict: 'fail',
+        classification: 'timeout',
+        message: `Timed out after ${Math.round(caseLimitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
+        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(caseLimitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
+      };
+    }
+    const next = await report(caseId, tc, started, result);
+    if (next === 'cancelled') return stopped();
+    if (next === 'circuit') break;
   }
   } finally {
     clearInterval(watch);

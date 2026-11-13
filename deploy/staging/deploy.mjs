@@ -30,7 +30,7 @@ import { uniqueBuildServices } from './build-targets.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
-const SERVICES = ['db', 'minio', 'api', 'worker', 'web', 'testhub', 'dbviewer'];
+const SERVICES = ['db', 'minio', 'api', 'worker', 'web', 'web-aurora', 'testhub', 'dbviewer'];
 const KEEP_SOURCES = 2;
 
 const repo = path.resolve(process.env.SANDBENCH_REPO || path.join(root, '../sand-bench-enterprise'));
@@ -66,14 +66,14 @@ async function resolvePorts(key) {
   // The engine env config stores vars.web/api/testhub/dbviewer as full URLs
   // like "http://127.0.0.1:28080"; parse the port out. Env vars still win,
   // so an operator can force a port set from the command line.
-  const dflt = { web: 18080, api: 18787, testhub: 18091, dbviewer: 18090 };
+  const dflt = { web: 18080, api: 18787, testhub: 18091, dbviewer: 18090, aurora: 18100 };
   let fromEngine = {};
   if (key !== 'sand-bench-staging') {
     try {
       const res = await fetch(`${engine}/api/v1/environments/${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
         const vars = ((await res.json()).data?.config?.vars) || {};
-        for (const name of ['web', 'api', 'testhub', 'dbviewer']) {
+        for (const name of ['web', 'api', 'testhub', 'dbviewer', 'aurora']) {
           const m = String(vars[name] || '').match(/:(\d+)(?:\/|$)/);
           if (m) fromEngine[name] = Number(m[1]);
         }
@@ -85,6 +85,7 @@ async function resolvePorts(key) {
     api: Number(process.env.STAGING_API_PORT) || fromEngine.api || dflt.api,
     testhub: Number(process.env.STAGING_TESTHUB_PORT) || fromEngine.testhub || dflt.testhub,
     dbviewer: Number(process.env.STAGING_DBVIEWER_PORT) || fromEngine.dbviewer || dflt.dbviewer,
+    aurora: Number(process.env.STAGING_AURORA_PORT) || fromEngine.aurora || dflt.aurora,
   };
 }
 
@@ -229,6 +230,7 @@ function compose(src, args, { inherit = true } = {}) {
     STAGING_API_PORT: String(ports.api),
     STAGING_TESTHUB_PORT: String(ports.testhub),
     STAGING_DBVIEWER_PORT: String(ports.dbviewer),
+    STAGING_AURORA_PORT: String(ports.aurora),
   };
   return run('docker', [...base, ...args], inherit ? { env, stdio: 'inherit' } : { env });
 }
@@ -253,6 +255,9 @@ async function verify(sourceDir) {
       return body.classification === 'test' ? '' : `classification is "${body.classification}", expected "test"`;
     }),
     await probe('web', `${host}:${ports.web}/index.html`),
+    await probe('web-aurora', `${host}:${ports.aurora}/`),
+    // The published API description must be served: the pinned export's docs/api is mounted for it.
+    await probe('openapi', `${host}:${ports.api}/api/v1/openapi.json`),
     await probe('testhub', `${host}:${ports.testhub}/health`),
     await probe('dbviewer', `${host}:${ports.dbviewer}/health`),
   ];
@@ -401,6 +406,7 @@ async function register(state) {
         api: `${host}:${ports.api}`,
         testhub: `${host}:${ports.testhub}`,
         dbviewer: `${host}:${ports.dbviewer}`,
+        aurora: `${host}:${ports.aurora}`,
         engine,
         tenant: 'default',
         // Identity lanes (docs/USER-POOL.md): the engine gives every running execution
