@@ -131,6 +131,13 @@ const ADMIN_DATA: CaseDef['dataProfile'] = {
   source: 'The environment\'s administrator identity (engine environment variables admin_username / admin_password).',
 };
 
+/**
+ * The User roles tab has finished loading: its status line reads "<n> roles in Sand Bench"
+ * (it reads "Loading roles of Sand Bench…" before, and an error for anyone but the
+ * administrator). A deployment may have no custom role at all, so the count is not asserted.
+ */
+const ROLES_LOADED = '#tar-status:has-text("in Sand Bench")';
+
 /** Something only a properly loaded screen shows (rows of the administrator's own list, for instance). */
 function proofSteps(proof?: string) {
   return proof
@@ -284,7 +291,7 @@ const PAGES: Array<{ code: string; path: string; name: string; publicPage?: bool
   { code: 'CFG-IMPORT-LIMITS',  path: '/configuration-import-schema-limits.html', name: 'Configuration · Import schema limits' },
   { code: 'CFG-ONBOARDING',     path: '/configuration-onboarding-journey.html',  name: 'Configuration · Onboarding journey' },
   { code: 'CFG-NOTIFY',         path: '/configuration-notifications.html',       name: 'Configuration · Notifications' },
-  { code: 'CFG-ROLES',          path: '/configuration-user-roles.html',          name: 'Configuration · User roles (now a tab of User management)', admin: true, proof: '#tar-rows tr' },
+  { code: 'CFG-ROLES',          path: '/configuration-user-roles.html',          name: 'Configuration · User roles (now a tab of User management)', admin: true, proof: ROLES_LOADED },
   { code: 'CFG-USERS',          path: '/configuration-users.html',               name: 'Configuration · Users (now a tab of User management)', admin: true, proof: '#ta-rows tr' },
   { code: 'CFG',                path: '/configuration.html',                     name: 'Configuration' },
   { code: 'CONNECTIONS',        path: '/connections.html',                       name: 'Connections' },
@@ -3163,7 +3170,7 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   ucGuiAvailability('UC-configurationEnvironmentDefaults', '/configuration-environment-defaults.html', 'Configuration · Environment defaults'),
   ucGuiAvailability('UC-configurationEventing', '/configuration-eventing.html', 'Configuration · Eventing', { controls: 3 }),
   ucGuiAvailability('UC-configurationNotifications', '/configuration-notifications.html', 'Configuration · Notifications'),
-  ucGuiAvailability('UC-configurationUserRoles', '/configuration-user-roles.html', 'Configuration · User roles', { admin: true, proof: '#tar-rows tr' }),
+  ucGuiAvailability('UC-configurationUserRoles', '/configuration-user-roles.html', 'Configuration · User roles', { admin: true, proof: ROLES_LOADED }),
 
   // Datasets
   ucGuiAvailability('UC-dsAll', '/datasets.html', 'Datasets · All'),
@@ -3228,8 +3235,8 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   // Users and roles (operator surfaces live under Configuration)
   ucGuiAvailability('UC-users', '/configuration-users.html', 'Users (tab of User management under Configuration)', { admin: true, proof: '#ta-rows tr' }),
   ucGuiAvailability('UC-userCreate', '/configuration-users.html', 'Create user (on the Users tab of User management)', { admin: true, proof: '#ta-rows tr' }),
-  ucGuiAvailability('UC-roles', '/configuration-user-roles.html', 'Roles (tab of User management under Configuration)', { admin: true, proof: '#tar-rows tr' }),
-  ucGuiAvailability('UC-roleCreate', '/configuration-user-roles.html', 'Create role (on the User roles tab of User management)', { admin: true, proof: '#tar-rows tr' }),
+  ucGuiAvailability('UC-roles', '/configuration-user-roles.html', 'Roles (tab of User management under Configuration)', { admin: true, proof: ROLES_LOADED }),
+  ucGuiAvailability('UC-roleCreate', '/configuration-user-roles.html', 'Create role (on the User roles tab of User management)', { admin: true, proof: ROLES_LOADED }),
 
   /* ---------------------------------------------------------------------- */
   /* Remaining HTML pages the Sand Bench deployment serves that no UC in    */
@@ -3327,8 +3334,9 @@ export const SANDBENCH_E2E_GUI_CASES: CaseDef[] = [
   /* FULL responsive matrix — every page × every viewport                   */
   /* Generated from VIEWPORTS × PAGES above. Every HTML page the deployment */
   /* serves gets a case at every window class, including sign-in on         */
-  /* operator pages. 13 viewports × 98 pages = 1274 cases, so the suite as  */
-  /* a whole is dominated by this matrix. Filter by `vp:*` tag or page code */
+  /* operator pages. 13 viewports × 123 pages × 3 browser engines = 4,797   */
+  /* cases, so the suite as a whole is dominated by this matrix (plus 615   */
+  /* element checks and 369 snapshots). Filter by `vp:*` tag or page code   */
   /* to run a slice. The hand-written starter cases that lived below this   */
   /* block have been removed as the matrix supersedes them.                 */
   /* ---------------------------------------------------------------------- */
