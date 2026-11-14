@@ -606,9 +606,12 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             case 'assert_computed_style_matches': {
               // The computed value of a CSS property matches a RegExp.
               // step.expected is the regex source (JS regex syntax, no flags).
-              if (!step.selector || !step.value || !step.expected) throw new Error('assert_computed_style_matches needs selector, value (CSS property), and expected (regex source)');
+              // The pattern is read from must_contain first: the Test cases screen rewrites
+              // `expected` into a plain-language sentence, which is not a pattern.
+              const pattern = step.must_contain ?? step.expected;
+              if (!step.selector || !step.value || !pattern) throw new Error('assert_computed_style_matches needs selector, value (CSS property), and must_contain/expected (regex source)');
               const prop = String(step.value);
-              const re = new RegExp(String(step.expected));
+              const re = new RegExp(String(pattern));
               const actual = await page.locator(step.selector).first().evaluate(
                 (el: Element, p: string) => window.getComputedStyle(el).getPropertyValue(p).trim(),
                 prop
