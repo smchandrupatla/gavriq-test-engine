@@ -101,6 +101,31 @@ describe('SIT results per test', () => {
     assert.doesNotMatch(tests[1]!.block, /not here/);
   });
 
+  it('keeps a multi-line error whole, so the actual and expected values are not lost', () => {
+    const tap = [
+      'not ok 1 - feeder starts on the next full hour',
+      '  ---',
+      '  duration_ms: 4',
+      "  error: 'Expected values to be strictly equal:",
+      '',
+      "    '14:00' !== '15:00'",
+      '',
+      "    '",
+      '  code: ERR_ASSERTION',
+      '  ...',
+      'not ok 2 - second',
+      '  ---',
+      '  error: |-',
+      '    Expected values to be strictly equal:',
+      '    1 !== 2',
+      '  code: ERR_ASSERTION',
+      '  ...',
+    ].join('\n');
+    const [first, second] = parseTapTests(tap);
+    assert.equal(first!.error, "Expected values to be strictly equal: '14:00' !== '15:00'");
+    assert.equal(second!.error, 'Expected values to be strictly equal: 1 !== 2');
+  });
+
   it('matches a parameterised name against every generated instance', () => {
     const re = new RegExp(namePattern('GUI page ${page.path} is served'));
     assert.ok(re.test('GUI page /index.html is served'));
