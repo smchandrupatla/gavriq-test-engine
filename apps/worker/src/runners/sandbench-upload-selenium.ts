@@ -241,17 +241,18 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
     await openMenu(driver, 'Import Scheme', timeout);
     await visible(driver, '#sbe-source-format[data-sbe-formats="configured"]', timeout);
     await new Select(await located(driver, '#sbe-source-format', timeout)).selectByValue('xsd');
-    await new Select(await located(driver, '#sbe-markdown-choice', timeout)).selectByValue(markdownPath ? 'yes' : 'no');
+    // Current Sand Bench: markdown is an optional checkbox, and Confirm upload stays
+    // disabled until Validate has passed - with or without markdown.
+    if (markdownPath) await (await located(driver, '#sbe-include-markdown', timeout)).click();
     await (await located(driver, '#sbe-schema-file', timeout)).sendKeys(tmpXsdPath);
     requireCondition((await elementText(driver, '#sbe-schema-chosen')).includes(input.fileName), 'chosen filename is not displayed');
 
-    if (markdownPath) {
-      await (await located(driver, '#sbe-md-file', timeout)).sendKeys(markdownPath);
-      await (await located(driver, '#sbe-validate-md', timeout)).click();
-      await driver.wait(async () => /All checks passed|not available in the markdown|Stopped at/.test(await elementText(driver, '#sbe-import-result')), timeout);
-      const validation = await elementText(driver, '#sbe-import-result');
-      requireCondition(validation.includes('All checks passed'), `Markdown validation did not pass: ${validation}`);
-    }
+    if (markdownPath) await (await located(driver, '#sbe-md-file', timeout)).sendKeys(markdownPath);
+    await (await located(driver, '#sbe-validate-md', timeout)).click();
+    await driver.wait(async () => await (await located(driver, '#sbe-confirm-upload', timeout)).isEnabled(), timeout);
+    const validation = await elementText(driver, '#sbe-import-result');
+    requireCondition(/well-formed|is valid/i.test(validation), `Validation did not pass: ${validation}`);
+    if (markdownPath) requireCondition(validation.includes('Markdown also covers every detected tag'), `Markdown validation did not pass: ${validation}`);
 
     let unexpectedDialog = '';
     const uploadAfter = Date.now();
@@ -275,7 +276,7 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
     requireCondition(createdId, 'upload did not acknowledge a new job; pre-existing jobs are preserved');
     requireCondition(receipt.accepted === 1 && receipt.code === code && receipt.status === 'stored', `expected one stored ${code} job`);
     requireCondition(!unexpectedDialog, `unexpected dialog: ${unexpectedDialog}`);
-    await driver.wait(async () => (await elementText(driver, '#sbe-import-result')).includes(`Stored ${code}`), timeout);
+    await driver.wait(async () => (await elementText(driver, '#sbe-import-result')).startsWith('Stored'), timeout); // the screen says "Stored."; the scheme code is checked from the upload receipt
 
     const stored = (await listJobs()).find((job) => job.id === createdId);
     requireCondition(stored?.status === 'stored' && stored.code === code, 'new upload was not persisted in the catalogue');
@@ -290,7 +291,10 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
       requireCondition((await mdDownload.text()) === markdown, 'downloaded Markdown content differs from the original fixture');
     }
 
-    await (await located(driver, '#sbe-import-jump', timeout)).click();
+    // The next-steps panel offers "Open Scheme Definitions" (was the #sbe-import-jump button);
+    // it deep-links into the new scheme, so the card list is reached through the menu.
+    await driver.wait(until.elementLocated(By.xpath("//*[@id='sbe-next-steps']//a[contains(normalize-space(.),'Open Scheme Definitions')]")), timeout);
+    await openMenu(driver, 'Scheme Definitions', timeout);
     await openPacsFamily(driver, timeout);
     await importedCards(driver, code, timeout);
 
@@ -341,7 +345,7 @@ export async function runSandbenchUploadSelenium(driver: WebDriver, input: Sandb
           const adminLogin = await fetch(base + '/api/v1/session/login', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username: 'admin', password: vars.password || 'password' }),
+            body: JSON.stringify({ username: 'admin', password: vars.adminPassword || 'password' }), // vars.password is the operator's
           });
           if (adminLogin.ok) {
             const adminSession = await adminLogin.json();
