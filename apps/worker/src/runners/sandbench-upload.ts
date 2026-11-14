@@ -114,16 +114,20 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
     await openMenu('Import Scheme');
     await page.locator('#sbe-source-format[data-sbe-formats="configured"]').waitFor({ state: 'visible', timeout });
     await page.locator('#sbe-source-format').selectOption('xsd');
-    await page.locator('#sbe-markdown-choice').selectOption(markdownPath ? 'yes' : 'no');
+    // Current Sand Bench: markdown is an optional checkbox ("Also upload markdown"), and
+    // Confirm upload stays disabled until Validate has passed - with or without markdown.
+    if (markdownPath) await page.locator('#sbe-include-markdown').check();
     await page.locator('#sbe-schema-file').setInputFiles({ name: input.fileName, mimeType: 'application/xml', buffer: Buffer.from(content) });
     requireCondition((await page.locator('#sbe-schema-chosen').innerText()).includes(input.fileName), 'chosen filename is not displayed');
-    if (markdownPath) {
-      await page.locator('#sbe-md-file').setInputFiles(markdownPath);
-      await page.locator('#sbe-validate-md').click();
-      await page.waitForFunction(() => /All checks passed|not available in the markdown|Stopped at/.test(document.querySelector('#sbe-import-result')?.textContent || ''), undefined, { timeout });
-      const validation = await page.locator('#sbe-import-result').innerText();
-      requireCondition(validation.includes('All checks passed'), `Markdown validation did not pass: ${validation}`);
-    }
+    if (markdownPath) await page.locator('#sbe-md-file').setInputFiles(markdownPath);
+    await page.locator('#sbe-validate-md').click();
+    await page.waitForFunction(() => {
+      const confirm = document.querySelector('#sbe-confirm-upload') as HTMLButtonElement | null;
+      return !!confirm && !confirm.disabled;
+    }, undefined, { timeout });
+    const validation = await page.locator('#sbe-import-result').innerText();
+    requireCondition(/well-formed|is valid/i.test(validation), `Validation did not pass: ${validation}`);
+    if (markdownPath) requireCondition(validation.includes('Markdown also covers every detected tag'), `Markdown validation did not pass: ${validation}`);
     const [upload] = await Promise.all([
       page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === UPLOAD_PATH, { timeout }),
       page.locator('#sbe-confirm-upload').click(),
@@ -134,7 +138,8 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
     requireCondition(createdId, 'upload did not acknowledge a new job; pre-existing jobs are preserved');
     requireCondition(receipt.accepted === 1 && receipt.code === code && receipt.status === 'stored', `expected one stored ${code} job`);
     requireCondition(!unexpectedDialog, `unexpected dialog: ${unexpectedDialog}`);
-    await page.waitForFunction((expected) => document.querySelector('#sbe-import-result')?.textContent?.includes(`Stored ${expected}`), code, { timeout });
+    // The screen says "Stored."; the scheme code is checked from the upload receipt above.
+    await page.waitForFunction(() => (document.querySelector('#sbe-import-result')?.textContent || '').trim().startsWith('Stored'), undefined, { timeout });
     const stored = (await listJobs()).find((job) => job.id === createdId);
     requireCondition(stored?.status === 'stored' && stored.code === code, 'new upload was not persisted in the catalogue');
     const source = stored.files.find((file) => file.kind === 'xsd');
@@ -147,7 +152,10 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
       const mdDownload = await api(`${UPLOAD_PATH}/${encodeURIComponent(createdId)}/files/markdown`);
       requireCondition(await mdDownload.text() === markdown, 'downloaded Markdown content differs from the original fixture');
     }
-    await page.locator('#sbe-import-jump').click();
+    // The next-steps panel offers "Open Scheme Definitions" (was the #sbe-import-jump button);
+    // it deep-links into the new scheme, so the card list is reached through the menu.
+    await page.locator('#sbe-next-steps').getByText('Open Scheme Definitions').waitFor({ state: 'visible', timeout });
+    await openMenu('Scheme Definitions');
     await visibleCards();
     // A fresh navigation proves the card is supplied by persisted application state.
     await page.reload({ waitUntil: 'domcontentloaded', timeout });
@@ -191,7 +199,7 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
           const adminLogin = await fetch(base + '/api/v1/session/login', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username: 'admin', password: vars.password || 'password' }),
+            body: JSON.stringify({ username: 'admin', password: vars.adminPassword || 'password' }), // vars.password is the operator's, not the administrator's
           });
           if (adminLogin.ok) {
             const adminSession = (await adminLogin.json()) as { token?: string };
