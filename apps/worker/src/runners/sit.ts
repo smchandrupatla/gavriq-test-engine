@@ -598,7 +598,9 @@ export async function runSitGroup(input: SitGroupInput): Promise<Map<string, Sit
       }
       continue;
     }
-    const failed = matched.filter((x) => !x.ok);
+    // A failing test marked TODO is the application team's known defect: parseTapTests
+    // reports it as skipped, so it must not count as a failure here either.
+    const failed = matched.filter((x) => !x.ok && !x.skipped);
     const ranOk = matched.filter((x) => x.ok && !x.skipped);
     const text = matched.map((x) => x.block).join('\n');
     const duration_ms = Math.round(matched.reduce((n, x) => n + (x.duration_ms || 0), 0));
