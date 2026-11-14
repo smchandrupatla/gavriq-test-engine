@@ -22,6 +22,8 @@ export const KNOWN_DEFECTS = {
   'KAN-1812': ['SB-UC-dsNew-ALT-1'], // adding a dataset item answers 500 (ALTER TABLE as the application role)
   'KAN-1813': ['SB-UC-tsNew-ALT-2', 'SB-UC-tsNew-EXC-2'], // invalid suite member list answers 500, documented 422
   'KAN-1814': ['SB-UC-msgCreateSchema-EXC-2'], // same schema under another name answers 500, documented 409
+  'KAN-1815': ['SB-VS-CORS-NOT-REFLECTED'], // CORS reflects any Origin with credentials allowed
+  'KAN-1818': ['SB-PERF-DBVIEWER-ROWS-INDEX'], // audit rows stored twice, one 1 MB: row listing is slow
 };
 
 let failed = 0;
