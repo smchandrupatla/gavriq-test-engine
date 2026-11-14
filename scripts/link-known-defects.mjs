@@ -22,6 +22,14 @@ export const KNOWN_DEFECTS = {
   'KAN-1812': ['SB-UC-dsNew-ALT-1'], // adding a dataset item answers 500 (ALTER TABLE as the application role)
   'KAN-1813': ['SB-UC-tsNew-ALT-2', 'SB-UC-tsNew-EXC-2'], // invalid suite member list answers 500, documented 422
   'KAN-1814': ['SB-UC-msgCreateSchema-EXC-2'], // same schema under another name answers 500, documented 409
+  // upstream SIT files drive the removed #screen-action form on /rule-bench-create.html (test is stale, not the application)
+  'KAN-1833': [
+    'BUC-BUC11-A-UTILITY-DATA-QUALITY-ENGINEER-AUTHORS-A-METER-TELEMETRY-SCHEME-STAGES-ANOMALY-RULES-FEEDS-A-',
+    'BUC-BUC12-A-FRAUD-PRODUCT-MANAGER-BUILDS-A-CHECKOUT-SCHEME-STAGES-CARD-TESTING-AND-HIGH-RISK-SHIPPING-RU',
+    'BUC-BUC13-A-SURVEILLANCE-RULE-OWNER-STAGES-BASELINE-OUTLIER-CONCENTRATION-CONDITIONS-IN-RULE-BENCH-BUILD',
+    'BUC-BUC14-A-PROGRAMME-LEAD-IMPORTS-THE-SCHEME-S-XSD-CENTRALLY-STAGES-AN-MDR-DERIVED-RULE-PROVISIONS-TWO-',
+    'BUC-BUC15-A-PSP-RELIABILITY-LEAD-BUILDS-THE-PAYMENT-INITIATION-CONTRACT-SCHEME-STAGES-CONFORMANCE-RULES-',
+  ],
   'KAN-1815': ['SB-VS-CORS-NOT-REFLECTED'], // CORS reflects any Origin with credentials allowed
   'KAN-1818': ['SB-PERF-DBVIEWER-ROWS-INDEX'], // audit rows stored twice, one 1 MB: row listing is slow
 };
