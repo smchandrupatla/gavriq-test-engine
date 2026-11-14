@@ -119,12 +119,18 @@ async function heartbeat() {
 }
 
 async function fetchTestCase(id: string) {
-  try {
-    const res = await api(`/api/v1/test-cases/${id}`);
-    return res?.data || null;
-  } catch {
-    return null;
+  // Retried: an engine that is busy answers late or not at all, and a case that could not be
+  // read must never be run as something else (see runJob: a missing case is an error).
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const res = await api(`/api/v1/test-cases/${id}`);
+      if (res?.data) return res.data;
+    } catch {
+      /* try again */
+    }
+    await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
+  return null;
 }
 
 async function fetchEnvironment(id: string | null | undefined) {
@@ -696,7 +702,10 @@ async function runJob(execution: any) {
     const testType = tc?.test_type || 'other';
     const limitMs = caseLimitMs(settings, tc);
     const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
-    let result = await executeCase(tc || { execution_method: 'selenium' }, baseUrl, env, headlessOverride, caseSignal, lane);
+    // A case the engine could not give us is an error, never a default browser visit that "passes".
+    let result: RunnerResult = tc
+      ? await executeCase(tc, baseUrl, env, headlessOverride, caseSignal, lane)
+      : { status: 'error', verdict: 'fail', message: `Could not read test case ${caseId} from the engine; it was not run`, classification: 'infrastructure_failure', duration_ms: 0 } as RunnerResult;
     // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
     if (cancel.signal.aborted) return stopped();
     // The per-test-type timeout fired instead: the case is killed and recorded as timed out,

@@ -434,7 +434,10 @@ export function parseTapTests(stdout: string): TapTest[] {
     let skipped = false;
     const directive = /\s+# (SKIP|TODO)\b.*$/i.exec(name);
     if (directive) {
-      skipped = /skip/i.test(directive[1]!);
+      // A TODO test is a known, tracked defect: node:test does not count its failure
+      // (exit code 0). It is reported as not run (skipped) with its ticket in the name,
+      // and a TODO that passes counts as a pass.
+      skipped = /skip/i.test(directive[1]!) || (/todo/i.test(directive[1]!) && m[2] === 'not ok');
       name = name.slice(0, directive.index);
     }
     const block = [lines[i]!];
