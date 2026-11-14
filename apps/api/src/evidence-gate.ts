@@ -179,8 +179,11 @@ export function registerEvidenceGate(app: FastifyInstance) {
 
     if (route === 'POST /api/v1/executions/:id/results') {
       const b = (req.body || {}) as Record<string, any>;
-      const tc = b.test_case_id
-        ? await query('SELECT execution_method, script FROM test_cases WHERE id::text = $1', [String(b.test_case_id)]).catch(() => ({ rows: [] as any[] }))
+      // Compared as a uuid so the primary-key index is used; `id::text = $1` scanned every
+      // case (17k rows) on each result and slowed result posting badly on a busy host.
+      const caseId = String(b.test_case_id || '');
+      const tc = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(caseId)
+        ? await query('SELECT execution_method, script FROM test_cases WHERE id = $1::uuid', [caseId]).catch(() => ({ rows: [] as any[] }))
         : { rows: [] as any[] };
       const method = effectiveMethod(tc.rows[0]?.execution_method, tc.rows[0]?.script);
       const status = String(b.status || '');

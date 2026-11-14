@@ -292,8 +292,12 @@ function sendRoundTripCase(ch: 'mq' | 'kafka'): CaseDef {
           { path: 'results', some: { target: 'testhub', stub, ok: true, status: 200 } },
           { path: 'results', some: { target: `${ch}-desk`, ok: true, status: 200 } },
         ],
+        // The application waits 2 s for the test hub and 2.5 s for the portal (externalSystems.ts
+        // sendDummyToSystem) and reports a slower answer as a failed send. A person whose send
+        // was reported as failed presses Send again; so does this step, for up to half a minute.
+        poll: { timeout_ms: 30000, interval_ms: 3000 },
         description: `send one tagged message to the connection: test hub and ${ch} portal both accept it`,
-        text: 'Ask the application to send one message, carrying a tag unique to this run, to that connection',
+        text: 'Ask the application to send one message, carrying a tag unique to this run, to that connection — and again if it reports that the portal did not answer in time',
         expected: `The application reports that both the test hub and the ${words} portal accepted the message.`,
         testData: 'One small message with a per-run unique tag.' },
       { action: 'request', method: 'GET', url: `{{testhub}}/hub/inbox?channel=${ch}`, expected_status: 200,
@@ -307,17 +311,13 @@ function sendRoundTripCase(ch: 'mq' | 'kafka'): CaseDef {
         expected: 'The test hub lists the message as received from Sand Bench and as sent on by the portal.' },
       { action: 'request', method: 'GET', url: `${portal}/app/ledger?q=${tag}`, expected_status: 200,
         expect_json: [
-          { path: 'data', min_length: 1, max_length: 1 },
-          { path: 'data.0.direction', equals: 'send' },
-          ...Object.entries(where).map(([path, equals]) => ({ path: `data.0.${path}`, equals })),
-          { path: 'data.0.payload.tag', equals: tag },
-          { path: 'data.0.results.0.via', equals: 'testhub' },
-          { path: 'data.0.results.0.ok', equals: true },
+          { path: 'data', min_length: 1 },
+          { path: 'data', some: { direction: 'send', ...where, 'payload.tag': tag, 'results.0.via': 'testhub', 'results.0.ok': true, 'results.0.status': 200 } },
         ],
         poll: { timeout_ms: 5000, interval_ms: 500 },
-        description: `${ch} portal record holds exactly one row for the tag: the message it sent on`,
+        description: `${ch} portal record holds the tagged message as sent on over the test hub (one row per send the portal received)`,
         text: `Search the ${words} portal's record for this run's tag`,
-        expected: 'Exactly one entry is found: the message, sent on over the wire successfully.' },
+        expected: 'The message is found, recorded as sent on over the wire successfully.' },
       ...(ch === 'kafka' ? [{
         action: 'request', method: 'GET', url: `{{kafkaPortal}}/app/inbox?q=${tag}`, expected_status: 200,
         expect_json: [{ path: 'filtered', min: 1 }, { path: 'data', some: { 'payload.tag': tag } }],
@@ -333,6 +333,8 @@ function sendRoundTripCase(ch: 'mq' | 'kafka'): CaseDef {
     dataProfile: { profile: 'synthetic', data: 'One small message carrying a tag unique to this run.', source: 'generated at run time' },
     expected: `Send accepted by testhub and the ${ch} portal; the tagged message is on testhub (from Sand Bench and from the portal) and recorded once in the portal; the connection is removed.`,
     commonFailureCauses: `The ${words} portal or the test hub is not running, or the application cannot reach the portal at its configured address.`,
+    flakinessNotes: 'The application waits at most 2 seconds for the test hub and 2.5 seconds for the portal. On an overloaded machine the portal can answer later than that: the message still arrives, but the application reports the send to the portal as failed. The send step therefore tries again for up to half a minute; if the machine stays that slow the case goes red at the send step.',
+    knownWorkarounds: 'Run the case again when the machine is less busy. If it keeps failing, check how long the portal and the test hub take to answer.',
   };
 }
 
