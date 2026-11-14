@@ -20,7 +20,7 @@ export const KNOWN_DEFECTS = {
   'KAN-1810': ['SB-UC-roleCreate-EXC-1', 'SB-UC-roles-EXC-2'], // duplicate role name answers 500, documented 409
   'KAN-1811': ['SB-UC-roles-EXC-1'], // deleting a role that is still assigned answers 200, documented 409
   'KAN-1812': ['SB-UC-dsNew-ALT-1'], // adding a dataset item answers 500 (ALTER TABLE as the application role)
-  'KAN-1813': ['SB-UC-tsNew-ALT-2', 'SB-UC-tsNew-EXC-2', 'SIT-73_SELENIUM_WORK_ITEMS_CASES-TS9-THE-SUITE-FORM-IS-REFUSED-AN-UNKNOWN SIT-73_SELENIUM_WORK_ITEMS_CASES-TS9-THE-SUITE-FORM-IS-REFUSED-AN-UNKNOWN-CASE-ID-WITH-A-VALIDATION-ERROR-RATHE-a77feca9 SIT-73_SELENIUM_WORK_ITEMS_CASES-TS9-THE-SUITE-FORM-IS-REFUSED-AN-UNKNOWN-CASE-ID-WITH-A-VALIDATION-ERROR-RATHER-THAN-A'], // invalid suite member list answers 500, documented 422
+  'KAN-1813': ['SB-UC-tsNew-ALT-2', 'SB-UC-tsNew-EXC-2', 'SIT-73_SELENIUM_WORK_ITEMS_CASES-TS9-THE-SUITE-FORM-IS-REFUSED-AN-UNKNOWN'], // invalid suite member list answers 500, documented 422
   'KAN-1814': ['SB-UC-msgCreateSchema-EXC-2'], // same schema under another name answers 500, documented 409
   // upstream SIT files drive the removed #screen-action form on /rule-bench-create.html (test is stale, not the application)
   'KAN-1833': [
