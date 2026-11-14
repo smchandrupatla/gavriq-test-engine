@@ -172,6 +172,12 @@ export const KNOWN_DEFECTS = {
     'SIT-70_UI_PAGES-THE-SCHEDULES-NEW-SCHEDULE-PAGE-RENDERS-',
     'SIT-70_UI_PAGES-THE-SCHEDULES-UPCOMING-SCHEDULES-PAGE-RE',
   ],
+  // Anonymous visitors get the protected screen shell instead of the sign-in gate
+  'KAN-1984': [
+    'SB-E2E-GUI-ANON-BLOCKED-ADMIN',
+    'SB-E2E-GUI-ANON-BLOCKED-SCHEME-DEFS',
+    'SB-E2E-GUI-NAV-GATE-REDIRECTS-TO-SIGNIN',
+  ],
   'KAN-1815': ['SB-VS-CORS-NOT-REFLECTED'], // CORS reflects any Origin with credentials allowed
   'KAN-1818': ['SB-PERF-DBVIEWER-ROWS-INDEX'], // audit rows stored twice, one 1 MB: row listing is slow
 };
