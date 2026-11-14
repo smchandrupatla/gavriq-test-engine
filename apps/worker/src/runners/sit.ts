@@ -449,8 +449,22 @@ export function parseTapTests(stdout: string): TapTest[] {
       block.push(line);
       const d = /^\s+duration_ms: ([\d.]+)/.exec(line);
       if (d) duration = Number(d[1]);
-      const e = /^\s+error: (.*)$/.exec(line);
-      if (e && error === undefined) error = /^[|>]/.test(e[1]!) ? (lines[j + 1] || '').trim() : e[1]!.replace(/^['"]|['"]$/g, '');
+      const e = /^(\s+)error: (.*)$/.exec(line);
+      if (e && error === undefined) {
+        // The reporter writes a multi-line error as a quoted or block scalar whose
+        // continuation lines are indented deeper than the key. Keep all of it: the
+        // first line alone is often just "Expected values to be strictly equal:".
+        const keyIndent = e[1]!.length;
+        const parts = [e[2]!];
+        for (let k = j + 1; k < lines.length; k++) {
+          const next = lines[k]!;
+          if (next.trim() === '' ) { parts.push(''); continue; }
+          if (next.length - next.trimStart().length <= keyIndent) break;
+          parts.push(next.trim());
+        }
+        const joined = parts.join(' ').replace(/^[|>][+-]?\s*/, '').replace(/^['"]|['"]$/g, '').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
+        error = joined.length > 700 ? joined.slice(0, 700) + '…' : joined;
+      }
       if (/^\s+\.\.\.\s*$/.test(line)) break;
     }
     tests.push({
