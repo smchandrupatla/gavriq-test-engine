@@ -37,7 +37,13 @@ export const KNOWN_DEFECTS = {
 let failed = 0;
 for (const [ticket, keys] of Object.entries(KNOWN_DEFECTS)) {
   for (const key of keys) {
-    const res = await fetch(`${TE}/api/v1/test-cases/${encodeURIComponent(key)}/triage`, {
+    // Keys over 100 characters are refused as a route parameter: patch those by id.
+    let ref = key;
+    if (key.length > 90) {
+      const found = await (await fetch(`${TE}/api/v1/test-cases?q=${encodeURIComponent(key)}&limit=5`)).json();
+      ref = (found.data || []).find((c) => c.key === key)?.id || key;
+    }
+    const res = await fetch(`${TE}/api/v1/test-cases/${encodeURIComponent(ref)}/triage`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', 'x-actor-id': 'known-defects' },
       body: JSON.stringify({ triageStatus: 'Issue linked', linkedIssueUrl: `${JIRA}/${ticket}` }),
