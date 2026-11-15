@@ -384,8 +384,16 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
             }
             case 'assert_selector_text': {
               if (!step.selector) throw new Error('assert_selector_text requires selector');
-              const text = (await page.locator(step.selector).first().innerText()).trim();
               const want = step.must_contain ?? step.expected;
+              // Read the rendered text, waiting up to 10 s for it to contain what is wanted:
+              // under load WebKit can report an empty innerText for a heading that is
+              // already found but not yet painted. The text must still be present.
+              let text = '';
+              for (const deadline = Date.now() + 10000; ; ) {
+                text = (await page.locator(step.selector).first().innerText()).trim();
+                if (!want || text.includes(want) || Date.now() > deadline) break;
+                await page.waitForTimeout(250);
+              }
               if (want && !text.includes(want)) {
                 // Say what the browser really holds, so an empty rendered text can be told
                 // apart from a wrong one (raw text and markup of the element).
