@@ -397,8 +397,11 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               if (want && !text.includes(want)) {
                 // Say what the browser really holds, so an empty rendered text can be told
                 // apart from a wrong one (raw text and markup of the element).
-                const raw = await page.locator(step.selector).first().evaluate((el: Element) => ({ tc: (el.textContent || '').trim().slice(0, 80), html: el.outerHTML.slice(0, 160) })).catch(() => ({ tc: '?', html: '?' }));
-                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${want}" (textContent "${raw.tc}"; markup ${raw.html})`);
+                const raw = await page.locator(step.selector).first().evaluate((el: Element) => {
+                  const s = getComputedStyle(el); const r = el.getBoundingClientRect();
+                  return { tc: (el.textContent || '').trim().slice(0, 80), html: el.outerHTML.slice(0, 160), css: `display=${s.display} vis=${s.visibility} op=${s.opacity} fs=${s.fontSize} color=${s.color} indent=${s.textIndent} clamp=${(s as any).webkitLineClamp} ovf=${s.overflow} box=${Math.round(r.width)}x${Math.round(r.height)}` };
+                }).catch(() => ({ tc: '?', html: '?', css: '?' }));
+                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${want}" (textContent "${raw.tc}"; markup ${raw.html}; style ${raw.css})`);
               }
               break;
             }
