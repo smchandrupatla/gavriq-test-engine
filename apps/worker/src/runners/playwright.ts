@@ -387,7 +387,10 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
               const text = (await page.locator(step.selector).first().innerText()).trim();
               const want = step.must_contain ?? step.expected;
               if (want && !text.includes(want)) {
-                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${want}"`);
+                // Say what the browser really holds, so an empty rendered text can be told
+                // apart from a wrong one (raw text and markup of the element).
+                const raw = await page.locator(step.selector).first().evaluate((el: Element) => ({ tc: (el.textContent || '').trim().slice(0, 80), html: el.outerHTML.slice(0, 160) })).catch(() => ({ tc: '?', html: '?' }));
+                throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected to include "${want}" (textContent "${raw.tc}"; markup ${raw.html})`);
               }
               break;
             }
