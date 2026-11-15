@@ -53,28 +53,34 @@ export async function currentRunRetentionDays(): Promise<number> {
  * down to its last two executions per type within the hour — before the run had
  * even finished — and the record of a full run could never be read back.
  */
+/**
+ * Per-CASE rule (owner's instruction, 2026-11-15, replaces the per-type rule above):
+ * every test case keeps at least one run — its last result is never deleted. A case
+ * with three runs or fewer keeps them all; a case with MORE than three keeps only its
+ * two most recent. An execution is removed only when no case it covers needs it, and
+ * never while it (or its run) is still queued, preparing or running.
+ * Parameters $1/$2 (the per-type table) are accepted but no longer used.
+ */
 const PER_TYPE_SURPLUS_SQL = `
-  WITH per_type(test_type, keep) AS (SELECT * FROM unnest($1::text[], $2::int[])),
-  run_of AS (
-    SELECT e.id, e.status, e.created_at, e.test_case_ids, COALESCE(e.metadata->>'run_group', e.id::text) AS run
+  WITH per_case AS (
+    SELECT e.id AS exec_id, c.case_id,
+           row_number() OVER (PARTITION BY c.case_id ORDER BY e.created_at DESC, e.id) AS rn,
+           count(*) OVER (PARTITION BY c.case_id) AS n
     FROM executions e
+    CROSS JOIN LATERAL unnest(e.test_case_ids) AS c(case_id)
+    WHERE e.status NOT IN ('queued','preparing','running') AND $1::text[] IS NOT NULL AND $2::int[] IS NOT NULL
   ),
-  run_types AS (
-    SELECT r.run, tc.test_type::text AS test_type, max(r.created_at) AS last_created
-    FROM run_of r JOIN test_cases tc ON tc.id = ANY(r.test_case_ids)
-    GROUP BY 1, 2
+  needed AS (
+    SELECT exec_id FROM per_case WHERE n <= 3 OR rn <= 2
   ),
-  ranked AS (
-    SELECT rt.run, pt.keep, row_number() OVER (PARTITION BY rt.test_type ORDER BY rt.last_created DESC, rt.run) AS rn
-    FROM run_types rt JOIN per_type pt ON pt.test_type = rt.test_type
-  ),
-  kept AS (
-    SELECT run FROM ranked WHERE rn <= keep
-    UNION
-    SELECT run FROM run_of WHERE status IN ('queued','preparing','running')
+  active_runs AS (
+    SELECT COALESCE(metadata->>'run_group', id::text) AS run FROM executions WHERE status IN ('queued','preparing','running')
   )
-  SELECT r.id FROM run_of r
-  WHERE r.run IN (SELECT run FROM ranked) AND r.run NOT IN (SELECT run FROM kept)`;
+  SELECT e.id FROM executions e
+  WHERE e.status NOT IN ('queued','preparing','running')
+    AND e.id IN (SELECT exec_id FROM per_case)
+    AND e.id NOT IN (SELECT exec_id FROM needed)
+    AND COALESCE(e.metadata->>'run_group', e.id::text) NOT IN (SELECT run FROM active_runs)`;
 
 async function perTypeKeep(): Promise<{ types: string[]; keeps: number[] }> {
   const { rows: settingsRows } = await query('SELECT test_type_retention FROM settings WHERE id = true');
