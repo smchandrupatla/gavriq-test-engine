@@ -1,5 +1,26 @@
 # Sand Bench test review — progress and blockers
 
+## Update 16 November 2026 — rebaseline against a8d72039ae8e
+
+All Sand Bench cases were rebaselined against Sand Bench main `a8d72039ae8e` (staging stack `sand-bench-staging`, web 18080, API 18787) with no change to the application. The earlier October candidate described further down is superseded.
+
+**Result: 8,111 of 8,883 active cases pass (91.3%)**, up from 2,066 (23%) on 14 November. Every red case has a Jira ticket in project KAN (Sand Bench Enterprise) and is marked "Issue linked"; the record is `scripts/link-known-defects.mjs`. 55 SIT cases are skipped because the application team marks them as known defects.
+
+| Family | Total | Passed | Red (ticketed) | Skipped | Never run |
+| --- | --- | --- | --- | --- | --- |
+| SB (Sand Bench) | 7,172 | 6,995 | 163 | 0 | 14 |
+| SIT (application team's tests) | 1,368 | 1,077 | 236 | 55 | 0 |
+| TE (engine self-test) | 287 | 0 | 0 | 0 | 287 |
+| SBE (events, portals) | 25 | 14 | 11 | 0 | 0 |
+| TC, BUC, REC | 31 | 25 | 5 (+1 linking) | 0 | 0 |
+
+Engine changes made during the rebaseline: the computed-style check reads its pattern from `must_contain`; text checks wait up to 10 s and report raw text, markup and styling on failure; SIT results keep the whole error; a failing `# TODO` SIT test counts as a known defect; run retention is per case (a case's last result is never deleted; more than three runs keeps the two newest).
+
+Application defects found (not changed): KAN-1810..1818, 1984 (anonymous visitor gets the protected screen), 1997 (script error), 1999 (nine Rule Bench / Overview gaps), 2001 (Reference directory scrolls sideways), 2003 (WebKit page titles empty or clipped, about 125 cases), 2004 (five screens without a heading), 2005 (forgot-password reveals account existence), 2006 (login accepts any tenant name), 2008 (slow events catalogue, DB viewer, improvement library), 2009 (missing help script, binder, users-limit endpoint), 2011 and 2012 (events never written or memory-only). Test-side drift for the application team: KAN-1832..1837, 1958, 1998, 2000, 2002, 2007, 2010. Coverage: KAN-2014 (205 write routes have a single case each).
+
+Still open: 287 engine self-test cases need the staging engine deployed; 14 AI-agent cases need an Ollama model server on port 11434. Duplicate analysis found no safe deletions (identical objectives are browser variants or one check per use case).
+
+---
 Updated 17 October 2026 (Australia/Sydney). **The all-passed live acceptance target has not been achieved.** Changes are uncommitted for review.
 
 ## Baseline and scope
