@@ -521,17 +521,27 @@ function inboundCase(channel: string, label: string): CaseDef {
       {
         action: 'request', method: 'POST', url: '{{testhub}}/hub/to-app',
         body: { channel, systemId: `ext_${channel}_te`, systemName: `TE ${label} client`, headers: { 'x-correlation-id': msgId }, payload: { MsgId: msgId, scheme: `te.${channel}.inbound` } },
-        expected_status: 202, expect_json: [{ path: 'forwarded', equals: true }],
+        expected_status: 202, expect_json: [{ path: 'forwarded', equals: true }, { path: 'status', equals: 202 }, { path: 'event.channel', equals: channel }],
+        // The test hub gives the application 2 seconds to take the message and answers
+        // "forwarded: false" when that runs out (apps/testhub/server.mjs, /hub/to-app).
+        // A sender whose delivery was not forwarded sends it again; so does this step.
+        poll: { timeout_ms: 20000, interval_ms: 2000 },
         description: `deliver over ${channel}`,
+        text: `Have an outside system hand one message to the test hub for delivery over the ${label} channel, sending it again if the hub could not pass it on in time`,
+        expected: 'The test hub passes the message on and the application accepts it.',
       },
       {
         action: 'request', method: 'GET', url: '{{api}}/api/v1/inbound/events', headers: BEARER,
-        expected_status: 200, expected_body_contains: msgId,
+        expected_status: 200,
+        expect_json: [{ path: 'data', some: { channel, systemId: `ext_${channel}_te`, 'payload.MsgId': msgId, 'headers.x-correlation-id': msgId } }],
         poll: { timeout_ms: 10000, interval_ms: 500 },
-        description: 'inbound event recorded',
+        description: 'inbound event recorded with its channel, sender and reference number',
+        text: 'Open the application\'s list of messages received from outside systems',
+        expected: 'The message is listed with the right channel, the sender and its reference number.',
       },
     ],
     timeoutSeconds: 40,
+    flakinessNotes: 'The test hub waits at most 2 seconds for the application to take a message. On an overloaded machine the first attempt can run out of time; the delivery step therefore tries again for up to 20 seconds.',
     tags: ['integration', 'sand-bench', channel, 'inbound'],
     dataProfile: { profile: 'synthetic-correlated', data: `One JSON message with unique MsgId ${msgId} on channel "${channel}".`, source: 'Generated per run; correlation id makes the poll deterministic.' },
     expected: 'Hub forwards (202) and the application\'s inbound feed shows the MsgId within 10s.',
