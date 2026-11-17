@@ -4,19 +4,51 @@
  * Dispatches to Selenium, Playwright, HTTP, Performance, or SIT file runners.
  */
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { runSelenium } from './runners/selenium.js';
 import { runPlaywright } from './runners/playwright.js';
 import { runHttp } from './runners/http.js';
+import { validateCaseShape } from './case-shape.js';
+import { withIdentityLane } from './identity-lane.js';
 import { runPerformance } from './runners/performance.js';
-import { runSit } from './runners/sit.js';
-import { classifyCase } from '../../api/src/case-definition.js';
-import { compact, saveJson, saveLog } from './evidence.js';
+import { runSit, runSitGroup, isSitScript, sitSourceRoot, sitTestOf } from './runners/sit.js';
+import { runE2E } from './runners/e2e.js';
+import { closeBrowserPool } from './runners/playwright.js';
+import { ensureEvidence, evidencePreflight, publishEvidence, secretValues } from './evidence.js';
 
 const API = process.env.TEST_ENGINE_API || 'http://127.0.0.1:8787';
 const WORKER_ID = process.env.WORKER_ID || `worker-${randomUUID().slice(0, 8)}`;
 const POLL_MS = Number(process.env.WORKER_POLL_MS || 4000);
 const DEFAULT_BASE_URL = process.env.TARGET_BASE_URL || 'http://127.0.0.1:8001';
 const WORKER_API_KEY = process.env.WORKER_API_KEY || '';
+/** How often a running job asks whether it has been cancelled. */
+const CANCEL_POLL_MS = Number(process.env.WORKER_CANCEL_POLL_MS || 5000);
+/**
+ * How many runs this worker services in parallel. The poll loop keeps claiming
+ * queued runs until this many are in flight; it stops claiming until one finishes.
+ * The register call publishes this as `max_concurrency` so the console shows what
+ * the worker will actually accept.
+ */
+const MAX_CONCURRENCY = Number(process.env.WORKER_MAX_CONCURRENCY || 3);
+
+/**
+ * Inside a container "127.0.0.1"/"localhost" is the worker itself, not the
+ * machine the deployment under test is published on. Environments written for
+ * a host worker (local-dev, sand-bench-local, engine-local) would therefore
+ * fail every case with "fetch failed" when a containerized worker claims the
+ * job. Such targets are re-pointed at the host gateway so any environment
+ * selected in the console runs on whichever worker is online.
+ * WORKER_LOOPBACK_HOST overrides the gateway name; set it to "off" to disable.
+ */
+const IN_CONTAINER = process.env.WORKER_IN_CONTAINER
+  ? process.env.WORKER_IN_CONTAINER === 'true'
+  : existsSync('/.dockerenv');
+const LOOPBACK_HOST = process.env.WORKER_LOOPBACK_HOST || (IN_CONTAINER ? 'host.docker.internal' : '');
+
+function reachable(value: string): string {
+  if (!LOOPBACK_HOST || LOOPBACK_HOST === 'off') return value;
+  return value.replace(/(\bhttps?:\/\/)(?:127\.0\.0\.1|localhost|\[::1\])(?=[:/]|$)/gi, `$1${LOOPBACK_HOST}`);
+}
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { 'content-type': 'application/json' };
@@ -31,8 +63,34 @@ async function api(path: string, opts: RequestInit = {}) {
   });
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof body === 'object' ? JSON.stringify(body) : String(body));
+  if (!res.ok) {
+    const err = new Error(typeof body === 'object' ? JSON.stringify(body) : String(body)) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return body;
+}
+
+/**
+ * For the calls that record a verdict or close a run. A control plane that is
+ * busy for a moment (no answer, or a 5xx / 429) is asked again, so a case that
+ * ran does not lose its result and an execution is not left "running" for the
+ * abandoned-run sweep to mark as an error. An answer that says no — a cancelled
+ * run, a result the evidence gate refuses — is final and is not repeated.
+ */
+async function apiDurable(path: string, opts: RequestInit = {}, attempts = 5) {
+  let last: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await api(path, opts);
+    } catch (err) {
+      last = err;
+      const status = (err as { status?: number }).status;
+      if (status !== undefined && status < 500 && status !== 429 && status !== 408) throw err;
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
+  throw last;
 }
 
 async function register() {
@@ -42,11 +100,11 @@ async function register() {
       id: WORKER_ID,
       name: `Multi-runner Worker ${WORKER_ID}`,
       capabilities: [
-        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load', 'sit',
+        'selenium', 'playwright', 'http', 'rest', 'api', 'performance', 'load', 'sit', 'e2e',
         'out_of_container', 'in_container', 'ui', 'smoke',
       ],
       labels: { kind: 'multi', runtime: 'node' },
-      max_concurrency: 3,
+      max_concurrency: MAX_CONCURRENCY,
     }),
   });
   console.log(`[worker ${WORKER_ID}] registered at ${API}`);
@@ -61,12 +119,18 @@ async function heartbeat() {
 }
 
 async function fetchTestCase(id: string) {
-  try {
-    const res = await api(`/api/v1/test-cases/${id}`);
-    return res?.data || null;
-  } catch {
-    return null;
+  // Retried: an engine that is busy answers late or not at all, and a case that could not be
+  // read must never be run as something else (see runJob: a missing case is an error).
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const res = await api(`/api/v1/test-cases/${id}`);
+      if (res?.data) return res.data;
+    } catch {
+      /* try again */
+    }
+    await new Promise((r) => setTimeout(r, 1000 * attempt));
   }
+  return null;
 }
 
 async function fetchEnvironment(id: string | null | undefined) {
@@ -79,6 +143,60 @@ async function fetchEnvironment(id: string | null | undefined) {
   }
 }
 
+type EngineSettings = {
+  // The /api/v1/settings endpoint publishes per-type timeouts as whole seconds
+  // under this key (see apps/api/src/routes/settings.ts). The DB column is in
+  // minutes, but what the worker SEES is seconds.
+  test_type_timeout_seconds?: Record<string, number>;
+  // Historical: an older worker build read minutes. Kept here so a stale
+  // settings row still resolves on a rolling redeploy.
+  test_type_timeout_minutes?: Record<string, number>;
+  consecutive_failure_limit?: number;
+};
+// The engine's blanket default when the settings API has not published a
+// per-type override. Each test case gets 30 s before the per-case abort
+// signal cuts the runner off and the result is recorded as timed out.
+const DEFAULT_CASE_TIMEOUT_MS = 30_000;
+const DEFAULT_FAILURE_LIMIT = 20;
+
+async function fetchSettings(): Promise<EngineSettings> {
+  try {
+    const res = await api('/api/v1/settings');
+    return res?.data || {};
+  } catch (err) {
+    console.warn('[worker] could not load settings, using defaults (24h timeout, 20 consecutive failures):', (err as Error).message);
+    return {};
+  }
+}
+
+/** The configured per-test-type timeout, in ms — 24h for any type without an override. */
+function caseTimeoutMs(settings: EngineSettings, testType: string | undefined): number {
+  const key = String(testType || 'other');
+  const seconds = settings.test_type_timeout_seconds?.[key];
+  if (Number.isFinite(seconds) && (seconds as number) > 0) return (seconds as number) * 1000;
+  const minutes = settings.test_type_timeout_minutes?.[key];
+  if (Number.isFinite(minutes) && (minutes as number) > 0) return (minutes as number) * 60_000;
+  return DEFAULT_CASE_TIMEOUT_MS;
+}
+
+/**
+ * The time limit of one case. The per-type limits are set for catalogue cases —
+ * a handful of requests, one screen. A case of the application team's SIT suite
+ * carries its own budget (set at import from what kind of test it is: a whole
+ * business journey takes many minutes), and that budget applies when it is the
+ * longer one; otherwise every journey would be cut off at the limit of its type.
+ */
+function caseLimitMs(settings: EngineSettings, tc: any): number {
+  const byType = caseTimeoutMs(settings, tc?.test_type || 'other');
+  const own = Number(tc?.timeout_seconds) > 0 ? Number(tc.timeout_seconds) * 1000 : 0;
+  return isSitScript(tc?.script) ? Math.max(byType, own) : byType;
+}
+
+function failureLimitOf(settings: EngineSettings): number {
+  const n = settings.consecutive_failure_limit;
+  return Number.isInteger(n) && (n as number) > 0 ? (n as number) : DEFAULT_FAILURE_LIMIT;
+}
+
 type RunnerResult = {
   status: string;
   verdict?: string;
@@ -87,181 +205,581 @@ type RunnerResult = {
   classification?: string | null;
   metrics?: Record<string, unknown>;
   evidence?: any[];
+  /** Raw runner output (SIT TAP), turned into log evidence when the runner wrote no file of its own. */
+  output?: string;
+  /** What happened, in plain words — one line per step, then the outcome; stored on the result as its remarks. */
+  remarks?: string[];
 };
 
-async function executeCase(tc: any, baseUrl: string, prefix: string): Promise<RunnerResult> {
-  const script = tc?.script || '';
-  const plan = classifyCase(tc || {});
+/**
+ * Variables shared with runners: environment config.vars verbatim, plus any
+ * config.secret_env entries resolved from this worker's process environment
+ * (the DB stores which env var holds a secret, never the secret itself).
+ *
+ * Per-worker user pool: when the environment carries the pool credentials
+ * (`pool_user_<slot>` / `pool_pass_<slot>` on cfg.vars or cfg.secret_env),
+ * each worker is pinned deterministically to one slot (hash of WORKER_ID
+ * modulo POOL_SIZE). The pin surfaces as four vars every case can reference:
+ *   worker_slot       the 0..POOL_SIZE-1 slot index for this worker
+ *   worker_user       the username at that slot
+ *   worker_pass       the password at that slot
+ *   worker_token_var  the token key where a login step should save its token
+ *                     (so later steps can send `{{ {{worker_token_var}} }}`
+ *                     — or more usually, the catalog uses a login helper
+ *                     that reads this and writes to vars[token_var] after).
+ * Scaling `--scale test-engine-worker=N` with N <= POOL_SIZE therefore gives
+ * N distinct identities, so Sand Bench's one-session-per-user rule does not
+ * invalidate another worker's login mid-run.
+ */
+const POOL_SIZE = 8;
+const ADMIN_POOL_SIZE = 2;
+function workerPoolSlot(workerId: string, mod: number): number {
+  // Same hashSlot as apps/api/src/catalog/user-pool.ts — kept in sync here
+  // so the catalog's pickUserForWorker and the runner's buildVars agree.
+  let h = 0;
+  for (let i = 0; i < workerId.length; i++) h = ((h << 5) - h + workerId.charCodeAt(i)) | 0;
+  return Math.abs(h) % mod;
+}
+function buildVars(env: any): Record<string, string> {
+  const vars: Record<string, string> = {};
+  const cfg = env?.config || {};
+  for (const [k, v] of Object.entries(cfg.vars || {})) vars[k] = reachable(String(v));
+  for (const [k, envName] of Object.entries(cfg.secret_env || {})) {
+    const resolved = process.env[String(envName)];
+    if (resolved !== undefined) vars[k] = resolved;
+  }
+  // Pin this worker to a pool slot and expose it to cases. If the matching
+  // pool_user_<slot> / pool_pass_<slot> vars are present on this env, mirror
+  // them under the generic worker_user / worker_pass keys.
+  const uSlot = workerPoolSlot(WORKER_ID, POOL_SIZE);
+  const aSlot = workerPoolSlot(`${WORKER_ID}:admin`, ADMIN_POOL_SIZE);
+  vars.worker_id = WORKER_ID;
+  vars.worker_slot = String(uSlot);
+  vars.worker_admin_slot = String(aSlot);
+  vars.worker_token_var = `token_u${uSlot}`;
+  vars.worker_admin_token_var = `token_a${aSlot}`;
+  const uu = vars[`pool_user_${uSlot}`];
+  const up = vars[`pool_pass_${uSlot}`];
+  if (uu !== undefined) vars.worker_user = uu;
+  if (up !== undefined) vars.worker_pass = up;
+  const au = vars[`pool_admin_${aSlot}`];
+  const ap = vars[`pool_adminpass_${aSlot}`];
+  if (au !== undefined) vars.worker_admin = au;
+  if (ap !== undefined) vars.worker_adminpass = ap;
+  return vars;
+}
 
-  // A case with nothing behind it must not pass: it used to fall through to
-  // "load the base URL" and report green, which proved nothing.
-  if (!plan.executable) {
-    const log = saveLog(`${prefix}-blocked`, [
-      `# ${tc?.key || 'unknown case'} was not run`,
-      `reason: ${plan.reason}`,
-      `execution_method: ${tc?.execution_method || '(none)'}`,
-      `script: ${script || '(none)'}`,
-      `steps: ${Array.isArray(tc?.steps) ? tc.steps.length : 0}`,
-    ]);
+async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?: boolean, signal?: AbortSignal, lane?: unknown): Promise<RunnerResult> {
+  const method = (tc?.execution_method || 'selenium').toLowerCase();
+  const script = tc?.script || '';
+  const rules = tc?.validation_rules || {};
+  const vars = withIdentityLane(buildVars(env), lane);
+
+  // Atomic-contract pre-flight: refuse to run a case that references a var
+  // it cannot resolve. Keeps the worker from executing a half-defined case
+  // against a shared environment.
+  const shapeProblem = validateCaseShape(tc, vars);
+  if (shapeProblem) {
     return {
-      status: 'blocked',
+      status: 'failed',
+      verdict: 'fail',
       duration_ms: 0,
-      message: `Not executable: ${plan.reason}`,
-      classification: 'script_problem',
-      metrics: { definition: plan.kind },
-      evidence: compact([log]),
+      message: shapeProblem.slice(0, 500),
+      classification: 'atomic_contract_violation',
+      metrics: {},
+      evidence: [],
+      remarks: [`Pre-flight: ${shapeProblem}.`],
     };
   }
 
-  // Imported SIT catalog entries
-  if (plan.kind === 'sit-file') {
-    const r = await runSit({
-      script,
+  const viewport =
+    rules.viewport && Number(rules.viewport.width) > 0
+      ? { width: Number(rules.viewport.width), height: Number(rules.viewport.height) || 800 }
+      : undefined;
+  // Priority: an explicit per-run request (execution.metadata.headless) beats
+  // the case's own validation_rules.headless, which beats each runner's default.
+  const headless =
+    typeof headlessOverride === 'boolean' ? headlessOverride : typeof rules.headless === 'boolean' ? rules.headless : undefined;
+
+  const cleanupSteps = Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : [];
+  const withCleanup = async (result: RunnerResult): Promise<RunnerResult> => {
+    if (!cleanupSteps.length) return result;
+    const cleanup = await runHttp({
       baseUrl,
-      timeoutSeconds: tc?.timeout_seconds || 120,
-      evidencePrefix: prefix,
+      vars,
+      cleanupSteps,
+      cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
     });
+    if (cleanup.status === 'passed') return { ...result, evidence: [...(result.evidence || []), ...(cleanup.evidence || [])] };
+    const status = result.status === 'passed' || result.status === 'skipped' ? 'failed' : result.status;
     return {
-      status: r.status === 'skipped' ? 'skipped' : r.status,
-      verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: r.evidence || [],
+      ...result,
+      status,
+      verdict: status === 'skipped' ? undefined : 'fail',
+      classification: cleanup.classification || 'cleanup_failure',
+      message: `${result.message}; cleanup failed: ${cleanup.message}`.slice(0, 900),
+      remarks: [...(result.remarks || [result.message]), `Cleanup failed: ${cleanup.message}.`],
+      evidence: [...(result.evidence || []), ...(cleanup.evidence || [])],
     };
+  };
+
+  // Every runner branch below funnels through runCase() so cleanup is always
+  // attempted — even if the runner (or anything between the call and the
+  // wrap) throws. The atomic contract requires it (see
+  // .github/skills/test-case-lifecycle/SKILL.md, authoring step 4).
+  const runCase = async (body: () => Promise<RunnerResult>): Promise<RunnerResult> => {
+    let result: RunnerResult;
+    try {
+      result = await body();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result = {
+        status: 'failed',
+        verdict: 'fail',
+        duration_ms: 0,
+        message: msg.slice(0, 500),
+        classification: 'runner_crash',
+        metrics: {},
+        evidence: [],
+      };
+    }
+    return withCleanup(result);
+  };
+
+  // Imported SIT catalog entries
+  if (isSitScript(script) || method === 'sit') {
+    return runCase(async () => {
+      const r = await runSit({
+        script,
+        baseUrl,
+        vars,
+        timeoutSeconds: tc?.timeout_seconds || 120,
+        signal,
+        // The suite of the commit deployed on this environment, when the worker has it.
+        sourceRoot: sitSourceRoot(env?.config?.deployment?.commit),
+      });
+      return {
+        status: r.status === 'skipped' ? 'skipped' : r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: [],
+        output: r.output,
+      };
+    });
   }
 
   const common = {
     script: script || undefined,
     baseUrl,
     timeoutSeconds: tc?.timeout_seconds || 30,
-    steps: Array.isArray(tc?.steps) ? tc.steps : undefined,
-    evidencePrefix: prefix,
+    steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
+    vars,
   };
 
-  if (plan.runner === 'playwright') {
-    const r = await runPlaywright(common);
-    return {
-      status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      classification: r.classification || null,
-      evidence: r.evidence,
-    };
-  }
-
-  if (plan.runner === 'http') {
-    const r = await runHttp(common);
-    return {
-      status: r.status,
-      verdict: r.status === 'passed' ? 'pass' : 'fail',
-      duration_ms: r.duration_ms,
-      message: r.message,
-      classification: r.classification || null,
-      metrics: r.metrics || {},
-      evidence: compact([saveLog(`${prefix}-http`, r.transcript)]),
-    };
-  }
-
-  if (plan.runner === 'performance') {
-    const rules = tc?.validation_rules || {};
-    const profile = {
-      path: rules.path || '/health',
-      method: rules.method || 'GET',
-      concurrency: rules.concurrency || 5,
-      requests: rules.requests || 20,
-      durationSeconds: rules.duration_seconds || 0,
-      sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
-    };
-    const r = await runPerformance({
-      baseUrl,
-      script: tc?.script,
-      ...profile,
-      timeoutSeconds: tc?.timeout_seconds || 15,
+  if (method === 'playwright') {
+    return runCase(async () => {
+      const r = await runPlaywright({
+        ...common,
+        browser: rules.browser || 'chromium',
+        viewport,
+        headless,
+        signal,
+        extraHttpHeaders: rules.extra_http_headers && typeof rules.extra_http_headers === 'object' ? rules.extra_http_headers : undefined,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: r.evidence || [],
+      };
     });
+  }
+
+  if (method === 'e2e') {
+    return runCase(async () => {
+      const r = await runE2E({
+        baseUrl,
+        steps: Array.isArray(tc?.steps) && tc.steps.length ? tc.steps : undefined,
+        vars,
+        timeoutSeconds: tc?.timeout_seconds || 180,
+        signal,
+        // Pin the e2e runDir to the case key so the agent's plan cache survives
+        // across runs — the first-run plan is paid once, then replays are fast.
+        caseKey: tc?.key,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: r.evidence || [],
+      };
+    });
+  }
+
+  if (method === 'http' || method === 'rest' || method === 'api') {
+    // runHttp already runs cleanupSteps itself, so skip the wrapper here —
+    // double-firing would try to delete already-deleted resources.
+    try {
+      const r = await runHttp({
+        ...common,
+        signal,
+        cleanupSteps: Array.isArray(rules.cleanup_steps) ? rules.cleanup_steps : undefined,
+        cleanupTimeoutSeconds: Number(rules.cleanup_timeout_seconds) > 0 ? Number(rules.cleanup_timeout_seconds) : 30,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics || {},
+        evidence: (r as { evidence?: any[] }).evidence || [],
+      };
+    } catch (err) {
+      // Crash before runHttp's own cleanup could run: attempt it from here.
+      const msg = err instanceof Error ? err.message : String(err);
+      return withCleanup({
+        status: 'failed',
+        verdict: 'fail',
+        duration_ms: 0,
+        message: msg.slice(0, 500),
+        classification: 'runner_crash',
+        metrics: {},
+        evidence: [],
+      });
+    }
+  }
+
+  if (method === 'performance' || method === 'load' || method === 'k6' || method === 'endurance' || method === 'soak') {
+    return runCase(async () => {
+      const r = await runPerformance({
+        baseUrl,
+        vars,
+        script: tc?.script,
+        url: rules.url,
+        path: rules.path || '/health',
+        method: rules.method || 'GET',
+        concurrency: rules.concurrency || 5,
+        requests: rules.requests || 20,
+        durationSeconds: Number(rules.duration_seconds) > 0 ? Number(rules.duration_seconds) : undefined,
+        timeoutSeconds: tc?.timeout_seconds || 15,
+        // Catalog may pass explicit headers (e.g. content-type) + a JSON body
+        // for POST benchmarks (session/login, events/emit, ...). Both pass
+        // through to runPerformance verbatim; the runner templates {{var}}s
+        // in the url already — body + headers are value-objects so callers
+        // can set them literally.
+        headers: rules.headers || undefined,
+        body: rules.body !== undefined ? rules.body : undefined,
+        // Status that counts as "the responder answered correctly" — perf
+        // engineer's hook for benchmarking the 401/404 responders where
+        // a non-2xx is the expected shape.
+        expectStatus: rules.expect_status,
+        sla: rules.sla || { p95_ms: 2000, error_rate_pct: 5 },
+        signal,
+      });
+      return {
+        status: r.status,
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
+        duration_ms: r.duration_ms,
+        message: r.message,
+        remarks: r.remarks,
+        classification: r.classification || null,
+        metrics: r.metrics,
+        evidence: [],
+      };
+    });
+  }
+
+  return runCase(async () => {
+    const r = await runSelenium({ ...common, viewport, headless, signal });
     return {
       status: r.status,
       verdict: r.status === 'passed' ? 'pass' : 'fail',
       duration_ms: r.duration_ms,
       message: r.message,
       classification: r.classification || null,
-      // The per-window series is small enough to live on the result so the console can graph it.
-      metrics: { ...r.metrics, profile, timeseries: r.timeseries },
-      evidence: compact([
-        saveJson(`${prefix}-perf-samples`, 'metric', { target: `${baseUrl}${profile.path}`, profile, metrics: r.metrics, samples: r.samples }),
-      ]),
+      evidence: r.evidence || [],
     };
-  }
-
-  const r = await runSelenium(common);
-  return {
-    status: r.status,
-    verdict: r.status === 'passed' ? 'pass' : 'fail',
-    duration_ms: r.duration_ms,
-    message: r.message,
-    classification: r.classification || null,
-    evidence: r.evidence || [],
-  };
+  });
 }
 
 async function runJob(execution: any) {
   console.log(`[worker] claimed ${execution.key}`);
   const caseIds: string[] = execution.test_case_ids || [];
   const env = await fetchEnvironment(execution.environment_id);
-  const baseUrl = env?.base_url || DEFAULT_BASE_URL;
+  const baseUrl = reachable(env?.base_url || DEFAULT_BASE_URL);
+  const headlessOverride = typeof execution?.metadata?.headless === 'boolean' ? execution.metadata.headless : undefined;
   let anyFailed = false;
+  const settings = await fetchSettings();
+  const failureLimit = failureLimitOf(settings);
+  let consecutiveFailures = 0;
+  let circuitBroken = false;
 
-  for (const caseId of caseIds) {
-    const tc = await fetchTestCase(caseId);
-    const started = new Date().toISOString();
-    const prefix = `${execution.key}-${tc?.key || caseId}`;
-    const result = await executeCase(tc || { key: caseId }, baseUrl, prefix);
-    if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
-
-    await api(`/api/v1/executions/${execution.id}/results`, {
+  // No evidence, no run: a case whose proof cannot be stored is not executed.
+  const store = await evidencePreflight(API, headers());
+  if (!store.ok) {
+    console.error(`[worker] ${execution.key} blocked — ${store.reason}`);
+    for (const caseId of caseIds) {
+      await api(`/api/v1/executions/${execution.id}/results`, {
+        method: 'POST',
+        body: JSON.stringify({
+          test_case_id: caseId,
+          status: 'blocked',
+          duration_ms: 0,
+          message: `Not run: ${store.reason}`,
+          remarks: [`Not run: ${store.reason}.`],
+          classification: 'infrastructure_failure',
+        }),
+      });
+    }
+    await api(`/api/v1/executions/${execution.id}/complete`, {
       method: 'POST',
-      body: JSON.stringify({
-        test_case_id: caseId,
-        status: result.status,
-        verdict: result.verdict,
-        duration_ms: result.duration_ms,
-        started_at: started,
-        finished_at: new Date().toISOString(),
-        message: result.message,
-        classification: result.classification,
-        metrics: result.metrics || {},
-        evidence: result.evidence || [],
-      }),
+      body: JSON.stringify({ status: 'blocked' }),
     });
+    return;
+  }
+  const lane = execution?.metadata?.identity_lane;
+  const secrets = secretValues(withIdentityLane(buildVars(env), lane));
+
+  // Cancelling a run in the console must stop the work, not just relabel it:
+  // the execution's status is watched while the job runs, and a cancel aborts
+  // the case in hand (its browser is closed) and skips the rest.
+  const cancel = new AbortController();
+  const watch = setInterval(async () => {
+    try {
+      const res = await api(`/api/v1/executions/${execution.id}/status`);
+      if (res?.data?.status === 'cancelled') cancel.abort();
+    } catch {
+      /* an API that cannot answer is not a cancel */
+    }
+  }, CANCEL_POLL_MS);
+  const stopped = async () => {
+    console.log(`[worker] ${execution.key} was cancelled — stopped`);
+    // Frees this worker's slot; the API keeps the status "cancelled".
+    await api(`/api/v1/executions/${execution.id}/complete`, { method: 'POST', body: JSON.stringify({ status: 'cancelled' }) }).catch(() => undefined);
+  };
+
+  /**
+   * Record one case's verdict: evidence first, then the result. Answers what the
+   * run should do next — carry on, stop because it was cancelled, or stop because
+   * too many cases in a row failed.
+   */
+  const report = async (caseId: string, tc: any, started: string, result: RunnerResult): Promise<'next' | 'cancelled' | 'circuit'> => {
+    if (result.status !== 'passed' && result.status !== 'skipped') anyFailed = true;
+    if (result.status === 'passed') consecutiveFailures = 0;
+    else if (result.status !== 'skipped') consecutiveFailures++;
+
+    const evidence = await publishEvidence(
+      ensureEvidence(result, {
+        method: isSitScript(tc?.script) ? 'sit' : String(tc?.execution_method || 'selenium').toLowerCase(),
+        caseKey: tc?.key,
+        caseName: tc?.name,
+        target: baseUrl,
+        rules: tc?.validation_rules,
+        secrets,
+      }),
+      { api: API, headers: headers(), executionId: execution.id, caseKey: tc?.key }
+    );
+
+    try {
+      await apiDurable(`/api/v1/executions/${execution.id}/results`, {
+        method: 'POST',
+        body: JSON.stringify({
+          test_case_id: caseId,
+          status: result.status,
+          verdict: result.verdict,
+          duration_ms: result.duration_ms,
+          started_at: started,
+          finished_at: new Date().toISOString(),
+          message: result.message,
+          remarks: result.remarks && result.remarks.length ? result.remarks : [result.message],
+          classification: result.classification,
+          metrics: result.metrics || {},
+          evidence,
+        }),
+      });
+    } catch (err) {
+      // The API refuses results for a cancelled run (409): same outcome as the watcher noticing.
+      if (String((err as Error).message).includes('execution_cancelled')) return 'cancelled';
+      throw err;
+    }
+
+    // N test cases in a row failed — whether at the start of the run or partway through it —
+    // so the rest of this execution is stopped rather than burning through a broken build.
+    if (consecutiveFailures >= failureLimit) {
+      circuitBroken = true;
+      console.log(`[worker] ${execution.key} circuit breaker: ${consecutiveFailures} consecutive failures (limit ${failureLimit}) — stopping`);
+      return 'circuit';
+    }
+    return 'next';
+  };
+
+  const fetched = new Map<string, any>();
+  const caseOf = async (id: string) => {
+    if (!fetched.has(id)) fetched.set(id, await fetchTestCase(id));
+    return fetched.get(id);
+  };
+  const done = new Set<string>();
+  const sitSource = sitSourceRoot(env?.config?.deployment?.commit);
+
+  try {
+  run: for (const caseId of caseIds) {
+    if (done.has(caseId)) continue;
+    if (cancel.signal.aborted) return stopped();
+    const tc = await caseOf(caseId);
+
+    // A SIT file is run ONCE for every case of this execution that is one of its
+    // tests: the file's tests share a signed-in session and a browser, and the
+    // application caps sessions per user, so a sign-in per case would end the
+    // sessions of the cases before it (and take far longer).
+    const sit = sitTestOf(tc?.script);
+    if (sit) {
+      const group: Array<{ id: string; tc: any; name?: string }> = [];
+      for (const otherId of caseIds) {
+        if (done.has(otherId)) continue;
+        const other = otherId === caseId ? tc : await caseOf(otherId);
+        const o = sitTestOf(other?.script);
+        if (o && o.file === sit.file) group.push({ id: otherId, tc: other, name: o.name });
+      }
+      if (group.length > 1) {
+        const started = new Date().toISOString();
+        // Each case keeps its own time limit; together they are the file's.
+        const limitMs = Math.min(4 * 3_600_000, group.reduce((n, g) => n + caseLimitMs(settings, g.tc), 0));
+        const groupSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
+        const perTest = Math.max(...group.map((g) => Number(g.tc?.timeout_seconds) || 120));
+        const outcomes = await runSitGroup({
+          file: sit.file,
+          tests: group.map((g) => ({ id: g.id, name: g.name })),
+          baseUrl,
+          vars: withIdentityLane(buildVars(env), lane),
+          timeoutSeconds: perTest,
+          signal: groupSignal,
+          sourceRoot: sitSource,
+        });
+        // The result of a file that was cut short by a run cancel is not a verdict: nothing is reported.
+        if (cancel.signal.aborted) return stopped();
+        for (const g of group) {
+          done.add(g.id);
+          const r = outcomes.get(g.id)!;
+          const timedOut = groupSignal.aborted && r.status !== 'passed' && r.status !== 'skipped';
+          const next = await report(g.id, g.tc, started, {
+            status: timedOut ? 'timed_out' : r.status === 'skipped' ? 'skipped' : r.status,
+            verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+            duration_ms: r.duration_ms,
+            message: timedOut ? `Timed out: the SIT file ${sit.file} was stopped after ${Math.round(limitMs / 60_000)} minute(s) before this test finished` : r.message,
+            remarks: [
+              `Ran ${sit.file} once for the ${group.length} cases of this run that are tests of it.`,
+              ...(r.remarks || []),
+              r.status === 'passed' ? `Result: passed — ${r.message}.` : `Result: ${timedOut ? 'timed out' : r.status} — ${r.message}.`,
+            ],
+            classification: timedOut ? 'timeout' : r.classification || null,
+            metrics: r.metrics || {},
+            evidence: [],
+            output: r.output,
+          });
+          if (next === 'cancelled') return stopped();
+          if (next === 'circuit') break run;
+        }
+        continue;
+      }
+    }
+
+    done.add(caseId);
+    const started = new Date().toISOString();
+    const testType = tc?.test_type || 'other';
+    const limitMs = caseLimitMs(settings, tc);
+    const caseSignal = AbortSignal.any([cancel.signal, AbortSignal.timeout(limitMs)]);
+    // A case the engine could not give us is an error, never a default browser visit that "passes".
+    let result: RunnerResult = tc
+      ? await executeCase(tc, baseUrl, env, headlessOverride, caseSignal, lane)
+      : { status: 'error', verdict: 'fail', message: `Could not read test case ${caseId} from the engine; it was not run`, classification: 'infrastructure_failure', duration_ms: 0 } as RunnerResult;
+    // The result of a case that was cut short by a run cancel is not a verdict: it is not reported.
+    if (cancel.signal.aborted) return stopped();
+    // The per-test-type timeout fired instead: the case is killed and recorded as timed out,
+    // regardless of what status the runner itself returned on abort, and the run continues.
+    if (caseSignal.aborted && result.status !== 'passed' && result.status !== 'skipped') {
+      result = {
+        ...result,
+        status: 'timed_out',
+        verdict: 'fail',
+        classification: 'timeout',
+        message: `Timed out after ${Math.round(limitMs / 60_000)} minute(s) — limit for test type "${testType}"`,
+        remarks: [...(result.remarks || []), `Stopped: timed out after ${Math.round(limitMs / 60_000)} minute(s), the limit for ${testType} tests.`],
+      };
+    }
+    const next = await report(caseId, tc, started, result);
+    if (next === 'cancelled') return stopped();
+    if (next === 'circuit') break;
+  }
+  } finally {
+    clearInterval(watch);
   }
 
-  await api(`/api/v1/executions/${execution.id}/complete`, {
+  await apiDurable(`/api/v1/executions/${execution.id}/complete`, {
     method: 'POST',
-    body: JSON.stringify({ status: anyFailed ? 'failed' : 'passed' }),
+    body: JSON.stringify({
+      status: anyFailed ? 'failed' : 'passed',
+      ...(circuitBroken
+        ? { metadata: { circuit_breaker: { triggered: true, consecutive_failures: consecutiveFailures, limit: failureLimit } } }
+        : {}),
+    }),
   });
-  console.log(`[worker] completed ${execution.key} → ${anyFailed ? 'failed' : 'passed'}`);
+  console.log(`[worker] completed ${execution.key} → ${anyFailed ? 'failed' : 'passed'}${circuitBroken ? ' (circuit breaker stopped the run early)' : ''}`);
 }
+
+let inFlight = 0;
 
 async function pollLoop() {
   await register();
   setInterval(heartbeat, 15_000);
   for (;;) {
+    // When a claim lands, poll again immediately so the worker rapidly fills
+    // its concurrency slots instead of waiting POLL_MS between back-to-back
+    // claims. Only an empty queue (or an error) backs off for POLL_MS.
+    let claimedSomething = false;
     try {
-      const claimed = await api('/api/v1/executions/claim', {
-        method: 'POST',
-        body: JSON.stringify({ worker_id: WORKER_ID }),
-      });
-      if (claimed?.data) await runJob(claimed.data);
+      if (inFlight < MAX_CONCURRENCY) {
+        const claimed = await api('/api/v1/executions/claim', {
+          method: 'POST',
+          body: JSON.stringify({ worker_id: WORKER_ID }),
+        });
+        if (claimed?.data) {
+          claimedSomething = true;
+          inFlight++;
+          runJob(claimed.data)
+            .catch((err) => console.warn(`[runJob] ${claimed.data?.key || '?'}`, (err as Error).message))
+            .finally(() => { inFlight--; });
+        }
+      }
     } catch (err) {
       console.warn('[poll]', (err as Error).message);
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    if (!claimedSomething) await new Promise((r) => setTimeout(r, POLL_MS));
   }
+}
+
+// Close the pooled browsers before the worker exits so Chromium/Firefox/WebKit
+// shut down cleanly instead of leaving zombie processes in the container.
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.once(sig, () => {
+    closeBrowserPool().finally(() => process.exit(0));
+  });
 }
 
 pollLoop().catch((err) => {
   console.error(err);
-  process.exit(1);
+  closeBrowserPool().finally(() => process.exit(1));
 });

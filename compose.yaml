@@ -26,6 +26,12 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://sitconsole:sitconsole@sit-console-db:5432/sitconsole
+      # Postgres pool size (apps/api/src/db/client.ts). Must stay comfortably
+      # above WORKER_SCALE_MAX below it or scaling the worker pool exhausts
+      # the pool and every worker heartbeat/poll starts failing with
+      # "timeout exceeded when trying to connect" (observed with 20 workers
+      # against the old default of 10).
+      DB_POOL_MAX: ${DB_POOL_MAX:-50}
       PORT: "8787"
       HOST: "0.0.0.0"
       API_INTERNAL_PORT: "18787"
@@ -34,6 +40,20 @@ services:
       AUTO_SEED: "true"
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
       EVIDENCE_DIR: /data/evidence
+      # Evidence gate: enforce | report | off (docs/RUN-TRIGGER-AND-EVIDENCE.md)
+      EVIDENCE_GATE: ${EVIDENCE_GATE:-report}
+      EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-0}
+      SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
+      TRIGGER_API_KEYS: ${TRIGGER_API_KEYS:-}
+      # Run SLA budget in seconds (planner target). 600 = 10 minutes.
+      SLA_SECONDS: ${SLA_SECONDS:-600}
+      # Upper bound on auto-scaling. Keep comfortably above the planner's
+      # target so a slow case profile has headroom.
+      WORKER_SCALE_MAX: ${WORKER_SCALE_MAX:-40}
+      AUTO_SCALE_WORKERS: ${AUTO_SCALE_WORKERS:-1}
+      # Quality Insights: with a key "Refresh insights" is written by Claude, without one by the built-in rules.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      INSIGHTS_MODEL: ${INSIGHTS_MODEL:-claude-opus-5}
       LOG_DIR: /var/log/sandbench
       LOG_SERVICE: sit-console
       SIT_CONSOLE_STORE: /data/history.json
@@ -42,7 +62,12 @@ services:
       SIT_DEFAULT_SUITES: health,gui,security
       SIT_ON_START: "false"
       SIT_TESTHUB_BASE: ${SIT_CONSOLE_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
-      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:8080}
+      SIT_WEB_BASE: ${SIT_CONSOLE_SIT_WEB_BASE:-http://host.docker.internal:80}
+      # Remote-execution webhook secrets, referenced by name from
+      # config/remote-triggers.json (secret values live only here).
+      SAND_BENCH_WEBHOOK_SECRET: ${SAND_BENCH_WEBHOOK_SECRET:-}
+      # Public URL the engine prints as the webhook endpoint (for display).
+      ENGINE_PUBLIC_URL: ${ENGINE_PUBLIC_URL:-http://127.0.0.1:8797}
     ports:
       - "127.0.0.1:${TEST_ENGINE_HOST_PORT:-8787}:8787"
     extra_hosts:
@@ -54,6 +79,28 @@ services:
       - type: bind
         source: ./apps/logging
         target: /opt/sbe-logging
+        read_only: true
+        bind:
+          create_host_path: true
+      # Remote-execution trigger config: file-edit, no restart needed.
+      - type: bind
+        source: ./config
+        target: /app/config
+        read_only: true
+      # The fixer-agent runs on the host and edits catalog files under
+      # apps/api/src/catalog/. The engine's reseed subprocess (spawned fresh
+      # via tsx by seed-realistic-catalog.ts) reads the on-disk files, so the
+      # host and container must see the same bytes. Mount is read-write so the
+      # engine can also git-checkout to roll back a sibling-regressing patch.
+      - type: bind
+        source: ./apps/api/src/catalog
+        target: /app/apps/api/src/catalog
+      # Exported Sand Bench sources, one folder per deployed commit (written by
+      # deploy/staging/deploy.mjs). The SIT importer reads the application team's
+      # suite of the deployed commit from here (import-sit-catalog.ts --env …).
+      - type: bind
+        source: ${SBE_SOURCES_DIR:-../sand-bench-staging/src}
+        target: /app/sbe-src
         read_only: true
         bind:
           create_host_path: true
@@ -82,27 +129,60 @@ services:
         condition: service_healthy
     environment:
       TEST_ENGINE_API: http://test-engine:8787
-      TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8080}
-      WORKER_POLL_MS: "4000"
+      TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
+      WORKER_POLL_MS: "2000"
+      WORKER_MAX_CONCURRENCY: ${WORKER_MAX_CONCURRENCY:-5}
       WORKER_API_KEY: ${WORKER_API_KEY:-}
       CHROME_BIN: /usr/bin/chromium
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       EVIDENCE_DIR: /data/evidence
-      # SIT cases run by the worker target the same system under test as the SIT runner.
-      # SIT_WEB_BASE is overridden per run by the execution environment's base URL.
-      SIT_API_BASE: ${SIT_SIT_API_BASE:-http://host.docker.internal:8787}
-      SIT_DBVIEWER_BASE: ${SIT_SIT_DBVIEWER_BASE:-http://host.docker.internal:8090}
-      SIT_TESTHUB_BASE: ${SIT_SIT_TESTHUB_BASE:-http://host.docker.internal:8091}
-      SIT_WEB_BASE: ${SIT_SIT_WEB_BASE:-http://host.docker.internal:80}
+      # Sand Bench demo credentials. The DB stores which env var name holds a
+      # secret (`secret_env`), never the secret itself; the worker resolves it
+      # from its own process environment. Dev stack ships 'password'; override
+      # for staging/other deployments via a .env file or shell export.
+      SB_DEMO_PASSWORD: ${SB_DEMO_PASSWORD:-password}
+      SB_DEMO_ADMIN_PASSWORD: ${SB_DEMO_ADMIN_PASSWORD:-password}
+      SB_STAGING_PASSWORD: ${SB_STAGING_PASSWORD:-password}
+      # Password of the staging operator pool (pool.op0…): one identity per identity
+      # lane, set by deploy/staging/user-pool.mjs. Fictional, staging only.
+      SB_STAGING_POOL_PASSWORD: ${SB_STAGING_POOL_PASSWORD:-SandBench-Pool-Stage-01}
     volumes:
       - test-engine-evidence:/data/evidence
+      # The same exported sources: a SIT case runs the file of the commit deployed
+      # on its environment (apps/worker/src/runners/sit.ts sitSourceRoot). Mounted
+      # under /app so the files resolve their packages from the worker's node_modules.
+      - type: bind
+        source: ${SBE_SOURCES_DIR:-../sand-bench-staging/src}
+        target: /app/sbe-src
+        read_only: true
+        bind:
+          create_host_path: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    shm_size: "256mb"
+    # Chromium, Firefox and WebKit all keep their render buffers in /dev/shm;
+    # 256mb was sized for Chrome alone and lets the larger engines crash mid-page.
+    shm_size: "1gb"
     restart: unless-stopped
     profiles:
       - workers
+
+  # Fires due schedules through the API (cron expressions in SCHEDULER_TZ).
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gavriq-test-engine:local
+    command: ["npx", "tsx", "apps/api/src/scheduler.ts"]
+    depends_on:
+      test-engine:
+        condition: service_healthy
+    environment:
+      TEST_ENGINE_API: http://test-engine:8787
+      WORKER_API_KEY: ${WORKER_API_KEY:-}
+      SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
+      SCHEDULER_POLL_MS: "60000"
+    restart: unless-stopped
 
   sit:
     build:

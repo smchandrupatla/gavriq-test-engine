@@ -48,31 +48,22 @@ export async function maybeAutoSeed() {
   }
 
   try {
-    if (auto) {
-      const { rows } = await query(`SELECT count(*)::int AS c FROM test_cases`);
-      if ((rows[0]?.c || 0) === 0) {
-        console.log('[auto-seed] empty repository — seeding base smoke pack...');
-        await runTsx('apps/api/src/seed.ts');
-      } else {
-        console.log('[auto-seed] test cases already present, skipping base seed');
-      }
-    }
-
-    // Sand Bench taxonomy
+    // Realistic executable catalog (Sand Bench + engine self-tests). Replaces
+    // the old base smoke pack and the display-only sandbench taxonomy seeds.
     if (forceSandbench || auto) {
       const { rows } = await query(
-        `SELECT count(*)::int AS c FROM test_cases WHERE 'sandbench' = ANY(tags)`
+        `SELECT count(*)::int AS c FROM test_cases WHERE created_by = 'realistic-catalog'`
       );
       const count = rows[0]?.c || 0;
       if (forceSandbench || count === 0) {
         console.log(
           forceSandbench
-            ? '[auto-seed] SEED_SANDBENCH=true — loading Sand Bench catalog...'
-            : '[auto-seed] no sandbench-tagged cases — loading Sand Bench catalog...'
+            ? '[auto-seed] SEED_SANDBENCH=true — seeding realistic catalog...'
+            : '[auto-seed] no realistic-catalog cases — seeding realistic catalog...'
         );
-        await runTsx('apps/api/src/seed-sandbench-catalog.ts');
+        await runTsx('apps/api/src/seed-realistic-catalog.ts');
       } else {
-        console.log(`[auto-seed] sandbench cases already present (${count}), skipping`);
+        console.log(`[auto-seed] realistic catalog already present (${count} cases), skipping`);
       }
     }
 

@@ -1,99 +1,372 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+/**
+ * Schedules: fire a run on a cron expression (see cron.ts) or on a named event
+ * (after_build, after_deploy, …). A schedule names either
+ *   - an application + environment (+ optional scope): the whole application is
+ *     planned through the same planner as POST /api/v1/runs — one execution per
+ *     suite, safety policy honored, grouped as one run; or
+ *   - a legacy target: test_plan_id / test_suite_id / test_case_ids, queued as
+ *     one execution.
+ */
+import type { FastifyInstance } from 'fastify';
+import { query } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
-import {
-  deleteSchedule, executionPlan, fire, fireEvent, listSchedules, previewCron, previewTarget,
-  runSchedule, saveSchedule, schedulerOptions, SchedulerError, DEFAULT_TZ,
-} from '../schedule/service.js';
-import { normalizeTarget, TargetError } from '../schedule/target.js';
-import { withTransaction } from '../db/client.js';
+import { defaultTimeZone, isValidExpression, nextFire, parseOneTime } from '../cron.js';
+import { queueRun } from './trigger.js';
+import { createDeployment } from '../infra.js';
+import { startCycleRun } from '../cycle-run.js';
 
-function fail(reply: FastifyReply, err: unknown) {
-  if (err instanceof SchedulerError) return reply.status(err.statusCode).send({ error: err.message });
-  if (err instanceof TargetError) return reply.status(400).send({ error: err.message });
-  throw err;
+async function resolveId(table: 'applications' | 'environments', ref: unknown): Promise<string | null | undefined> {
+  if (ref === null) return null;
+  if (typeof ref !== 'string' || !ref) return undefined;
+  const { rows } = await query(`SELECT id FROM ${table} WHERE id::text = $1 OR key = $1`, [ref]);
+  return rows[0]?.id ?? undefined;
 }
 
-/** Scheduler — Run now, cron schedules, event triggers and the Execution Plan. */
+function withNextRun(s: any, tz: string) {
+  const oneTime = s.cron_expression ? parseOneTime(s.cron_expression) : null;
+  let next: string | null;
+  if (oneTime) {
+    // A one-time schedule's "next" is its timestamp until it fires, then nothing.
+    next = s.enabled && !s.last_run_at ? oneTime.toISOString() : null;
+  } else if (s.enabled && s.cron_expression && !/^every:/i.test(s.cron_expression)) {
+    next = nextFire(s.cron_expression, new Date(), tz)?.toISOString() ?? null;
+  } else {
+    next = s.next_run_at ?? null;
+  }
+  return { ...s, next_run_at: next, time_zone: tz };
+}
+
+/** Queue whatever a schedule targets. Returns the HTTP status and body to answer with. */
+async function fire(s: any, opts: { requested_by: string; trigger_source: string; environment_id?: string | null; event?: string; metadata?: Record<string, unknown> }) {
+  const environment = opts.environment_id || s.environment_id;
+  // The schedule form writes two user-facing choices into scope: run_type
+  // (deploy mode, "run_only" by default) and application_version (branch/tag).
+  // Pull them out of scope here and stamp them onto every execution the
+  // schedule creates so they show in the App version column + filter and
+  // so a future deploy orchestrator can read the run_type from metadata.
+  const scope = s.scope && typeof s.scope === 'object' ? s.scope : {};
+  const runType = typeof scope.run_type === 'string' ? scope.run_type.trim() : '';
+  const appVersion = typeof scope.application_version === 'string' ? scope.application_version.trim() : '';
+  // "Stop after N runs" (schedule form). Count prior fires by distinct run_group
+  // on executions tagged with this schedule_id, falling back to execution key
+  // for the legacy case-id path that writes one row per fire. When the cap is
+  // reached, pause the schedule so the poller stops picking it up.
+  const maxFires = Number((scope as any).max_fires) || 0;
+  if (maxFires > 0) {
+    const { rows: countRows } = await query<{ n: string }>(
+      `SELECT COUNT(DISTINCT COALESCE(metadata->>'run_group', key))::text AS n
+         FROM executions
+        WHERE metadata->>'schedule_id' = $1`,
+      [s.id]
+    );
+    const fired = Number(countRows[0]?.n || 0);
+    if (fired >= maxFires) {
+      await query('UPDATE schedules SET enabled = false WHERE id = $1', [s.id]);
+      return { status: 409, body: { error: `Schedule "${s.name}" has reached its ${maxFires}-run limit; paused.`, code: 'max_fires_reached' } };
+    }
+  }
+  // Auto-fix opt-in on a schedule (scope.auto_fix on the form) flows through to
+  // queueRun via metadata.auto_fix, which is what opens the per-run fix loop
+  // (apps/api/src/run-fix-loop.ts). Each firing of the schedule opens its own
+  // loop, so a nightly "retry twice on failure" schedule yields one fresh loop
+  // per night rather than reusing yesterday's.
+  const autoFix = (scope as any).auto_fix;
+  const autoFixMeta =
+    autoFix && typeof autoFix === 'object' && (autoFix.enabled === true || autoFix.enabled === 'true')
+      ? { auto_fix: { enabled: true, max_attempts: Number(autoFix.max_attempts) || undefined } }
+      : {};
+  const scheduleMeta: Record<string, unknown> = {
+    schedule_id: s.id,
+    schedule_name: s.name,
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.metadata || {}),
+    ...(appVersion ? { application_version: appVersion } : {}),
+    ...(runType ? { run_type: runType } : {}),
+    ...autoFixMeta,
+  };
+  const reason = opts.event ? `${s.name} (${opts.event})` : s.name;
+
+  if (s.application_id) {
+    if (!environment) return { status: 400, body: { error: `Schedule "${s.name}" has no environment` } };
+    // Resolve the schedule's application_id to the key — deployments.application
+    // and cycle_runs.application are text columns that downstream consumers
+    // expect to hold the key (not the UUID).
+    const appKey = s.application_key || (await query<{ key: string }>(`SELECT key FROM applications WHERE id = $1`, [s.application_id])).rows[0]?.key || s.application_id;
+    // Dispatch on run_type. The three "deploy around a run" modes
+    // (deploy_run_teardown, deploy_and_run, deploy_only) go through
+    // createDeployment with the application_version as the git ref. The two
+    // repeating modes (deploy_run_teardown_loop, clean_cycle) go through
+    // startCycleRun. "run_only" and anything unknown fall through to the
+    // plain queueRun() path.
+    if (runType === 'deploy_only' || runType === 'deploy_and_run' || runType === 'deploy_run_teardown') {
+      const runRequest = runType === 'deploy_only'
+        ? null
+        : {
+            application: appKey,
+            environment,
+            scope,
+            reason,
+            trigger_source: opts.trigger_source,
+            requested_by: opts.requested_by,
+            metadata: scheduleMeta,
+          };
+      const dep = await createDeployment(
+        {
+          application: appKey,
+          environment,
+          mode: runType === 'deploy_only' ? 'deploy_only' : 'deploy_and_run',
+          ref: appVersion || null,
+          teardown_after_run: runType === 'deploy_run_teardown' ? true : runType === 'deploy_and_run' ? false : null,
+          requested_by: opts.requested_by,
+          reason: `scheduled: ${reason}`,
+          run_request: runRequest,
+        },
+        opts.requested_by
+      );
+      if (dep.status < 300) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+      return { status: dep.status, body: dep.body };
+    }
+    if (runType === 'deploy_run_teardown_loop' || runType === 'clean_cycle') {
+      const iterations = Math.max(1, Math.min(100, Number(scope.iterations) || 1));
+      const outcome = await startCycleRun(
+        {
+          application: appKey,
+          environment,
+          iterations,
+          clean_start: runType === 'clean_cycle',
+          requestedBy: opts.requested_by,
+        },
+        opts.requested_by
+      );
+      if (outcome.status < 300) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+      return { status: outcome.status, body: outcome.body };
+    }
+    // run_only (default) or an unknown run_type — plain queueRun path.
+    const outcome = await queueRun(
+      {
+        application: s.application_id,
+        environment,
+        scope,
+        reason,
+        trigger_source: opts.trigger_source,
+        requested_by: opts.requested_by,
+        metadata: scheduleMeta,
+      },
+      opts.requested_by
+    );
+    // A deferred outcome (stack was down, deploy queued, run follows) counts as fired: the occurrence is consumed.
+    if (outcome.queued || outcome.deferred) await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+    return { status: outcome.status, body: outcome.body, queued: outcome.queued };
+  }
+
+  let caseIds: string[] = s.test_case_ids || [];
+  if (!caseIds.length && s.test_suite_id) {
+    const suiteCases = await query('SELECT test_case_id FROM test_case_suites WHERE test_suite_id = $1', [s.test_suite_id]);
+    caseIds = suiteCases.rows.map((r: any) => r.test_case_id);
+  }
+  if (!caseIds.length && !s.test_plan_id) {
+    return { status: 400, body: { error: `Schedule "${s.name}" has no application, test cases or plan` } };
+  }
+  const key = `${opts.event ? `evt-${opts.event}` : 'sched'}-${Date.now().toString(36)}`;
+  const exec = await query(
+    `INSERT INTO executions (
+       key, requested_by, test_plan_id, test_suite_id, test_case_ids,
+       environment_id, status, trigger_source, metadata
+     ) VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8::jsonb)
+     RETURNING *`,
+    [key, opts.requested_by, s.test_plan_id, s.test_suite_id, caseIds, environment, opts.trigger_source, JSON.stringify(scheduleMeta)]
+  );
+  await query(`UPDATE schedules SET last_run_at = now() WHERE id = $1`, [s.id]);
+  return { status: 202, body: { data: exec.rows[0], message: 'Execution queued from schedule' } };
+}
+
 export async function scheduleRoutes(app: FastifyInstance) {
-  app.get('/api/v1/schedules', async (_req, reply) => reply.send({ data: await listSchedules() }));
+  const tz = defaultTimeZone();
+
+  app.get('/api/v1/schedules', async (_req, reply) => {
+    const { rows } = await query(
+      `SELECT s.*, a.key AS application_key, e.key AS environment_key
+       FROM schedules s
+       LEFT JOIN applications a ON a.id = s.application_id
+       LEFT JOIN environments e ON e.id = s.environment_id
+       ORDER BY s.name`
+    );
+    return reply.send({ data: rows.map((s) => withNextRun(s, tz)) });
+  });
 
   app.post<{ Body: Record<string, unknown> }>('/api/v1/schedules', async (req, reply) => {
-    try {
-      const data = await saveSchedule(null, req.body || {}, req.actor?.id ?? (req.body?.created_by as string) ?? null);
-      await audit(req, 'schedule.create', 'schedule', data.id, { name: data.name, cron: data.cron_expression });
-      return reply.status(201).send({ data });
-    } catch (err) { return fail(reply, err); }
+    const b = req.body || {};
+    if (!b.name) return reply.status(400).send({ error: 'name required' });
+    if (!b.cron_expression && !b.event_trigger) {
+      return reply.status(400).send({ error: 'cron_expression or event_trigger required' });
+    }
+    if (b.cron_expression && !isValidExpression(String(b.cron_expression))) {
+      return reply.status(400).send({ error: 'cron_expression must be five cron fields ("0 2 * * *"), @hourly/@daily/@weekly, every:N, or at:<ISO date-time> for a one-time run' });
+    }
+
+    const applicationId = await resolveId('applications', b.application ?? b.application_key ?? b.application_id);
+    if (applicationId === undefined && (b.application || b.application_key || b.application_id)) {
+      return reply.status(404).send({ error: 'Application not found' });
+    }
+    const environmentId = await resolveId('environments', b.environment ?? b.environment_key ?? b.environment_id);
+    if (environmentId === undefined && (b.environment || b.environment_key || b.environment_id)) {
+      return reply.status(404).send({ error: 'Environment not found' });
+    }
+    if (!applicationId && !b.test_plan_id && !b.test_suite_id && !(Array.isArray(b.test_case_ids) && b.test_case_ids.length)) {
+      return reply.status(400).send({ error: 'Provide application (with environment), or test_plan_id / test_suite_id / test_case_ids' });
+    }
+    if (applicationId && !environmentId) {
+      return reply.status(400).send({ error: 'An application schedule needs an environment' });
+    }
+
+    const { rows } = await query(
+      `INSERT INTO schedules (
+         name, cron_expression, event_trigger, application_id, scope, test_plan_id, test_suite_id,
+         test_case_ids, environment_id, enabled, created_by
+       ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,COALESCE($10,true),$11)
+       RETURNING *`,
+      [
+        b.name,
+        b.cron_expression ?? null,
+        b.event_trigger ?? null,
+        applicationId ?? null,
+        JSON.stringify(b.scope && typeof b.scope === 'object' ? b.scope : {}),
+        b.test_plan_id ?? null,
+        b.test_suite_id ?? null,
+        b.test_case_ids ?? [],
+        environmentId ?? null,
+        b.enabled ?? true,
+        b.created_by ?? req.actor?.id ?? null,
+      ]
+    );
+    await audit(req, 'schedule.create', 'schedule', rows[0]!.id, { name: b.name, cron_expression: b.cron_expression ?? null, event_trigger: b.event_trigger ?? null });
+    return reply.status(201).send({ data: withNextRun(rows[0], tz) });
   });
 
-  app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>('/api/v1/schedules/:id', async (req, reply) => {
-    try {
-      const data = await saveSchedule(req.params.id, req.body || {}, req.actor?.id ?? null);
-      await audit(req, 'schedule.update', 'schedule', data.id, { fields: Object.keys(req.body || {}) });
-      return reply.send({ data });
-    } catch (err) { return fail(reply, err); }
-  });
+  app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    '/api/v1/schedules/:id',
+    async (req, reply) => {
+      const b = req.body || {};
+      if (b.cron_expression && !isValidExpression(String(b.cron_expression))) {
+        return reply.status(400).send({ error: 'cron_expression must be five cron fields ("0 2 * * *"), @hourly/@daily/@weekly, or every:N' });
+      }
+      const applicationId = await resolveId('applications', b.application ?? b.application_key ?? b.application_id);
+      if (applicationId === undefined && (b.application || b.application_key || b.application_id)) {
+        return reply.status(404).send({ error: 'Application not found' });
+      }
+      const environmentId = await resolveId('environments', b.environment ?? b.environment_key ?? b.environment_id);
+      if (environmentId === undefined && (b.environment || b.environment_key || b.environment_id)) {
+        return reply.status(404).send({ error: 'Environment not found' });
+      }
+      const { rows } = await query(
+        `UPDATE schedules SET
+           name = COALESCE($2, name),
+           cron_expression = COALESCE($3, cron_expression),
+           event_trigger = COALESCE($4, event_trigger),
+           enabled = COALESCE($5, enabled),
+           environment_id = COALESCE($6, environment_id),
+           application_id = COALESCE($7, application_id),
+           scope = COALESCE($8::jsonb, scope),
+           test_case_ids = COALESCE($9, test_case_ids),
+           updated_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [
+          req.params.id,
+          b.name ?? null,
+          b.cron_expression ?? null,
+          b.event_trigger ?? null,
+          b.enabled ?? null,
+          environmentId ?? null,
+          applicationId ?? null,
+          b.scope && typeof b.scope === 'object' ? JSON.stringify(b.scope) : null,
+          b.test_case_ids ?? null,
+        ]
+      );
+      if (!rows[0]) return reply.status(404).send({ error: 'Schedule not found' });
+      await audit(req, 'schedule.update', 'schedule', rows[0].id, { changed_fields: Object.keys(b) });
+      return reply.send({ data: withNextRun(rows[0], tz) });
+    }
+  );
 
   app.delete<{ Params: { id: string } }>('/api/v1/schedules/:id', async (req, reply) => {
-    try {
-      await deleteSchedule(req.params.id);
-      await audit(req, 'schedule.delete', 'schedule', req.params.id, {});
-      return reply.status(204).send();
-    } catch (err) { return fail(reply, err); }
+    const { rows } = await query('DELETE FROM schedules WHERE id = $1 RETURNING id, name', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Schedule not found' });
+    await audit(req, 'schedule.delete', 'schedule', rows[0].id, { name: rows[0].name });
+    return reply.status(204).send();
   });
 
-  /** Fire a schedule immediately. */
-  app.post<{ Params: { id: string }; Body?: { requested_by?: string } }>('/api/v1/schedules/:id/run', async (req, reply) => {
-    try {
-      const data = await runSchedule(req.params.id, 'manual', req.body?.requested_by || req.actor?.id || 'operator');
-      if (data?.outcome === 'skipped_empty') return reply.status(400).send({ error: 'Schedule has no test cases or target', data });
-      return reply.status(202).send({ data: { ...data, ...(data?.execution ?? {}) }, message: 'Execution queued from schedule' });
-    } catch (err) { return fail(reply, err); }
-  });
-
-  /** Event-based trigger (after_build, after_deploy, ...). */
-  app.post<{ Body: { event: string; environment_id?: string } }>('/api/v1/schedules/trigger', async (req, reply) => {
-    const event = req.body?.event;
-    if (!event) return reply.status(400).send({ error: 'event required' });
-    const results = await fireEvent(String(event).slice(0, 64), req.body?.environment_id ?? null, 'event');
-    return reply.status(202).send({
-      data: { event, executions_started: results.filter((r) => r!.outcome === 'queued').length, executions: results },
-    });
-  });
-
-  app.get('/api/v1/scheduler/options', async (_req, reply) => reply.send({ data: await schedulerOptions() }));
-
-  app.get('/api/v1/scheduler/plan', async (req, reply) => {
-    const q = req.query as { hours?: string };
-    return reply.send({ data: await executionPlan(Number(q.hours) || 168) });
-  });
-
-  app.post<{ Body: { target?: unknown } }>('/api/v1/scheduler/preview', async (req, reply) => {
-    try {
-      return reply.send({ data: await previewTarget(normalizeTarget(req.body?.target)) });
-    } catch (err) { return fail(reply, err); }
-  });
-
-  app.post<{ Body: { cron_expression?: string; timezone?: string; count?: number } }>('/api/v1/scheduler/cron-preview', async (req, reply) => {
-    try {
-      return reply.send({ data: previewCron(String(req.body?.cron_expression ?? ''), req.body?.timezone || DEFAULT_TZ, req.body?.count ?? 5) });
-    } catch (err) { return fail(reply, err); }
-  });
-
-  /** On demand: all tests, chosen types, chosen suites or chosen cases. */
-  app.post<{ Body: { target?: unknown; environment_id?: string; label?: string; requested_by?: string } }>(
-    '/api/v1/scheduler/run-now',
+  /**
+   * Fire a schedule now (the poller, a person, or a deploy hook).
+   *
+   * The poller sends `expected_last_run_at` — the last_run_at it saw when it
+   * judged the schedule due. The run is then claimed with a compare-and-set, so
+   * two overlapping polls (or two pollers) that both saw "due" queue one run,
+   * not two; the loser gets 409. A person pressing "Run now" sends no such field
+   * and always fires.
+   */
+  app.post<{ Params: { id: string }; Body?: { requested_by?: string; environment?: string; expected_last_run_at?: string | null } }>(
+    '/api/v1/schedules/:id/run',
     async (req, reply) => {
-      try {
-        const target = normalizeTarget(req.body?.target);
-        const by = req.body?.requested_by || req.actor?.id || 'operator';
-        const data = await withTransaction((db) => fire(db, {
-          target, trigger: 'manual', requested_by: String(by).slice(0, 120),
-          environment_id: req.body?.environment_id ?? null, label: req.body?.label?.slice(0, 200) ?? null,
-        }));
-        if (data.outcome === 'skipped_empty') return reply.status(400).send({ error: 'That selection matches no test cases', data });
-        await audit(req, 'scheduler.run_now', 'execution', data.execution?.id, { target, cases: data.case_count });
-        return reply.status(202).send({ data, message: 'Execution queued' });
-      } catch (err) { return fail(reply, err); }
+      const { rows } = await query('SELECT * FROM schedules WHERE id = $1', [req.params.id]);
+      if (!rows[0]) return reply.status(404).send({ error: 'Schedule not found' });
+      const environmentId = await resolveId('environments', req.body?.environment);
+      if (environmentId === undefined && req.body?.environment) return reply.status(404).send({ error: 'Environment not found' });
+
+      const claiming = !!req.body && 'expected_last_run_at' in req.body;
+      const expected = claiming ? req.body!.expected_last_run_at ?? null : null;
+      if (claiming) {
+        // JSON carries milliseconds; the column holds microseconds.
+        const claimed = await query(
+          `UPDATE schedules SET last_run_at = now()
+           WHERE id = $1 AND date_trunc('milliseconds', last_run_at) IS NOT DISTINCT FROM date_trunc('milliseconds', $2::timestamptz)
+           RETURNING id`,
+          [rows[0].id, expected]
+        );
+        if (!claimed.rows[0]) return reply.status(409).send({ error: 'Schedule was already fired for this occurrence', code: 'already_fired' });
+      }
+
+      const outcome = await fire(rows[0], {
+        requested_by: req.body?.requested_by || req.actor?.id || 'scheduler',
+        trigger_source: 'schedule',
+        environment_id: environmentId ?? null,
+      });
+      // Nothing was queued: give the claim back so the occurrence is not silently consumed.
+      if (claiming && outcome.status !== 202) {
+        await query(`UPDATE schedules SET last_run_at = $2::timestamptz WHERE id = $1`, [rows[0].id, expected]);
+      }
+      if (outcome.status === 202) await audit(req, 'schedule.run', 'schedule', rows[0].id, outcome.queued || {});
+      return reply.status(outcome.status).send(outcome.body);
+    }
+  );
+
+  /** Event-based trigger (after_build, after_deploy, ...) fires every enabled schedule bound to the event. */
+  app.post<{ Body: { event: string; environment?: string; environment_id?: string; metadata?: Record<string, unknown> } }>(
+    '/api/v1/schedules/trigger',
+    async (req, reply) => {
+      const event = req.body?.event;
+      if (!event) return reply.status(400).send({ error: 'event required' });
+      const environmentId = await resolveId('environments', req.body?.environment ?? req.body?.environment_id);
+      if (environmentId === undefined && (req.body?.environment || req.body?.environment_id)) {
+        return reply.status(404).send({ error: 'Environment not found' });
+      }
+
+      const { rows } = await query(`SELECT * FROM schedules WHERE enabled = true AND event_trigger = $1`, [event]);
+      const started: any[] = [];
+      const skipped: any[] = [];
+      for (const s of rows) {
+        const outcome = await fire(s, {
+          requested_by: req.actor?.id || 'event',
+          trigger_source: 'ci',
+          environment_id: environmentId ?? null,
+          event,
+          metadata: req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {},
+        });
+        if (outcome.status === 202) started.push({ schedule: s.name, ...(outcome.body.data || {}) });
+        else skipped.push({ schedule: s.name, ...outcome.body });
+      }
+      await audit(req, 'schedule.event', 'event', event, { started: started.length, skipped: skipped.length });
+      return reply.status(202).send({ data: { event, executions_started: started.length, executions: started, skipped } });
     }
   );
 }

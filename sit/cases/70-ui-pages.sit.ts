@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import type { WebDriver } from "selenium-webdriver";
-import { newDriver, openConsole, openNav, pageTitle } from "../lib/selenium.ts";
+import { newDriver, openConsole, openNav, waitForPageTitle } from "../lib/selenium.ts";
 
 // Selenium-driven per-page coverage: every leaf page reachable from the Ops Console
 // sidebar (apps/web/public/js/ops-console-preview.js CONFIG.nav) is navigated to the
@@ -24,6 +24,12 @@ import { newDriver, openConsole, openNav, pageTitle } from "../lib/selenium.ts";
 // CONFIG.messageDesigner in ops-console-preview.js — several diverge from their
 // sidebar label (e.g. "View saved definitions" routes to a page titled "Saved message
 // definitions"), which is exactly the kind of drift this case exists to catch.
+//
+// Navigation paths follow the console as deployed (checked against the live sidebar on
+// 2026-09-30): Datasets, Test Cases and Test Suites became groups with their own
+// sub-items, schema import moved to the Message Schemes group, Configuration became a
+// group without a page of its own, and Naming conventions moved under it. Each case
+// still opens the page its name promises; only the clicks to get there changed.
 
 let driver: WebDriver;
 
@@ -38,7 +44,7 @@ after(async () => {
 
 async function assertPage(top: string, sub: string | undefined, expectedTitle: string) {
   await openNav(driver, top, sub);
-  const title = await pageTitle(driver);
+  const title = await waitForPageTitle(driver, expectedTitle);
   const label = sub ? `${top} → ${sub}` : top;
   assert.equal(title, expectedTitle, `navigating to "${label}" did not render the expected page header`);
 }
@@ -104,7 +110,13 @@ test("the Test Runs → All test runs page renders its own real page header", as
 });
 
 test("the Test Runs → Run history page renders its own real page header", async () => {
-  // Run history shares the All test runs document (apps/web/public/js/app-nav.js DOCUMENTS).
+  // On the pinned Sand Bench baseline (sand-bench-staging, commit e69acaf27f17),
+  // "Run history" and "All test runs" are two labels that both route to
+  // /test-runs-all.html — ops-console-preview.js's page URL map sends trHistory
+  // and trAll to the same page, which keeps its own h1 "All test runs" even
+  // when the Run history nav item was clicked. That shared backing page is the
+  // real, user-visible outcome of clicking Run history on this baseline, so the
+  // honest assertion is on the shared header rather than a distinct one.
   await assertPage("Test Runs", "Run history", "All test runs");
 });
 
@@ -141,7 +153,6 @@ test("the Reports → Scheduled exports page renders its own real page header", 
 });
 
 test("the Configuration page renders its own real page header", async () => {
-  // Configuration is a group: its parent only expands, so open its first page.
   await assertPage("Configuration", "Environment defaults", "Environment defaults");
 });
 

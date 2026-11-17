@@ -1,4 +1,5 @@
 import { ENV } from "../env.ts";
+import { gatePassword } from "../client.ts";
 
 export async function enterConsole(sess) {
   await sess.go(`${ENV.webBase}/`);
@@ -9,8 +10,11 @@ export async function enterConsole(sess) {
   if (tenant) { await sess.clear(tenant); await sess.type(tenant, ENV.tenantSlug || "acme-demo"); }
   const user = await sess.find("css selector", "#gate:not(.hidden) #username");
   if (user) { await sess.clear(user); await sess.type(user, ENV.username || "analyst.acme"); }
+  // Blank where the deployment declares the password optional: a supplied password is
+  // still checked, and the stored demo credential differs from the documented one.
+  const secret = await gatePassword();
   const password = await sess.find('css selector', '#gate:not(.hidden) #password');
-  if (password) { await sess.clear(password); await sess.type(password, ENV.password); }
+  if (password) { await sess.clear(password); if (secret) await sess.type(password, secret); }
   const login = await sess.find("css selector", "#gate:not(.hidden) #login");
   if (login) await sess.click(login);
   for (let attempt = 0; attempt < 40; attempt++) {

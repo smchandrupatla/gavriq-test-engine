@@ -79,9 +79,15 @@ DO $$ BEGIN
     'application_defect','assertion_failure','environment_problem',
     'infrastructure_failure','network_failure','authentication_problem',
     'test_data_problem','script_problem','dependency_failure',
-    'deployment_problem','timeout','unknown'
+    'deployment_problem','timeout','cleanup_failure','unknown'
   );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- The engine's worker reports a cleanup_failure classification when a case's
+-- own cleanup step failed after its main assertions passed (see http.ts and
+-- worker.ts). Older schemas were seeded before that value existed; add it on
+-- the fly so the API's enum cast does not 500 on these reports.
+ALTER TYPE failure_classification ADD VALUE IF NOT EXISTS 'cleanup_failure';
 
 -- ---------------------------------------------------------------------------
 -- Hierarchy: Application → Release → Component → Feature → Requirement
@@ -247,6 +253,43 @@ CREATE INDEX IF NOT EXISTS idx_test_cases_lifecycle ON test_cases(lifecycle);
 CREATE INDEX IF NOT EXISTS idx_test_cases_type ON test_cases(test_type);
 CREATE INDEX IF NOT EXISTS idx_test_cases_tags ON test_cases USING GIN(tags);
 
+-- ---------------------------------------------------------------------------
+-- Test bench representation (adopted from Sand Bench's Test cases screen):
+-- what the case is for in plain words, who owns it, where it runs, how long it
+-- takes, the links and notes around it, and the triage/collaboration state.
+-- Steps (JSONB above) carry the same shape per entry: {text, expected, testData,
+-- attachments} for people, plus the runner fields (action, url, ...) for workers.
+-- ---------------------------------------------------------------------------
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS objective TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS component TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS environment TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS estimated_duration TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'Team';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS automation_link TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS test_data TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS flakiness_notes TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS known_workarounds TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS common_failure_causes TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS triage_status TEXT NOT NULL DEFAULT 'None';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS assignee TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS linked_issue_url TEXT;
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS notes JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE test_cases ADD COLUMN IF NOT EXISTS watchers JSONB NOT NULL DEFAULT '[]';
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_visibility_check CHECK (visibility IN ('Public','Team','Private'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_estimated_duration_check
+    CHECK (estimated_duration IS NULL OR estimated_duration IN ('Under 1m','1-5m','5-15m','15-60m','60m+'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  ALTER TABLE test_cases ADD CONSTRAINT test_cases_triage_status_check
+    CHECK (triage_status IN ('None','Investigating','Assigned','Issue linked','Resolved'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE INDEX IF NOT EXISTS idx_test_cases_triage ON test_cases(triage_status);
+CREATE INDEX IF NOT EXISTS idx_test_cases_component ON test_cases(component);
+
 CREATE TABLE IF NOT EXISTS test_case_suites (
   test_case_id  UUID NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
   test_suite_id UUID NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE,
@@ -315,6 +358,7 @@ CREATE TABLE IF NOT EXISTS environments (
 CREATE TABLE IF NOT EXISTS executions (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   key                 TEXT NOT NULL UNIQUE,
+  name                TEXT,                  -- human display name: case/suite name + timestamp
   requested_by        TEXT,
   test_plan_id        UUID REFERENCES test_plans(id) ON DELETE SET NULL,
   test_suite_id       UUID REFERENCES test_suites(id) ON DELETE SET NULL,
@@ -331,8 +375,130 @@ CREATE TABLE IF NOT EXISTS executions (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS name TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
 CREATE INDEX IF NOT EXISTS idx_executions_env ON executions(environment_id);
+-- Runs are groups of executions sharing metadata.run_group (trigger API, run-all).
+CREATE INDEX IF NOT EXISTS idx_executions_run_group ON executions((metadata->>'run_group'));
+
+-- A deploy of `ref` to one environment, triggered from the console or the API
+-- and reported back by that environment's own deploy control plane (see
+-- apps/api/src/routes/deployments.ts). `key` is the remote deploy job id.
+-- `run_id` is a metadata.run_group value (runs have no dedicated table), set
+-- only when mode = deploy_and_run and the deploy itself succeeded.
+CREATE TABLE IF NOT EXISTS deployments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key             TEXT UNIQUE,
+  application     TEXT NOT NULL,
+  environment_id  UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  ref             TEXT NOT NULL DEFAULT 'main',
+  mode            TEXT NOT NULL DEFAULT 'deploy_only' CHECK (mode IN ('deploy_only', 'deploy_and_run')),
+  status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'deploying', 'succeeded', 'failed')),
+  commit          TEXT,
+  version         TEXT,
+  error           TEXT,
+  run_id          TEXT,
+  requested_by    TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  finished_at     TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_created ON deployments(created_at DESC);
+
+-- Lifecycle (apps/api/src/infra.ts): a deploy may ask for the environment to be
+-- torn down once the run it queued has finished, whatever the verdict. The run
+-- request a deploy was made for (a run that found its environment down) is kept
+-- so the post-deploy run has the same scope the caller asked for.
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_after_run BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS teardown_job_id UUID;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS run_request JSONB;
+-- A deploy that is one iteration of a cycle (see cycle_runs below) carries the cycle id.
+-- When its teardown succeeds, the engine starts the next iteration or marks the cycle done.
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS cycle_run_id UUID;
+
+-- Cycle runs: deploy → run → tear down, repeated iterations_total times, so the user
+-- can hammer an environment N times from one click. apps/api/src/cycle-run.ts starts
+-- the first iteration; infra.ts advances the cycle on each teardown success and marks
+-- it failed if a deploy or run step fails. Cancel stops the cycle after the current
+-- iteration finishes (or immediately, cancelling any live run as well).
+CREATE SEQUENCE IF NOT EXISTS cycle_run_key_seq;
+CREATE TABLE IF NOT EXISTS cycle_runs (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                     TEXT NOT NULL UNIQUE,
+  application             TEXT NOT NULL,
+  environment_id          UUID NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  iterations_total        INT NOT NULL CHECK (iterations_total BETWEEN 1 AND 100),
+  iterations_done         INT NOT NULL DEFAULT 0,
+  status                  TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
+  current_deployment_id   UUID REFERENCES deployments(id) ON DELETE SET NULL,
+  last_error              TEXT,
+  requested_by            TEXT,
+  started_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at             TIMESTAMPTZ,
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_runs_env_status ON cycle_runs (environment_id, status);
+CREATE INDEX IF NOT EXISTS idx_cycle_runs_app ON cycle_runs (application, started_at DESC);
+
+-- Clean-start cycle: before the first iteration, tear down whatever is on the stack and prune
+-- Docker (stopped containers in the managed projects, dangling images, build cache older than
+-- the policy's prune_build_cache_hours). Phase progresses: tearing_down → pruning → ready → nulled
+-- when preparation is done, then normal cycle iterations begin.
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS clean_start BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS preparation_phase TEXT
+  CHECK (preparation_phase IS NULL OR preparation_phase IN ('tearing_down', 'pruning', 'ready'));
+ALTER TABLE cycle_runs ADD COLUMN IF NOT EXISTS preparation_prune_job_id UUID;
+
+-- Infrastructure jobs: work for the host-side infra agent (apps/infra-agent),
+-- which has git and docker where the compose stacks live. The control plane
+-- decides when (after a run, idle, too long up, housekeeping cadence, a person);
+-- the agent claims the oldest queued job, does it and reports back.
+--   deploy    params {script, ref}                → the environment's deploy script
+--   teardown  params {script, remove_images, remove_volumes}
+--   prune     params {projects, image_prefixes, build_cache_hours, dry_run}
+CREATE TABLE IF NOT EXISTS infra_jobs (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind            TEXT NOT NULL CHECK (kind IN ('deploy', 'teardown', 'prune', 'scale_workers')),
+  environment_id  UUID REFERENCES environments(id) ON DELETE CASCADE,
+  deployment_id   UUID REFERENCES deployments(id) ON DELETE SET NULL,
+  status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  reason          TEXT,                         -- requested | after_run | idle | max_uptime | housekeeping | run_on_down_environment
+  params          JSONB NOT NULL DEFAULT '{}',
+  result          JSONB NOT NULL DEFAULT '{}',
+  log             TEXT,
+  error           TEXT,
+  agent_id        TEXT,
+  requested_by    TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_infra_jobs_status ON infra_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_infra_jobs_env ON infra_jobs(environment_id, created_at DESC);
+-- The check constraint on `kind` grew to include 'scale_workers' for the
+-- SLA-driven auto-scaler. Older databases came up with the three-value
+-- constraint, so drop + re-add it so an existing stack doesn't reject the new
+-- kind on insert. Idempotent.
+DO $$ BEGIN
+  ALTER TABLE infra_jobs DROP CONSTRAINT IF EXISTS infra_jobs_kind_check;
+  ALTER TABLE infra_jobs ADD CONSTRAINT infra_jobs_kind_check CHECK (kind IN ('deploy','teardown','prune','scale_workers'));
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
+
+-- The agents themselves: one row per host process, kept alive by heartbeats.
+CREATE TABLE IF NOT EXISTS infra_agents (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  host            TEXT,
+  version         TEXT,
+  metadata        JSONB NOT NULL DEFAULT '{}',
+  last_heartbeat  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  registered_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS execution_results (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -349,8 +515,18 @@ CREATE TABLE IF NOT EXISTS execution_results (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Remarks: what happened, in plain words. On a result they come from the worker
+-- (one line per step, then the outcome); on an execution they are added by people
+-- reviewing the run ({author, text, at}). Both are shown on the run screen.
+ALTER TABLE execution_results ADD COLUMN IF NOT EXISTS remarks JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS remarks JSONB NOT NULL DEFAULT '[]';
+
 CREATE INDEX IF NOT EXISTS idx_execution_results_exec ON execution_results(execution_id);
 CREATE INDEX IF NOT EXISTS idx_execution_results_case ON execution_results(test_case_id);
+-- Latest result per case (console summary) and "changed since" polling.
+CREATE INDEX IF NOT EXISTS idx_execution_results_case_created ON execution_results(test_case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_execution_results_created ON execution_results(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_executions_created ON executions(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS evidence (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -363,6 +539,9 @@ CREATE TABLE IF NOT EXISTS evidence (
   metadata            JSONB NOT NULL DEFAULT '{}',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Evidence is always read per result (run screen, evidence gate, reports).
+CREATE INDEX IF NOT EXISTS idx_evidence_result ON evidence(execution_result_id);
 
 CREATE TABLE IF NOT EXISTS defect_links (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -403,6 +582,10 @@ CREATE TABLE IF NOT EXISTS schedules (
   test_suite_id   UUID REFERENCES test_suites(id) ON DELETE SET NULL,
   test_case_ids   UUID[] DEFAULT '{}',
   environment_id  UUID REFERENCES environments(id) ON DELETE SET NULL,
+  -- Application schedules run the whole application on the environment through
+  -- the run planner (one execution per suite), narrowed by scope.
+  application_id  UUID REFERENCES applications(id) ON DELETE CASCADE,
+  scope           JSONB NOT NULL DEFAULT '{}',
   enabled         BOOLEAN NOT NULL DEFAULT true,
   last_run_at     TIMESTAMPTZ,
   next_run_at     TIMESTAMPTZ,
@@ -410,6 +593,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_by      TEXT
 );
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS application_id UUID REFERENCES applications(id) ON DELETE CASCADE;
+ALTER TABLE schedules ADD COLUMN IF NOT EXISTS scope JSONB NOT NULL DEFAULT '{}';
 
 -- ---------------------------------------------------------------------------
 -- AI Proposals (Prompt 2 / 10)
@@ -608,23 +793,268 @@ CREATE TABLE IF NOT EXISTS test_packs (
 );
 
 -- ---------------------------------------------------------------------------
--- Data hygiene: earlier Sand Bench catalog seeds stored design mock-up values
--- (tone:/status: tags, "Duration ref: … last tested: …") and marked script-less
--- rows as automated/active. Strip the mock values and mark those rows as drafts
--- to be automated. Idempotent; only touches seeded rows with no script or steps.
+-- Settings (engine-wide configuration, e.g. run retention)
 -- ---------------------------------------------------------------------------
-UPDATE test_cases
-SET tags = ARRAY(SELECT t FROM unnest(tags) AS t WHERE t NOT LIKE 'tone:%' AND t NOT LIKE 'status:%'),
-    expected_results = CASE WHEN expected_results LIKE 'Duration ref:%' THEN NULL ELSE expected_results END,
-    automation_status = 'to_be_automated',
-    lifecycle = CASE WHEN lifecycle = 'active' THEN 'draft'::test_lifecycle ELSE lifecycle END,
-    updated_at = now()
-WHERE created_by = 'sandbench-seed'
-  AND (script IS NULL OR script = '')
-  AND steps = '[]'::jsonb
-  AND (automation_status = 'automated'
-       OR expected_results LIKE 'Duration ref:%'
-       OR EXISTS (SELECT 1 FROM unnest(tags) AS t WHERE t LIKE 'tone:%' OR t LIKE 'status:%'));
+CREATE TABLE IF NOT EXISTS settings (
+  id                 BOOLEAN PRIMARY KEY DEFAULT true CHECK (id),  -- singleton row
+  run_retention_days INT NOT NULL DEFAULT 5,
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by         TEXT
+);
+INSERT INTO settings (id) VALUES (true) ON CONFLICT DO NOTHING;
+
+-- test_type -> minutes; a type absent here uses the 30 s application default (see routes/settings.ts).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS test_type_timeout_minutes JSONB NOT NULL DEFAULT '{}';
+-- test_type -> integer: how many past runs of each type to retain. A type absent
+-- here falls through to the default (2) that the API fills on read.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS test_type_retention JSONB NOT NULL DEFAULT '{}';
+-- Stop a run after this many test cases in a row fail (anywhere in the run, including its start).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS consecutive_failure_limit INT NOT NULL DEFAULT 20;
+-- Rolling fail-rate cancel: cancel every queued execution in a run_group once
+-- the group's recent-result window hits this fail rate. 0 disables the guard;
+-- the window must have at least `rolling_fail_cancel_window` reported results
+-- before the guard fires, so an early fail does not take the whole run down.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_window INT NOT NULL DEFAULT 20;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS rolling_fail_cancel_threshold_pct INT NOT NULL DEFAULT 50;
+-- Infrastructure policy (idle/max-uptime teardown, housekeeping cadence, teardown defaults);
+-- keys absent here take the defaults in apps/api/src/infra.ts.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS infra_policy JSONB NOT NULL DEFAULT '{}';
+
+-- Per-run auto-fix loop: default cap on how many attempts the engine makes before it
+-- parks the loop and logs the failing cases as defects. Each run can override this.
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS auto_fix_default_max_attempts INT NOT NULL DEFAULT 2;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS fixer_agent_mode TEXT NOT NULL DEFAULT 'auto';           -- off | propose | auto
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS fixer_agent_diff_cap_lines INT NOT NULL DEFAULT 400;
+
+-- ---------------------------------------------------------------------------
+-- Quality Insights: versioned reviews of an application's test quality.
+-- snapshot holds the facts the engine computed, analysis the review written
+-- over them; a version is never rewritten and outlives run retention.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS quality_insights (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id  UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  version         INT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'generating',  -- generating|ready|failed
+  analyst         TEXT,                                 -- Claude | Built-in rules | name of an external agent
+  model           TEXT,
+  trigger_source  TEXT NOT NULL DEFAULT 'manual',       -- manual|agent
+  requested_by    TEXT,
+  window_days     INT NOT NULL DEFAULT 30,
+  snapshot        JSONB NOT NULL,
+  analysis        JSONB,
+  notice          TEXT,
+  error           TEXT,
+  usage           JSONB NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at    TIMESTAMPTZ,
+  UNIQUE (application_id, version)
+);
+
+-- ---------------------------------------------------------------------------
+-- Held reports wait in the defect log until a person sends them to the implementation
+-- manager (auto-approve off), so the product manager's queue only sees released ones.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS held BOOLEAN NOT NULL DEFAULT false;
+
+-- Defect log: every failure the engine logs, and every defect a person raises by hand,
+-- with its lifecycle (logged -> validated -> sent, or rejected), the run, test case,
+-- environment and application version it was seen in, and its attachments.
+CREATE SEQUENCE IF NOT EXISTS defect_log_key_seq;
+
+CREATE TABLE IF NOT EXISTS defect_log (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key                   TEXT NOT NULL UNIQUE,              -- DL-000001
+  application_id        UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  title                 TEXT NOT NULL,
+  description           TEXT NOT NULL DEFAULT '',
+  severity              TEXT NOT NULL DEFAULT 'medium',    -- low|medium|high|critical
+  status                TEXT NOT NULL DEFAULT 'logged',    -- logged|validated|rejected|sent
+  origin                TEXT NOT NULL DEFAULT 'manual',    -- auto|manual
+  test_case_id          UUID REFERENCES test_cases(id) ON DELETE SET NULL,
+  case_key              TEXT,
+  run_id                TEXT,
+  execution_id          UUID REFERENCES executions(id) ON DELETE SET NULL,
+  execution_result_id   UUID REFERENCES execution_results(id) ON DELETE SET NULL,
+  environment_id        UUID REFERENCES environments(id) ON DELETE SET NULL,
+  environment_key       TEXT,
+  application_version   TEXT NOT NULL DEFAULT 'not recorded',
+  failure_message       TEXT,
+  defect_report_id      UUID REFERENCES defect_reports(id) ON DELETE SET NULL,
+  defect_id             UUID REFERENCES defects(id) ON DELETE SET NULL,
+  logged_by             TEXT,
+  validated_by          TEXT,
+  validated_at          TIMESTAMPTZ,
+  rejected_reason       TEXT,
+  sent_by               TEXT,
+  sent_at               TIMESTAMPTZ,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_status_idx ON defect_log (application_id, status);
+CREATE INDEX IF NOT EXISTS defect_log_run_idx ON defect_log (run_id);
+
+-- The named implementation manager (applications.metadata->implementation_manager) recorded
+-- on a defect at the moment it is sent, so the record shows who received it.
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS implementation_manager TEXT;
+
+-- Reviewer baseline decision: once a defect lands, a reviewer picks one of
+-- three resolutions so the downstream fixer / implementation manager knows
+-- which side of the gap to close.
+--
+--   fix_test_case  = the application is the baseline — the test is wrong and
+--                    should be rewritten against the application's current
+--                    behaviour (handed to the fixer agent / catalog editor).
+--   fix_application = the test case is the baseline — the application has a
+--                    real defect and should be fixed (handed to the dev team
+--                    through the usual implementation-manager loop).
+--   other          = something else (e.g. flake, environment, duplicate).
+--                    resolution_notes carries the specifics.
+--
+-- Null means "not yet reviewed". The three canonical values are enforced
+-- client- + server-side; the column is TEXT so adding a value later only
+-- needs the UI + validator to change.
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution              TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_reviewer     TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_notes        TEXT;
+ALTER TABLE defect_log ADD COLUMN IF NOT EXISTS resolution_at           TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS defect_log_resolution_idx ON defect_log (resolution);
+
+-- A sent defect's report carries its application key so the right application's implementation
+-- manager (and feedback loop) picks it up, even for a manual defect with no execution behind it.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS application_key TEXT;
+CREATE INDEX IF NOT EXISTS idx_defect_reports_application ON defect_reports (application_key);
+
+-- Deploy-failure loop (apps/api/src/deploy-loop.ts): when a managed stack's deploy fails,
+-- the engine opens a defect_reports row with kind='deploy' and hands it to the application
+-- repo's agent through the same claim/fix lane every test defect uses. When the agent marks
+-- the defect fixed, the engine redeploys (at the agent's fix_ref if given, otherwise the same
+-- ref). The retry count is capped: after deploy_retry_cap attempts (default 5) the report
+-- goes to status='parked', and the console banners the environment for offline investigation.
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'test';
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS environment_id UUID REFERENCES environments(id) ON DELETE SET NULL;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_retry_count INT NOT NULL DEFAULT 0;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_retry_cap INT NOT NULL DEFAULT 5;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_last_ref TEXT;
+ALTER TABLE defect_reports ADD COLUMN IF NOT EXISTS deploy_last_error TEXT;
+CREATE INDEX IF NOT EXISTS idx_defect_reports_kind_env ON defect_reports (kind, environment_id);
+-- At most one live deploy-failure report per environment (parked and verified don't count:
+-- a new deploy failure after a parked report opens a fresh one).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_defect_reports_live_deploy
+  ON defect_reports (environment_id)
+  WHERE kind = 'deploy' AND status NOT IN ('parked', 'verified');
+
+-- Attachments: a screenshot or system log either linked to the run's evidence (evidence_id)
+-- or uploaded by a person (content).
+CREATE TABLE IF NOT EXISTS defect_log_attachments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  defect_log_id   UUID NOT NULL REFERENCES defect_log(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL DEFAULT 'other',          -- screenshot|log|other
+  name            TEXT NOT NULL,
+  content_type    TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes      INT NOT NULL DEFAULT 0,
+  sha256          TEXT,
+  evidence_id     UUID REFERENCES evidence(id) ON DELETE SET NULL,
+  content         BYTEA,
+  created_by      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_attachments_log_idx ON defect_log_attachments (defect_log_id);
+
+-- Conversation on a defect: manual comments a person (or the implementation manager) adds,
+-- alongside the lifecycle events the timeline derives from the record itself. Lets the
+-- implementation manager ask for more detail and the tester answer, kept with the defect.
+CREATE TABLE IF NOT EXISTS defect_log_comments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  defect_log_id   UUID NOT NULL REFERENCES defect_log(id) ON DELETE CASCADE,
+  author          TEXT NOT NULL DEFAULT 'operator',
+  body            TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS defect_log_comments_log_idx ON defect_log_comments (defect_log_id, created_at);
+
+-- Per-run auto-fix loop (run-fix-loop.ts): one row per run_group the operator opted
+-- into "auto-fix on failure" for. The loop looks at the latest attempt's failing
+-- cases, classifies them (transient vs. real), reruns the failing subset after a
+-- redeploy where applicable, and parks after `max_attempts` tries so the remaining
+-- failures land in the defect log for a person.
+CREATE TABLE IF NOT EXISTS run_fix_loops (
+  run_id            TEXT PRIMARY KEY,                      -- the original run_group
+  application_key   TEXT NOT NULL,
+  environment_key   TEXT NOT NULL,
+  max_attempts      INT NOT NULL DEFAULT 2,
+  attempt           INT NOT NULL DEFAULT 1,                -- the attempt number of current_run_id (1 = original)
+  state             TEXT NOT NULL DEFAULT 'running',       -- running | converged | parked | stopped
+  phase             TEXT NOT NULL DEFAULT 'waiting_results', -- waiting_results | classifying | redeploying | rerunning | capped
+  current_run_id    TEXT NOT NULL,                         -- run_group of the attempt we are watching
+  case_keys         TEXT[] NOT NULL DEFAULT '{}',          -- the cases this loop is tracking (shrinks as cases pass)
+  parked_case_keys  TEXT[] NOT NULL DEFAULT '{}',          -- cases that hit the cap without going green
+  reason            TEXT,                                  -- user-visible status note
+  last_error        TEXT,
+  requested_by      TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS run_fix_loops_state_idx ON run_fix_loops (state);
+CREATE INDEX IF NOT EXISTS run_fix_loops_current_idx ON run_fix_loops (current_run_id);
+
+-- Per-attempt audit of what the loop did (rerun / redeploy / park / stop) so the
+-- console can show a step history without re-reading every attempt's run.
+ALTER TABLE run_fix_loops ADD COLUMN IF NOT EXISTS fix_actions JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ---------------------------------------------------------------------------
+-- AI test-case fixer: one row per proposed patch an off-engine fixer agent
+-- is asked to produce. Lifecycle: pending -> claimed -> applied|rejected|failed
+-- (or regressed, if the apply caused a sibling case to go red on the next
+-- attempt). See apps/api/src/run-fix-loop.ts (awaiting_patch phase) and
+-- apps/api/src/routes/fix-proposals.ts.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fix_proposals (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id            TEXT NOT NULL,                        -- the original run_group (loops.run_id)
+  attempt           INT NOT NULL,                         -- which attempt of the loop opened this
+  case_key          TEXT NOT NULL,
+  source_file       TEXT NOT NULL,                        -- apps/api/src/catalog/<file>.ts (relative to repo root)
+  status            TEXT NOT NULL DEFAULT 'pending',      -- pending|claimed|applied|rejected|failed|regressed
+  classification    TEXT,                                 -- test_broken|test_data_broken|prod_defect|unknown
+  rationale         TEXT,
+  rationale_inputs  JSONB NOT NULL DEFAULT '{}'::jsonb,   -- the signals the agent saw (message, evidence, drift, ...)
+  before_source     TEXT,
+  after_source      TEXT,
+  diff              TEXT,
+  signature         TEXT,                                 -- hash(case_key, step_idx, status, first_assertion_line)
+  commit_sha        TEXT,
+  agent_id          TEXT,
+  reason            TEXT,                                 -- user-visible status note (why rejected / regressed / failed)
+  siblings_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,   -- {case_key: last_known_status} for the file at apply time
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  claimed_at        TIMESTAMPTZ,
+  completed_at      TIMESTAMPTZ,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Serializes claim/apply per case so two schedules firing the same minute
+-- cannot open two concurrent proposals for the same case.
+CREATE UNIQUE INDEX IF NOT EXISTS fix_proposals_pending_per_case
+  ON fix_proposals(case_key) WHERE status IN ('pending','claimed');
+CREATE INDEX IF NOT EXISTS fix_proposals_run_idx ON fix_proposals(run_id);
+CREATE INDEX IF NOT EXISTS fix_proposals_status_idx ON fix_proposals(status);
+
+-- Feedback loop (feedback-loop.ts): one row per application. The loop runs the
+-- application's suite, lets the Defect Manager file reports, requests reruns of
+-- the defects the implementation manager fixed, and stops once a full sweep is clean.
+CREATE TABLE IF NOT EXISTS feedback_loops (
+  key              TEXT PRIMARY KEY,                    -- application key
+  environment_key  TEXT NOT NULL,
+  state            TEXT NOT NULL DEFAULT 'stopped',     -- stopped|running|suspended
+  phase            TEXT NOT NULL DEFAULT 'idle',        -- idle|sweeping|awaiting_pm|awaiting_fixes|rerunning|converged
+  cycle            INT NOT NULL DEFAULT 0,
+  current_run_id   TEXT,                                -- full sweep in flight
+  clean_sweep      BOOLEAN NOT NULL DEFAULT false,      -- last full sweep had no failures and nothing changed since
+  note             TEXT,
+  last_error       TEXT,
+  started_at       TIMESTAMPTZ,
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ---------------------------------------------------------------------------
 -- Seed baseline application (Sand Bench)

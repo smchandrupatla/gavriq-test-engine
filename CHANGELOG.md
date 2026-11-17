@@ -1,5 +1,85 @@
 # Changelog
 
+## [Unreleased]
+
+**Changed — test cases, suites and runs now use Sand Bench's representation, written in plain language**
+- Every test case carries the fields of Sand Bench's Test cases screen (Title, Test ID, Priority Critical/High/Medium/Low, Status from the latest run, Owner, Component, Environment, Estimated duration, Tags, Visibility, **Objective**, Preconditions, Steps as *what is done / what should happen / data used*, Dependencies, Automation link, Overall test data, Attachments, flakiness notes, known workarounds, common failure causes, Triage, Notes, Watchers). `test_cases` gained the columns; `CaseDef.objective` is required and every catalog case (Sand Bench, use-case flows, engine self-tests, SIT imports) has one, written for a reader with no technical background
+- `apps/api/src/catalog/plain-language.ts` narrates every executable step into plain words and fills the screen fields a case leaves unset; `tests/plain-language-catalog.test.ts` rejects jargon in an objective and incomplete representations. The standing rule is `.github/skills/plain-language-test-cases/SKILL.md`
+- Console: **Test cases** (stat strip, search, filters, sort, saved views, compact/cards, insights, CSV export, detail panel with summary, steps, triage, run history with remarks, notes, watchers, suites, activity), **New / Edit test case** form, **Test suites** (stats, member cases, run / compose / delete) and **New test suite** (`apps/api/public/catalog/testbench.js`); the case page shows the same detail
+- API: `GET /api/v1/test-cases` rows carry the screen fields and the latest run; `/summary`, `/analytics`, `/check-id`, `/:id/runs`, `/:id/suites`, `/:id/notes`, `/:id/watch`, `/:id/triage`, `/:id/run`, `/run-batch`; `/api/v1/test-suites` CRUD + `/:id/run`, `/:id/runs`, `/from-suites`, `/run-batch`; `/api/v1/test-runs` (one row per case result: result pass/fail/blocked, environment, duration, triggered by, remarks)
+- Runs capture **remarks**: the worker reports one plain line per step and the outcome (`execution_results.remarks`), people add remarks on the run screen (`POST /api/v1/executions/:id/remarks`, `executions.remarks`), and the run screen shows both
+- `npm run docs:catalog` writes the objective and a Step / Expected result / Test data table per case
+
+**Added — infrastructure lifecycle: stacks run only while they are being tested**
+- A managed environment (`config.infra {driver: "compose", script}` — the local Sand Bench staging and engine staging stacks) is deployed when a deploy or a run asks for it, and torn down again afterwards: **Deploy, run, tear down** in the console header (default), `POST /api/v1/deployments` with `teardown_after_run`, or any run — **Run everything**, a schedule, `POST /api/v1/runs` — that finds the stack down deploys first, runs the same scope, and tears down after the run, whatever the verdict. **Deploy only** and **Deploy and run** keep the stack up
+- Policy (`GET`/`PUT /api/v1/infra/policy`, Configuration › Infrastructure): stacks nothing has run on for 12 h, or up for 48 h, come down on their own (never while a run is active); Docker housekeeping every 6 h removes the managed stacks' stopped containers and unused images, dangling images and build cache unused for 48 h. Nothing outside the managed compose projects is ever touched
+- The engine only decides (`apps/api/src/infra.ts`, one tick a minute, `infra_jobs`); the new **infra agent** (`apps/infra-agent`, `npm run start:infra-agent`) on the Docker host runs the environment's own `deploy.mjs` and `docker`. Only `deploy/<name>/deploy.mjs` scripts are ever run. A job whose agent goes quiet is failed and its stack released
+- Console: stack state chip (Up / Down / Deploying… / Tearing down…) next to the environment, **Tear down** button, deploy status that follows the deploy through its run and teardown with the agent's log tail; **Configuration › Infrastructure** page with the agent, every managed stack's state and next automatic action, the policy, housekeeping (**Prune Docker now**, **Preview**) and the recent jobs with logs; Lifecycle fields on the environment form; a single-case run on a stack that is down is refused with a pointer to Deploy
+- `deploy/staging/deploy.mjs down [--rmi] [--volumes]` and `deploy/engine-staging/deploy.mjs down …`; both scripts register the environment as managed and record whether the stack is up or down
+- See `docs/INFRA-LIFECYCLE.md`
+
+**Added — deploy main to an environment, triggered from the console**
+- New non-production deploy API on the Sand Bench repo (`sand-bench-enterprise/deploy/api`): `POST /v1/deploy` builds/ups the `sand-bench-staging` stack from a `git archive` of the requested ref, verifies and seeds it, registers it with the Test Engine exactly as `deploy/staging/deploy.mjs` already did, then reports success or failure to a callback URL. Opt-in only (`DEPLOY_API_ENABLED=1` + `DEPLOY_API_KEY`), binds `127.0.0.1`, never part of a service image
+- Console: a **Deploy main…** control next to "Run everything" (environment picker implicit in the selected environment, mode **Deploy only** / **Deploy and run**). `POST /api/v1/deployments` triggers it, `deployments` table tracks queued → deploying → succeeded/failed, and the console polls to a status chip with the error inline on failure
+- A failed deploy — whether the trigger call itself fails or the callback reports `status: "failed"` — never queues a run; `deploy_and_run` only calls the same "run everything" planner the console's **Run everything** button uses (`runAllCases`, extracted from `/api/v1/executions/run-all`) after a `succeeded` callback
+- New permission `environments:deploy` (`test_admin`, `test_manager`, `automation_agent` — the latter for the Sand Bench callback's `X-Api-Key`)
+
+**Added — Quality Insights**
+- Console screen **Quality insights** (`#/insights`): a versioned review per application — verdict and headline, quality score with its six components, results and pass rate per day, one card per environment (build under test, pass rate, coverage, flaky / regressed / never-passed cases), findings, failure themes, coverage by test type, checks stated per case, cases needing attention, prioritised suggestions and the version history
+- **Refresh insights** writes a new version: by Claude when `ANTHROPIC_API_KEY` is set (`INSIGHTS_MODEL`, default `claude-opus-5`), by the built-in rules otherwise; an agent can post its own review of `GET /api/v1/insights/snapshot`. Versions are stored with the facts they were written from (`quality_insights`), so they outlive run retention
+- Runs record the build they test: on claim the environment's registered deployment is copied to `executions.metadata.build`
+- Index on `evidence(execution_result_id)`
+- See `docs/QUALITY-INSIGHTS.md`
+
+**Fixed — cases that failed instantly or "never ran" (137 of 414)**
+- Worker image had no `sit/` folder, so all 92 imported SIT cases failed in milliseconds with `SIT file not found`. `Dockerfile.worker` now ships `sit/`, `dev/`, `docs/use-cases` and the report helpers the security cases import (`apps/secportal/*`)
+- Worker image had no Firefox or WebKit, so 12 cells of the browser matrix failed with `Executable doesn't exist`. The image installs both for the pinned Playwright version; worker `shm_size` raised to 1gb; Firefox/WebKit cases get a 120s step budget
+- A containerized worker claiming a job for an environment written as `127.0.0.1`/`localhost` (`local-dev`, `sand-bench-local`, `engine-local`) targeted itself: every HTTP case failed with `fetch failed` and every performance case with a 100% error rate. The worker re-points loopback targets at the host gateway (`WORKER_LOOPBACK_HOST`, `WORKER_IN_CONTAINER`), so any environment picked in the console runs on whichever worker is online
+- `execution_method: endurance` fell through to the Selenium runner and "passed" without sending a request. Endurance/soak cases run in the performance runner for `validation_rules.duration_seconds`
+- SIT runner: environment variables (`{{api}}`, `{{testhub}}`, `{{dbviewer}}`, tenant, user) are mapped onto the `SIT_*` contract instead of only the web base URL; parameterised test names (`${page.path}`) match every generated instance; a name that matches no test is a failure, not a pass; every test skipped is `skipped`, not `passed`; failures carry the assertion message; a timeout kills the browsers the case started; a ChromeDriver is started for the raw-WebDriver screen cases, which used to skip themselves
+- Performance runner: a run in which nothing answered reports why (`network_failure` / `environment_problem` with the first error) instead of `SLA violated: error_rate 100%`
+- Executions left `running` by a worker that died are closed as `error` with `metadata.abandoned` after three silent minutes (five had been "running" for up to six days)
+- SIT suite brought level with `sand-bench-enterprise/sit` and the console as deployed: sign-in through the gate, navigation groups and `/v/<id>` screens, forms addressed by control name, DB-viewer reads of the newest page, TRACE probe sent with `node:http`
+
+**Added — evidence gate and run trigger API**
+- Evidence is the exit criterion of a run. Every runner now leaves evidence on pass and on fail: HTTP request/response transcripts, a final-page screenshot plus step log for Playwright and Selenium, a metric report for performance/endurance, the TAP output for SIT files. Secrets are masked before a file is written
+- Workers upload evidence to the engine (`POST /api/v1/evidence/upload`, stored per execution with a SHA-256) instead of relying on a shared folder, so a worker on another machine produces evidence the console can serve
+- Evidence gate (`EVIDENCE_GATE=enforce|report|off`, default `report`): the API verifies evidence against the store, records a pass/fail without it as `error` / `inconclusive`, derives the final execution status from the recorded results, and writes `metadata.exit_criteria`
+- Run trigger API: `POST /api/v1/runs {application, environment, scope?, exclusive?, dry_run?}`, `GET /api/v1/runs/:runId` (state, verdict, exit criteria), `GET /api/v1/runs/:runId/evidence` (manifest), `GET /api/v1/runs`. Honors the environment safety policy per case
+- `scripts/trigger-run.mjs` starts a run and waits for the verdict; its exit code gates a pipeline
+- `X-Api-Key` callers (`TRIGGER_API_KEYS`) for machine-to-machine triggers
+- Schedules run an application on an environment through the same planner (`application` + `environment` + optional `scope`), on real five-field cron expressions evaluated in `SCHEDULER_TZ` (`@hourly`/`@daily`/`@weekly` and `every:N` still accepted); `GET /api/v1/schedules` reports `next_run_at`; `DELETE /api/v1/schedules/:id`; a new cron schedule waits for its next firing instead of firing on creation. The poller (`npm run start:scheduler`) fires through the API and catches up a missed firing once
+- See `docs/RUN-TRIGGER-AND-EVIDENCE.md`
+
+**Fixed**
+- `POST /api/v1/environments` failed with `env_type is of type environment_type but expression is of type text` whenever `env_type` was supplied
+- `POST /api/v1/test-cases` failed the same way for `test_type`, `severity`, `priority`, `automation_status`, `lifecycle` and `tags`, so no case could be created through the API
+
+**Added**
+- Console status tiles: one tile per SIT area, QA/QC type, baseline and in-container build on Overview, and one per suite on every sub-menu page. Red = a case failed, green = everything that ran passed, amber = only skipped/blocked, dashed grey = never run; a pulsing chip marks tiles with cases in an active run
+- Per-tile history panel (loaded on click): results-per-run stacked chart, pass-rate trend, last/average pass rate, most frequent failures, and a run table; "Open details" goes to that tile's page
+- Live run board on Overview and Test runs, and a run screen (`#/run/:id`) with per-case passed / failed / running / pending state, elapsed time, lazy-loaded evidence, cancel and run-again. Runs with no new result for 15 minutes are flagged as stalled instead of spinning forever
+- Lean console endpoints: `GET /api/v1/ui/summary`, `GET /api/v1/ui/live?since=`, `GET /api/v1/ui/executions/:id`, `POST /api/v1/ui/history`, `GET /api/v1/ui/build-history` (all `tests:read` under RBAC)
+
+**Changed**
+- Console boots from one summary call plus one live poll instead of ~12 full-row calls (all case pages, suites, membership, test-status twice); case bodies, run results, evidence and history load on demand. Polls every 3s while a run is active, 15s when idle, 60s in a background tab
+- JSON, JS and HTML responses over 1 KB are gzipped; console assets are served with an ETag so reloads get a 304
+- Indexes on `execution_results(test_case_id, created_at)`, `execution_results(created_at)` and `executions(created_at)`
+- Worker pill and "no live worker" banner count only workers with a recent heartbeat
+
+**Fixed**
+- Console `esc()` mapped `&<>"'` to themselves, so case names were inserted into the page unescaped
+- Restored two fixes lost in merge `427a122`: queueing an execution failed with `execution_location ... is of type text` (0.3.1), and `POST /api/v1/executions/:id/complete` failed with `text = uuid`, so workers could never finish a run (0.3.2)
+
+**Added — realistic catalog, generic console, run-everything**
+- Realistic executable catalog (`apps/api/src/catalog/`): 102 Sand Bench cases across 18 QA/QC suites (smoke, field-fidelity units, channel round trips, screens, use-case contracts, regression, data quality via db-viewer, Selenium baseline, performance/endurance SLAs, upgrade compatibility, robustness, exposure scanning, negative-auth pen tests, cross-browser/viewport matrix, chaos, compliance, DR) — every case has verified endpoints/selectors, executable steps, preconditions, data used and a data profile. `npm run seed` (seed-realistic-catalog) upserts them and **deletes** the old display-only dummy cases, the legacy TC-SB login flows and the my-app/test-app placeholders; the dummy seeders and `data/sandbench-catalog*.json` are removed
+- The engine registers itself as application #2 (`gavriq-test-engine`) with a runnable API self-test suite — the multi-application proof
+- Application selector in the console top bar (persisted, next to the environment selector); every view, tile, KPI, build panel and poll is scoped to the selected application; SIT sections appear only for applications that have SIT cases
+- **Run everything**: `POST /api/v1/executions/run-all {application_key, environment_id, dry_run?}` queues one execution per non-empty suite (cases deduped across suites) under a shared `metadata.run_group`; ▶ button on the Overview header
+- HTTP runner: absolute/`{{var}}`-templated URLs from `environments.config.vars` (`{{web}} {{api}} {{testhub}} {{dbviewer}} {{engine}}` …), per-run `{{ts}}/{{rand}}` correlation ids, variable capture between steps (`save`), JSON-path assertions (`expect_json` equals/contains/exists/min/min_length), header assertions, raw bodies for malformed-payload tests, and poll-until steps for async round trips; secrets resolve from worker env via `config.secret_env`, never from the DB
+- Playwright runner: browser engine choice (chromium/firefox/webkit), explicit viewports, `wait_for`/`wait_for_hidden`/`assert_selector_text`/`assert_no_horizontal_overflow` steps, screenshot-on-failure evidence; Selenium runner: window size + the same step vocabulary; performance runner: templated absolute targets
+- `GET /api/v1/ui/summary` now actually filters cases and suites by `application_key`; `/api/v1/workers` derives `offline` for stale heartbeats (dead registrations no longer show online forever)
+- `npm run docs:catalog` generates `docs/TEST-CASE-CATALOG.md` from the live repository (per category: description, steps, data used, data profile, expected result for every case); `dev/scripts/run-catalog-local.ts` executes catalog definitions directly through the runners for authoring
 ## [Unreleased] — 2026-09-26
 
 **Added**

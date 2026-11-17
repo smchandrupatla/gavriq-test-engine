@@ -1,8 +1,24 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { ENV } from "../env.ts";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+// officialNav()/ensureOfficialNav() live in live-bind-parts/part-00.js, the part that
+// live-bind.js loads. The Sand Bench repository reads it from its own source tree; this
+// engine ships without the application's sources and tests a deployment, so it reads the
+// file the deployed web host actually serves -- which is also the navigation an operator
+// gets. Fetched once, when a case file imports this module.
+async function fetchOfficialNavSource() {
+  const url = `${ENV.webBase}/js/live-bind-parts/part-00.js`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`official navigation source not served: GET ${url} -> ${res.status}`);
+  const src = await res.text();
+  if (!src.includes("function officialNav")) throw new Error(`${url} no longer defines officialNav()`);
+  return src;
+}
+
+const NAV_SOURCE = await fetchOfficialNavSource();
+
+function officialNavSource() {
+  return NAV_SOURCE;
+}
 
 // officialNav()/ensureOfficialNav() live in live-bind-parts/part-00.js (the source part
 // that live-bind.js loads, either via the built live-bind.bundle.js or by joining the

@@ -18,7 +18,15 @@ export async function applicationRoutes(app: FastifyInstance) {
 
   // Application detail with related data — home screen for an application
   app.get<{ Params: { id: string } }>('/api/v1/applications/:id', async (req, reply) => {
-    const application = await findApplication(req.params.id);
+    const { rows } = await query(
+      // id is a UUID column; comparing a text key against it directly raises
+      // Postgres "operator does not exist: text = uuid". Cast the uuid side to
+      // text for the OR-branch that accepts the application's human-readable
+      // key alongside its uuid.
+      'SELECT * FROM applications WHERE id::text = $1 OR key = $1',
+      [req.params.id]
+    );
+    const application = rows[0];
     if (!application) return reply.status(404).send({ error: 'Application not found' });
 
     // Fetch related test cases for this application
@@ -34,18 +42,18 @@ export async function applicationRoutes(app: FastifyInstance) {
       [application.id]
     );
 
-    // Executions have no application column: an execution belongs to the application
-    // when any of its test cases does.
+    // Fetch recent executions for this application. Executions have no direct
+    // application_id column; the application is carried on each execution's
+    // metadata.application_key, same shape every other route reads.
     const recentExecutions = await query(
       `SELECT e.*,
               (SELECT count(*)::int FROM execution_results er
                WHERE er.execution_id = e.id AND er.status = 'failed') AS failed_results
        FROM executions e
-       WHERE EXISTS (SELECT 1 FROM test_cases tc
-                     WHERE tc.id = ANY(e.test_case_ids) AND tc.application_id = $1)
+       WHERE e.metadata->>'application_key' = $1
        ORDER BY e.created_at DESC
        LIMIT 5`,
-      [application.id]
+      [application.key]
     );
 
     return reply.send({

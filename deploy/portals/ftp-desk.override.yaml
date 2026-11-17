@@ -1,0 +1,16 @@
+# Overlay for gavriq-ftp-desk when it is deployed next to the Sand Bench staging stack.
+#
+# The portal's own compose.yaml already does what staging needs: it publishes the
+# portal on host port 18102 (8102 belongs to another product on this machine), mounts
+# the external volume "sbe-shared-ftp" read-only at /ftp — the same volume the staging
+# API and worker mount (deploy/staging/compose.override.yml) — and reads /ftp/sandbench.
+#
+# This overlay therefore only narrows the published port to the loopback interface,
+# like every other port of the staging stack. It must NOT redeclare the volume: an
+# earlier version set "external: false" here, which made Compose treat the shared
+# volume as its own (a "down -v" would then have deleted the staging stack's volume).
+name: gavriq-ftp-desk
+services:
+  ftp-desk:
+    ports: !override
+      - "127.0.0.1:18102:8102"
