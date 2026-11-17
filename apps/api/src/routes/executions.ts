@@ -2,7 +2,308 @@ import type { FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { query, withTransaction } from '../db/client.js';
 import { audit } from '../middleware/rbac.js';
+import { humanDateTime } from '../lib/naming.js';
+import { deployFirstIfDown } from '../infra.js';
 import { ingestExecution } from '../defects/service.js';
+
+/** "<case name> — <timestamp>" for a single case, "<suite name> — <timestamp>" for many, else "Run — <timestamp>". */
+function runName(caseNames: string[], suiteName: string | null, at: Date): string {
+  const stamp = humanDateTime(at);
+  if (caseNames.length === 1) return `${caseNames[0]} — ${stamp}`;
+  if (suiteName) return `${suiteName} — ${stamp}`;
+  return `Run — ${stamp}`;
+}
+
+/**
+ * Identity lanes — one signed-in identity per running execution.
+ *
+ * An application that ends every session of a user on sign-out, or caps how many
+ * sessions a user may hold, cannot have two cases running at the same time under
+ * one user: the first to sign out (or the sixth to sign in) ends the other's
+ * session mid-test. An environment that lists a pool of identities in its
+ * config.vars (`pool_user_0` … `pool_user_N`) therefore gets a LANE per running
+ * execution: the lowest pool index no other running execution on that environment
+ * holds. It is stored as `metadata.identity_lane`; the worker resolves
+ * {{username}} / {{password}} to that pool entry for every case of the execution
+ * (apps/worker/src/worker.ts). The lane is free again when the execution ends.
+ *
+ * Returns the lane, null when the environment has no pool (nothing to lease), or
+ * 'none-free' when every lane is taken — the execution then stays queued instead
+ * of doubling up on an identity. The caller (admitExecution) holds the
+ * environment's claim lock, so two workers claiming at once cannot be handed the
+ * same lane.
+ */
+type ClaimClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+
+async function leaseIdentityLane(client: ClaimClient, environmentId: string): Promise<number | null | 'none-free'> {
+  const { rows } = await client.query('SELECT config FROM environments WHERE id = $1', [environmentId]);
+  const vars = (rows[0]?.config?.vars || {}) as Record<string, unknown>;
+  const lanes = Object.keys(vars)
+    .map((name) => /^pool_user_(\d+)$/.exec(name)?.[1])
+    .filter((n): n is string => n !== undefined)
+    .map(Number)
+    .sort((a, b) => a - b);
+  if (!lanes.length) return null;
+  const { rows: busy } = await client.query(
+    `SELECT metadata->>'identity_lane' AS lane FROM executions
+     WHERE environment_id = $1 AND status IN ('running','preparing') AND metadata ? 'identity_lane'`,
+    [environmentId]
+  );
+  const taken = new Set(busy.map((r) => Number(r.lane)));
+  const free = lanes.find((l) => !taken.has(l));
+  return free === undefined ? 'none-free' : free;
+}
+
+/**
+ * Executions that must not overlap on one environment. The application team's
+ * SIT suite signs in as the administrator, file by file, and opens its own
+ * sessions as it goes; the application allows the administrator a handful of
+ * sessions and ends all of them on a sign-out. Two SIT files running at the same
+ * time therefore end each other's sessions mid-test — so an execution that holds
+ * SIT cases runs only while no other one does ("sit"). Everything else keeps
+ * running beside it on its own identity lane.
+ */
+async function serialGroupOf(client: ClaimClient, execution: { test_case_ids?: string[] | null }): Promise<string | null> {
+  const ids = execution.test_case_ids || [];
+  if (!ids.length) return null;
+  const { rows } = await client.query(
+    `SELECT 1 FROM test_cases WHERE id = ANY($1::uuid[]) AND (script LIKE 'sit/cases/%' OR script LIKE '%.sit.ts%') LIMIT 1`,
+    [ids]
+  );
+  return rows.length ? 'sit' : null;
+}
+
+/**
+ * May this queued execution start now? Answers with what it starts with (its
+ * identity lane, its serial group), or null when it has to wait: its serial
+ * group is busy on the environment, or no identity lane is free. Decided under
+ * a per-environment lock held to the end of the claim transaction.
+ */
+async function admitExecution(
+  client: ClaimClient,
+  execution: { environment_id?: string | null; test_case_ids?: string[] | null }
+): Promise<{ lane: number | null; serialGroup: string | null } | null> {
+  const environmentId = execution.environment_id;
+  if (!environmentId) return { lane: null, serialGroup: null };
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`claim:${environmentId}`]);
+  const serialGroup = await serialGroupOf(client, execution);
+  if (serialGroup) {
+    const { rows } = await client.query(
+      `SELECT 1 FROM executions
+       WHERE environment_id = $1 AND status IN ('running','preparing') AND metadata->>'serial_group' = $2 LIMIT 1`,
+      [environmentId, serialGroup]
+    );
+    if (rows.length) return null;
+  }
+  const lane = await leaseIdentityLane(client, environmentId);
+  if (lane === 'none-free') return null;
+  return { lane, serialGroup };
+}
+
+export interface RunAllOutcome {
+  status: number;
+  body: Record<string, any>;
+  /** Set only when executions were actually queued (not on dry_run or an empty plan): what to audit. */
+  audit?: { application_id: string; details: Record<string, unknown> };
+}
+
+/**
+ * Rolling fail-rate guard for a run_group. After each result lands, look at
+ * the most-recent reported results across every execution in the group and,
+ * if more than half of them are failures, cancel every still-queued execution
+ * in the group so nobody waits on an obviously broken deploy.
+ *
+ * Tunable via the engine's `runtime_settings` row:
+ *   rolling_fail_cancel_enabled  (default true)
+ *   rolling_fail_cancel_window   (default 20 — minimum results before the guard fires)
+ *   rolling_fail_cancel_threshold(default 0.5 — fraction, 0.5 = 50 %)
+ *
+ * Running executions are left alone (they finish or time out normally); only
+ * queued ones are cancelled. A group never cancels itself twice: once at least
+ * one execution carries `metadata.rolling_fail_cancelled`, the guard is quiet.
+ */
+async function cancelOnRollingFailure(runGroup: string): Promise<void> {
+  const settings = await query(
+    `SELECT rolling_fail_cancel_enabled AS enabled,
+            rolling_fail_cancel_window AS window,
+            rolling_fail_cancel_threshold_pct AS threshold_pct
+     FROM settings WHERE id = true`
+  ).catch(() => ({ rows: [] as any[] }));
+  const row = settings.rows[0] as { enabled?: boolean; window?: number; threshold_pct?: number } | undefined;
+  if (!row || row.enabled === false) return;
+  const window = Math.max(5, Number(row.window) || 20);
+  const threshold = Math.min(1, Math.max(0.1, (Number(row.threshold_pct) || 50) / 100));
+
+  const already = await query(
+    `SELECT 1 FROM executions
+     WHERE metadata->>'run_group' = $1 AND (metadata->>'rolling_fail_cancelled') = 'true' LIMIT 1`,
+    [runGroup]
+  );
+  if (already.rows.length) return;
+
+  const recent = await query(
+    `SELECT er.status FROM execution_results er
+     JOIN executions ex ON ex.id = er.execution_id
+     WHERE ex.metadata->>'run_group' = $1
+     ORDER BY er.created_at DESC
+     LIMIT $2`,
+    [runGroup, window]
+  );
+  if (recent.rows.length < window) return;
+  const failed = recent.rows.filter((r: any) => r.status !== 'passed' && r.status !== 'skipped').length;
+  if (failed / recent.rows.length <= threshold) return;
+
+  const cancelled = await query(
+    `UPDATE executions
+       SET status = 'cancelled',
+           finished_at = now(),
+           metadata = metadata || jsonb_build_object(
+             'rolling_fail_cancelled', 'true',
+             'rolling_fail_cancel_reason', $2::text
+           )
+     WHERE metadata->>'run_group' = $1 AND status IN ('queued','preparing')
+     RETURNING id`,
+    [runGroup, `rolling fail rate ${failed}/${recent.rows.length} > ${Math.round(threshold * 100)}%`]
+  );
+  if (cancelled.rowCount) {
+    console.warn(`[rolling-fail-cancel] run_group ${runGroup}: ${failed}/${recent.rows.length} failed; cancelled ${cancelled.rowCount} queued executions`);
+    // Nudge the infra lifecycle so the stack can tear down as soon as any
+    // still-running executions finish — teardown-after-run doesn't wait on
+    // the cancelled queue, same as a normal run that completes.
+    try {
+      const { infraTick } = await import('../infra.js');
+      await infraTick();
+    } catch { /* best effort — the periodic tick will catch it within 60s */ }
+  }
+}
+
+/**
+ * Plan and queue "everything" for one application: one execution per
+ * non-empty suite, grouped under a shared metadata.run_group id. Shared by
+ * the console's "Run everything" button (`/api/v1/executions/run-all`) and
+ * the post-deploy "deploy and run" flow (`routes/deployments.ts`), so both
+ * mean exactly the same thing by "everything". Never throws for a caller
+ * mistake: the outcome carries the HTTP status and body to answer with.
+ */
+export async function runAllCases(b: Record<string, unknown>, actorId?: string | null): Promise<RunAllOutcome> {
+  const appKey = typeof b.application_key === 'string' ? b.application_key : null;
+  const appId = typeof b.application_id === 'string' ? b.application_id : null;
+  if (!appKey && !appId) {
+    return { status: 400, body: { error: 'Provide application_key or application_id' } };
+  }
+
+  const appRow = await query(
+    `SELECT id, key, name FROM applications WHERE ${appId ? 'id::text = $1' : 'key = $1'}`,
+    [appId || appKey]
+  );
+  if (!appRow.rows[0]) return { status: 404, body: { error: 'Application not found' } };
+  const application = appRow.rows[0];
+
+  let environmentId: string | null = null;
+  if (typeof b.environment_id === 'string' && b.environment_id) {
+    const env = await query(
+      `SELECT id, key, config FROM environments WHERE id::text = $1 OR key = $1`,
+      [b.environment_id]
+    );
+    if (!env.rows[0]) return { status: 404, body: { error: 'Environment not found' } };
+    environmentId = env.rows[0].id;
+    // A managed stack that is down is deployed first; "everything" is queued when the deploy succeeds.
+    if (b.dry_run !== true) {
+      const deferred = await deployFirstIfDown(
+        env.rows[0],
+        { planner: 'run_all', application: application.key, trigger_source: (b.trigger_source as string) || 'run-all', requested_by: (b.requested_by as string) ?? actorId ?? null },
+        actorId
+      );
+      if (deferred) return { status: deferred.status, body: deferred.body };
+    }
+  }
+
+  const suites = await query(
+    `SELECT s.id, s.key, s.name, s.suite_type,
+            COALESCE(array_agg(m.test_case_id ORDER BY m.sort_order) FILTER (WHERE m.test_case_id IS NOT NULL), '{}') AS case_ids
+     FROM test_suites s
+     LEFT JOIN test_case_suites m ON m.test_suite_id = s.id
+     LEFT JOIN test_cases tc ON tc.id = m.test_case_id AND tc.lifecycle NOT IN ('deprecated','archived')
+     WHERE s.application_id = $1 AND tc.id IS NOT NULL
+     GROUP BY s.id
+     ORDER BY s.key`,
+    [application.id]
+  );
+
+  const seen = new Set<string>();
+  const plan: Array<{ suite_id: string; suite_key: string; suite_name: string; case_ids: string[] }> = [];
+  for (const s of suites.rows) {
+    const ids = (s.case_ids as string[]).filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    if (ids.length) plan.push({ suite_id: s.id, suite_key: s.key, suite_name: s.name, case_ids: ids });
+  }
+
+  const totalCases = plan.reduce((n, p) => n + p.case_ids.length, 0);
+  if (b.dry_run === true) {
+    return {
+      status: 200,
+      body: {
+        data: {
+          application: application.key,
+          environment_id: environmentId,
+          total_cases: totalCases,
+          suites: plan.map((p) => ({ key: p.suite_key, name: p.suite_name, cases: p.case_ids.length })),
+        },
+      },
+    };
+  }
+  if (!totalCases) return { status: 400, body: { error: 'Application has no runnable cases' } };
+
+  // Stamp application_version on every execution the "Run everything" planner creates,
+  // so the Test runs table can show + filter by it.
+  const applicationVersion = typeof b.application_version === 'string' && b.application_version.trim()
+    ? b.application_version.trim()
+    : null;
+  const runGroup = `all-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+  const batchAt = new Date();
+  const created: any[] = [];
+  for (const p of plan) {
+    const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+    const name = runName([], p.suite_name, batchAt);
+    const { rows } = await query(
+      `INSERT INTO executions (
+         key, name, requested_by, test_suite_id, test_case_ids, environment_id,
+         execution_location, status, trigger_source, metadata
+       ) VALUES ($1,$2,$3,$4,$5,$6,'out_of_container','queued',$7,$8::jsonb)
+       RETURNING id, key, name, test_suite_id, test_case_ids, status, created_at`,
+      [
+        key, name, (b.requested_by as string) ?? actorId ?? null, p.suite_id, p.case_ids, environmentId,
+        (b.trigger_source as string) || 'run-all',
+        JSON.stringify({
+          run_group: runGroup, suite_key: p.suite_key, application_key: application.key,
+          ...(applicationVersion ? { application_version: applicationVersion } : {}),
+        }),
+      ]
+    );
+    created.push({ ...rows[0], suite_key: p.suite_key, suite_name: p.suite_name });
+  }
+
+  return {
+    status: 202,
+    body: {
+      data: {
+        run_group: runGroup,
+        application: application.key,
+        environment_id: environmentId,
+        total_cases: totalCases,
+        executions: created,
+      },
+      message: `Queued ${created.length} suite executions (${totalCases} cases)`,
+    },
+    audit: {
+      application_id: application.id,
+      details: { run_group: runGroup, executions: created.length, total_cases: totalCases, environment_id: environmentId },
+    },
+  };
+}
 
 export async function executionRoutes(app: FastifyInstance) {
   app.get('/api/v1/executions', async (req, reply) => {
@@ -15,7 +316,7 @@ export async function executionRoutes(app: FastifyInstance) {
     if (q.test_suite_id) { clauses.push(`e.test_suite_id = $${i++}`); params.push(q.test_suite_id); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const { rows } = await query(
-      `${EXECUTION_SUMMARY_SQL} ${where} GROUP BY e.id, s.name ORDER BY e.created_at DESC LIMIT 50`,
+      `SELECT e.*, s.name AS suite_name FROM executions e LEFT JOIN test_suites s ON s.id = e.test_suite_id ${where} ORDER BY e.created_at DESC LIMIT 50`,
       params
     );
     return reply.send({ data: rows });
@@ -98,17 +399,55 @@ export async function executionRoutes(app: FastifyInstance) {
       environmentId = envRow.rows[0]?.id ?? null;
     }
 
+    const [caseRows, suiteRow] = await Promise.all([
+      resolvedIds.length
+        ? query(
+            `SELECT tc.name, a.key AS app_key FROM test_cases tc
+             JOIN applications a ON a.id = tc.application_id
+             WHERE tc.id = ANY($1::uuid[])`,
+            [resolvedIds]
+          )
+        : Promise.resolve({ rows: [] as any[] }),
+      b.test_suite_id
+        ? query(
+            `SELECT s.name, a.key AS app_key FROM test_suites s
+             JOIN applications a ON a.id = s.application_id
+             WHERE s.id = $1`,
+            [b.test_suite_id]
+          )
+        : Promise.resolve({ rows: [] as any[] }),
+    ]);
+    const caseNames = caseRows.rows.map((r: any) => r.name);
+    const suiteName = suiteRow.rows[0]?.name ?? null;
+    // application_key drives the console's env/app-scoped run filtering (routes/ui.ts /ui/live) —
+    // derived from the actual case/suite rather than trusted from the caller.
+    const applicationKey = caseRows.rows[0]?.app_key ?? suiteRow.rows[0]?.app_key ?? null;
+    const name = runName(caseNames, suiteName, new Date());
+    // application_version lets callers tag a run with a branch/tag/version so
+    // the Test runs table can show + filter by it. Accept it either on the top
+    // level or inside metadata; the top-level wins to make callers simpler.
+    const applicationVersion = typeof b.application_version === 'string' && b.application_version.trim()
+      ? b.application_version.trim()
+      : (b.metadata && typeof b.metadata === 'object' && typeof (b.metadata as any).application_version === 'string'
+          ? ((b.metadata as any).application_version as string).trim()
+          : null);
+    const metadata = {
+      ...(b.metadata && typeof b.metadata === 'object' ? b.metadata : {}),
+      ...(applicationKey ? { application_key: applicationKey } : {}),
+      ...(applicationVersion ? { application_version: applicationVersion } : {}),
+    };
+
     const key = `exec-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
     const { rows } = await query(
       `INSERT INTO executions (
-         key, requested_by, test_plan_id, test_suite_id, test_case_ids,
+         key, name, requested_by, test_plan_id, test_suite_id, test_case_ids,
          environment_id, execution_location, status, trigger_source, metadata
-       ) VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::execution_location,'out_of_container'),'queued',COALESCE($8,'manual'),COALESCE($9,'{}'::jsonb))
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8::execution_location,'out_of_container'),'queued',COALESCE($9,'manual'),$10::jsonb)
        RETURNING *`,
       [
-        key, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
+        key, name, b.requested_by ?? req.actor?.id ?? null, b.test_plan_id ?? null, b.test_suite_id ?? null,
         resolvedIds, environmentId, b.execution_location ?? null,
-        b.trigger_source ?? null, JSON.stringify(b.metadata ?? {}),
+        b.trigger_source ?? null, JSON.stringify(metadata),
       ]
     );
 
@@ -120,6 +459,25 @@ export async function executionRoutes(app: FastifyInstance) {
     });
 
     return reply.status(202).send({ data: rows[0], message: 'Execution queued' });
+  });
+
+  /**
+   * On-demand "run everything" for one application: queues one execution per
+   * non-empty suite (cases deduped across suites so nothing runs twice),
+   * grouped under a shared metadata.run_group id. With dry_run=true it only
+   * returns the plan.
+   */
+  app.post<{ Body: Record<string, unknown> }>('/api/v1/executions/run-all', async (req, reply) => {
+    const outcome = await runAllCases(req.body || {}, req.actor?.id);
+    if (outcome.audit) await audit(req, 'execution.run_all', 'application', outcome.audit.application_id, outcome.audit.details);
+    return reply.status(outcome.status).send(outcome.body);
+  });
+
+  // Status only — what a worker polls while it runs a job, to learn it was cancelled.
+  app.get<{ Params: { id: string } }>('/api/v1/executions/:id/status', async (req, reply) => {
+    const { rows } = await query('SELECT id, status FROM executions WHERE id::text = $1 OR key = $1', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
+    return reply.send({ data: rows[0] });
   });
 
   app.post<{ Params: { id: string } }>('/api/v1/executions/:id/cancel', async (req, reply) => {
@@ -134,25 +492,97 @@ export async function executionRoutes(app: FastifyInstance) {
     return reply.send({ data: rows[0] });
   });
 
+  // Bulk stop: every queued/preparing/running execution, optionally narrowed to
+  // one application/environment. Unscoped (no body) cancels everything in flight —
+  // the "Cancel all" action behind the console's Running Now tab.
+  app.post<{ Body: { application_key?: string; environment_id?: string } }>(
+    '/api/v1/executions/cancel-all',
+    async (req, reply) => {
+      const b = req.body || {};
+      const clauses = [`status IN ('queued','preparing','running')`];
+      const params: unknown[] = [];
+      if (b.application_key) { params.push(b.application_key); clauses.push(`metadata->>'application_key' = $${params.length}`); }
+      if (b.environment_id) { params.push(b.environment_id); clauses.push(`environment_id::text = $${params.length}`); }
+      const { rows } = await query(
+        `UPDATE executions SET status = 'cancelled', finished_at = now()
+         WHERE ${clauses.join(' AND ')}
+         RETURNING id`,
+        params
+      );
+      await audit(req, 'execution.cancel_all', 'application', undefined, { cancelled: rows.length, ...b });
+      return reply.send({ data: { cancelled: rows.length } });
+    }
+  );
+
   app.post<{ Body: { worker_id: string; capabilities?: string[] } }>(
     '/api/v1/executions/claim',
     async (req, reply) => {
       const workerId = req.body?.worker_id;
       if (!workerId) return reply.status(400).send({ error: 'worker_id required' });
 
+      // A worker that died mid-job leaves its execution "running" forever
+      // (the live run screen never settles). Workers heartbeat every 15s even
+      // while a case is executing, so three silent minutes means it is gone.
+      await query(
+        `UPDATE executions e
+            SET status = 'error', finished_at = now(),
+                metadata = e.metadata || jsonb_build_object(
+                  'abandoned', true,
+                  'abandoned_reason', 'worker ' || COALESCE(e.worker_id, '(none)') || ' stopped reporting before the run completed')
+          WHERE e.status IN ('running','preparing')
+            AND e.started_at < now() - interval '3 minutes'
+            AND NOT EXISTS (
+              SELECT 1 FROM workers w
+               WHERE w.id = e.worker_id AND w.last_heartbeat > now() - interval '3 minutes')`
+      );
+
       const row = await withTransaction(async (client) => {
-        const { rows } = await client.query(
-          `SELECT * FROM executions
-           WHERE status = 'queued'
-           ORDER BY created_at
-           FOR UPDATE SKIP LOCKED
-           LIMIT 1`
+        // Oldest first. An execution that has to wait — no identity lane free on its
+        // environment, or its serial group busy there — is passed over and stays
+        // queued, so the next one that can start does.
+        // SIT executions that cannot start (another one is running on their
+        // environment) are left out here already, so a long line of them at the
+        // head of the queue does not hide the executions behind it that can.
+        const { rows: candidates } = await client.query(
+          `SELECT q.* FROM executions q
+           WHERE q.status = 'queued'
+             AND NOT (
+               EXISTS (SELECT 1 FROM executions r
+                       WHERE r.environment_id = q.environment_id AND r.status IN ('running','preparing')
+                         AND r.metadata->>'serial_group' = 'sit')
+               AND EXISTS (SELECT 1 FROM test_cases tc
+                           WHERE tc.id = ANY(q.test_case_ids) AND (tc.script LIKE 'sit/cases/%' OR tc.script LIKE '%.sit.ts%'))
+             )
+           ORDER BY q.created_at
+           FOR UPDATE OF q SKIP LOCKED
+           LIMIT 10`
         );
-        if (!rows[0]) return null;
+        let picked: any = null;
+        let lane: number | null = null;
+        let serialGroup: string | null = null;
+        for (const candidate of candidates) {
+          const admitted = await admitExecution(client, candidate);
+          if (!admitted) continue;
+          picked = candidate;
+          lane = admitted.lane;
+          serialGroup = admitted.serialGroup;
+          break;
+        }
+        if (!picked) return null;
+        // The run records the build it is about to test: the commit registered on the
+        // environment (config.deployment) at the moment a worker starts. A build the
+        // caller passed in metadata.build (a deploy pipeline knows best) is kept.
         const { rows: updated } = await client.query(
-          `UPDATE executions SET status = 'running', worker_id = $2, started_at = now()
-           WHERE id = $1 RETURNING *`,
-          [rows[0].id, workerId]
+          `UPDATE executions e SET status = 'running', worker_id = $2, started_at = now(),
+                  metadata = COALESCE((
+                    SELECT jsonb_build_object('build', env.config->'deployment')
+                    FROM environments env
+                    WHERE env.id = e.environment_id AND jsonb_typeof(env.config->'deployment') = 'object'
+                  ), '{}'::jsonb) || e.metadata
+                  || CASE WHEN $3::int IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('identity_lane', $3::int) END
+                  || CASE WHEN $4::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('serial_group', $4::text) END
+           WHERE e.id = $1 RETURNING *`,
+          [picked.id, workerId, lane, serialGroup]
         );
         await client.query(
           `UPDATE workers SET last_heartbeat = now(), status = 'busy', current_load = current_load + 1
@@ -172,21 +602,30 @@ export async function executionRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const b = req.body || {};
       const exec = await query(
-        'SELECT id FROM executions WHERE id::text = $1 OR key = $1',
+        'SELECT id, status, metadata FROM executions WHERE id::text = $1 OR key = $1',
         [req.params.id]
       );
       if (!exec.rows[0]) return reply.status(404).send({ error: 'Execution not found' });
+      // A cancelled run takes no more results: the worker reads this as "stop".
+      if (exec.rows[0].status === 'cancelled') {
+        return reply.status(409).send({ error: 'Execution was cancelled', code: 'execution_cancelled' });
+      }
 
+      // Remarks: what happened in plain words, one line per step then the outcome
+      // (the worker sends them; an older worker's message is split into lines).
+      const remarks = Array.isArray(b.remarks)
+        ? b.remarks.map((r: unknown) => String(r ?? '').trim()).filter(Boolean).slice(0, 200)
+        : String(b.message || '').split(/;\s+(?=[A-Za-z0-9])/).map((s) => s.trim()).filter(Boolean);
       const { rows } = await query(
         `INSERT INTO execution_results (
            execution_id, test_case_id, status, verdict, duration_ms,
-           started_at, finished_at, message, classification, metrics
-         ) VALUES ($1,$2,$3::execution_status,$4,$5,$6,$7,$8,$9::failure_classification,COALESCE($10,'{}'::jsonb))
+           started_at, finished_at, message, classification, metrics, remarks
+         ) VALUES ($1,$2,$3::execution_status,$4,$5,$6,$7,$8,$9::failure_classification,COALESCE($10,'{}'::jsonb),$11::jsonb)
          RETURNING *`,
         [
           exec.rows[0].id, b.test_case_id, b.status, b.verdict ?? null,
           b.duration_ms ?? null, b.started_at ?? null, b.finished_at ?? new Date().toISOString(),
-          b.message ?? null, b.classification ?? null, JSON.stringify(b.metrics ?? {}),
+          b.message ?? null, b.classification ?? null, JSON.stringify(b.metrics ?? {}), JSON.stringify(remarks),
         ]
       );
 
@@ -203,18 +642,37 @@ export async function executionRoutes(app: FastifyInstance) {
         }
       }
 
+      // Rolling fail-rate guard: if the group's recent window is more than
+      // half failing, cancel the rest of the run so nobody waits on obvious
+      // junk. See cancelOnRollingFailure() for the exact threshold + window.
+      const runGroup = (exec.rows[0].metadata && typeof exec.rows[0].metadata === 'object')
+        ? (exec.rows[0].metadata as Record<string, unknown>).run_group
+        : null;
+      if (typeof runGroup === 'string' && runGroup) {
+        try { await cancelOnRollingFailure(runGroup); } catch (err) { req.log.warn({ err }, 'rolling fail-rate cancel failed'); }
+      }
+
       return reply.status(201).send({ data: rows[0] });
     }
   );
 
-  app.post<{ Params: { id: string }; Body: { status?: string } }>(
+  app.post<{ Params: { id: string }; Body: { status?: string; metadata?: Record<string, unknown> } }>(
     '/api/v1/executions/:id/complete',
     async (req, reply) => {
       const status = req.body?.status || 'passed';
+      const metadataPatch =
+        req.body?.metadata && typeof req.body.metadata === 'object' && !Array.isArray(req.body.metadata)
+          ? req.body.metadata
+          : null;
+      // "Cancelled" is final: a worker finishing up (or an older worker that never
+      // noticed the cancel) must not turn the run back into passed/failed.
       const { rows } = await query(
-        `UPDATE executions SET status = $2::execution_status, finished_at = now()
+        `UPDATE executions SET
+           status = CASE WHEN status = 'cancelled' THEN status ELSE $2::execution_status END,
+           finished_at = CASE WHEN status = 'cancelled' THEN COALESCE(finished_at, now()) ELSE now() END,
+           metadata = metadata || COALESCE($3::jsonb, '{}'::jsonb)
          WHERE id::text = $1 OR key = $1 RETURNING *`,
-        [req.params.id, status]
+        [req.params.id, status, metadataPatch ? JSON.stringify(metadataPatch) : null]
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Execution not found' });
       if (rows[0].worker_id) {

@@ -11,13 +11,11 @@ export const ENV = {
   // the existing console's webBase if this is ever left unset.
   auroraBase: trimSlash(process.env.SIT_AURORA_BASE || "http://web-aurora:80"),
   dbviewerBase: trimSlash(process.env.SIT_DBVIEWER_BASE || "http://dbviewer:8090"),
-  // The product collapsed to one hidden tenant and dropped the tenant field from
-  // login entirely (2026-10-02); tenantSlug is no longer read anywhere but is left
-  // here rather than removed, in case a SIT case still references {{tenantSlug}}.
-  tenantSlug: process.env.SIT_TENANT_SLUG || "default",
-  username: process.env.SIT_USERNAME || "admin",
-  // Must match dev/demo-seed/sand-bench-demo-tenants-users.json's temporaryPassword.
-  password: process.env.SIT_PASSWORD || "password",
+  tenantSlug: process.env.SIT_TENANT_SLUG || "acme-demo",
+  username: process.env.SIT_USERNAME || "operator.acme",
+  // SIT_PASSWORD="" (explicit empty) opts into passwordless demo sign-in on
+  // development builds; unset falls back to the documented demo password.
+  password: process.env.SIT_PASSWORD !== undefined ? process.env.SIT_PASSWORD : "SandBenchDemo1234!",
   messageTypeCode: process.env.SIT_MESSAGE_TYPE || "pain.001.001.09",
   // Performance cases (91-performance-soak, 92-performance-burst) are bounded-duration by
   // design -- see those files for why. Defaults are kept short so they don't meaningfully

@@ -1,62 +1,560 @@
 /**
- * Lightweight HTTP/API runner for health, REST smoke, and contract-style checks.
- * Every request and response is written to `transcript` so the result carries proof.
+ * HTTP/API runner for health, REST smoke, contract and round-trip checks.
+ *
+ * Steps run in order and share a variable scope:
+ *   - `url` may be absolute or templated ("{{api}}/api/v1/runs"); `path` stays
+ *     relative to the execution's base URL. Variables come from the environment's
+ *     config.vars (injected by the worker) plus anything captured with `save`.
+ *   - `save` captures values out of a JSON response body by dot-path
+ *     ({"token": "token"} → vars.token = body.token) for later steps
+ *     (e.g. headers: {authorization: "Bearer {{token}}"}).
+ *   - `expect_json` asserts on the body by dot-path (equals / contains / exists /
+ *     matches, min and max for numbers, min_length and max_length for arrays
+ *     and strings).
+ *   - `poll` re-issues the same request until every expectation passes or the
+ *     poll window closes — the async round-trip primitive (message sent via one
+ *     system, its effect observed through another).
+ *   - `allow_failure` marks a step whose expectations may fail without failing
+ *     the case (used to probe optional surfaces).
+ *   - `precondition` marks a step that establishes whether the target can host
+ *     the case at all (fixtures seeded, nothing else draining the queue). When
+ *     its expectations fail the case is reported skipped, not failed. A target
+ *     that does not answer is still a failure.
+ *
+ * Every run leaves an `http_transcript` evidence file: each request as sent and
+ * the response as received (secrets masked, bodies capped), pass or fail.
  */
+import { redact, redactBody, redactText, secretValues, writeJsonEvidence, type EvidenceItem } from '../evidence.js';
+
+export interface HttpStep {
+  action: string; // 'request'
+  method?: string;
+  url?: string;
+  path?: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  /** Raw request body sent verbatim (for malformed-payload tests); wins over `body`. */
+  body_raw?: string;
+  /** JSON text resolved from captured variables, then parsed to preserve numbers, booleans and objects. */
+  body_json?: string;
+  expected_status?: number | number[];
+  expected_body_contains?: string;
+  expected_body_not_contains?: string;
+  expect_json?: Array<{
+    path: string;
+    equals?: unknown;
+    contains?: string;
+    exists?: boolean;
+    min_length?: number;
+    /** Upper bound on an array's or string's length (inclusive). */
+    max_length?: number;
+    /** Numeric lower bound (inclusive). */
+    min?: number | string;
+    /** Numeric upper bound (inclusive). */
+    max?: number | string;
+    /** Regular expression the value (as a string) must match. */
+    matches?: string;
+    /** At least one entry must match all dot paths. A timestamp can use { at_or_after: '{{ts}}' } (epoch ms). */
+    some?: Record<string, unknown>;
+  }>;
+  expect_headers?: Array<{
+    name: string;
+    exists?: boolean;
+    contains?: string;
+    not_contains?: string;
+  }>;
+  /**
+   * Extra body checks that apply only when the response has that status. For a
+   * route with more than one legitimate answer — a list that an unconfigured
+   * optional integration replaces with its documented "not configured" refusal —
+   * each answer is held to its own contract, so allowing the second status does
+   * not also allow an unrelated failure that happens to share it.
+   */
+  expect_by_status?: Record<string, Pick<HttpStep, 'expect_json' | 'expected_body_contains' | 'expected_body_not_contains'>>;
+  save?: Record<string, string>;
+  /** Cleanup-only: skip this operation when one of these case variables was never captured. */
+  skip_if_missing?: string[];
+  poll?: { timeout_ms?: number; interval_ms?: number };
+  /**
+   * Sign-in steps only: share one session per worker instead of opening a new one
+   * for every case. The first case signs in; later cases get the same answer back
+   * after `check_url` (sent with the session's bearer token, read from the sign-in
+   * answer at `token_path`, default "token") confirms the session is still alive.
+   * Used for an identity that every case has to share — the application's single
+   * administrator, capped at a handful of sessions — so a run does not evict its
+   * own sessions. A case must never sign such an identity out.
+   */
+  reuse_session?: { check_url: string; token_path?: string };
+  allow_failure?: boolean;
+  precondition?: boolean;
+  description?: string;
+  /** Plain-language wording of the step (what is done), as the Test cases screen shows it. */
+  text?: string;
+}
+
 export interface HttpRunInput {
   baseUrl: string;
   script?: string;
-  steps?: Array<{
-    action: string;
-    method?: string;
-    path?: string;
-    headers?: Record<string, string>;
-    body?: unknown;
-    expected_status?: number;
-    expected_body_contains?: string;
-  }>;
+  steps?: HttpStep[];
+  /** Case-owned HTTP cleanup, always attempted after the main steps. */
+  cleanupSteps?: HttpStep[];
+  cleanupTimeoutSeconds?: number;
   timeoutSeconds?: number;
+  vars?: Record<string, string>;
+  /** Aborts the in-flight request and stops before the next step (e.g. the engine's per-test-type timeout, or a run cancel). */
+  signal?: AbortSignal;
 }
 
 export interface HttpRunResult {
-  status: 'passed' | 'failed' | 'error';
+  status: 'passed' | 'failed' | 'error' | 'skipped';
   message: string;
   duration_ms: number;
   classification?: string;
   metrics?: Record<string, number>;
-  transcript: string[];
+  evidence?: EvidenceItem[];
+  /** What happened, in plain words: one line per step, then the outcome (shown as the run's remarks). */
+  remarks?: string[];
 }
 
-const BODY_LIMIT = 4000;
-
-function clip(text: string): string {
-  return text.length > BODY_LIMIT ? `${text.slice(0, BODY_LIMIT)}\n… (${text.length - BODY_LIMIT} more bytes)` : text;
+/** "answered OK (200)" — the status in words for a remark line. */
+function statusWords(code: number): string {
+  const map: Record<number, string> = {
+    200: 'answered OK', 201: 'confirmed it was created', 202: 'accepted it for processing', 204: 'answered with nothing to show',
+    400: 'rejected the request as invalid', 401: 'refused — sign-in required', 403: 'refused — not allowed', 404: 'reported nothing is there',
+    405: 'reported the action is not allowed', 409: 'reported a conflict', 412: 'refused — precondition failed', 413: 'rejected the request as too large',
+    415: 'rejected the content type', 422: 'rejected the content as unprocessable', 429: 'asked the caller to slow down', 500: 'failed with an internal error', 503: 'reported it is unavailable',
+  };
+  return `${map[code] || (code < 300 ? 'answered successfully' : code < 400 ? 'redirected' : code < 500 ? 'rejected the request' : 'failed on the server side')} (${code})`;
 }
 
-function record(transcript: string[], method: string, url: string, reqBody: unknown, res: Response, text: string, latency: number) {
-  transcript.push(
-    `>>> ${method} ${url}`,
-    ...(reqBody !== undefined ? [JSON.stringify(reqBody, null, 2)] : []),
-    `<<< ${res.status} ${res.statusText} (${latency}ms)`,
-    `content-type: ${res.headers.get('content-type') || '-'}`,
-    clip(text),
-    ''
-  );
+/** The remark label of a step: its plain-language text, else its description, else the request. */
+function stepLabel(step: HttpStep, idx: number, method: string): string {
+  const what = step.text || step.description || `${method} ${String(step.url || step.path || '/').replace(/^https?:\/\/[^/]+/, '').replace(/\{\{\s*\w+\s*\}\}/, '')}`;
+  return `Step ${idx + 1} — ${what.replace(/\.$/, '')}`;
+}
+
+interface Exchange {
+  step: number;
+  description?: string;
+  request: { method: string; url: string; headers?: Record<string, string>; body?: string };
+  response?: { status: number; headers: Record<string, string>; body: string; latency_ms: number };
+  /** Set when the answer is the worker's shared session, re-checked, rather than a new sign-in. */
+  note?: string;
+  attempts?: number;
+  outcome?: 'passed' | 'failed' | 'tolerated' | 'precondition_not_met';
+  failure?: string;
+  error?: string;
+}
+
+/** What was put on the wire during a run; `current` is the request still awaiting its response. */
+interface Trace {
+  exchanges: Exchange[];
+  current?: Exchange;
+  vars: Record<string, string>;
+}
+
+function getPath(obj: unknown, dotPath: string): unknown {
+  let cur: any = obj;
+  for (const part of dotPath.split('.')) {
+    if (cur == null) return undefined;
+    // numeric segment doubles as array index
+    cur = cur[/^\d+$/.test(part) ? Number(part) : part];
+  }
+  return cur;
+}
+
+function substitute(value: string, vars: Record<string, string>): string {
+  return value.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, name) => {
+    const v = vars[name];
+    return v === undefined ? `{{${name}}}` : String(v);
+  });
+}
+
+function substituteDeep(value: unknown, vars: Record<string, string>): unknown {
+  if (typeof value === 'string') return substitute(value, vars);
+  if (Array.isArray(value)) return value.map((v) => substituteDeep(v, vars));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = substituteDeep(v, vars);
+    return out;
+  }
+  return value;
+}
+
+function requestBody(step: HttpStep, vars: Record<string, string>): string | undefined {
+  if (step.body_json !== undefined) {
+    if (step.body !== undefined || step.body_raw !== undefined) throw new Error('body_json must not be combined with body or body_raw');
+    try { return JSON.stringify(JSON.parse(substitute(step.body_json, vars))); }
+    catch { throw new Error('body_json did not resolve to valid JSON'); }
+  }
+  return step.body_raw !== undefined ? step.body_raw : step.body !== undefined ? JSON.stringify(substituteDeep(step.body, vars)) : undefined;
+}
+
+function captureText(value: unknown): string {
+  return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * Shared sessions (`reuse_session`), one per sign-in request for the life of the
+ * worker: the sign-in answer as received, or null when the sign-in was refused.
+ * Stored as a promise so cases that start together wait for one sign-in instead
+ * of each opening a session of their own.
+ */
+const sharedSessions = new Map<string, Promise<string | null>>();
+const SESSION_REUSED_NOTE = 'session reused: this worker already holds a session for this identity; it was checked and is still valid, so no new one was opened';
+
+/** Forget every shared session (tests, and a worker that is shutting down). */
+export function clearSharedSessions(): void {
+  sharedSessions.clear();
+}
+
+async function sessionStillValid(text: string, checkUrl: string, tokenPath: string): Promise<boolean> {
+  let token: unknown;
+  try { token = getPath(JSON.parse(text), tokenPath); } catch { return false; }
+  if (typeof token !== 'string' || !token) return false;
+  try {
+    const res = await fetch(checkUrl, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+    await res.arrayBuffer().catch(() => undefined);
+    return res.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Send one step's request. A `reuse_session` sign-in is answered from the shared
+ * session when that is still valid; everything else goes on the wire as written.
+ */
+async function sendStep(
+  step: HttpStep,
+  request: { method: string; url: string; headers?: Record<string, string>; body?: string },
+  vars: Record<string, string>,
+  signal: AbortSignal
+): Promise<{ res: Response; text: string; reused: boolean }> {
+  const direct = async () => {
+    const res = await fetch(request.url, { method: request.method, headers: request.headers, body: request.body, signal });
+    return { res, text: await res.text(), reused: false };
+  };
+  const reuse = step.reuse_session;
+  if (!reuse || request.method !== 'POST' || !reuse.check_url) return direct();
+
+  const key = `${request.url}\n${request.body || ''}`;
+  const checkUrl = substitute(reuse.check_url, vars);
+  const tokenPath = reuse.token_path || 'token';
+  for (let round = 0; round < 3; round++) {
+    const pending = sharedSessions.get(key);
+    if (!pending) break;
+    const text = await pending.catch(() => null);
+    if (text && (await sessionStillValid(text, checkUrl, tokenPath))) {
+      return { res: new Response(text, { status: 200, headers: { 'content-type': 'application/json' } }), text, reused: true };
+    }
+    // Ended since (evicted, signed out, expired): drop it unless another case has already replaced it.
+    if (sharedSessions.get(key) === pending) sharedSessions.delete(key);
+  }
+
+  let settle!: (value: string | null) => void;
+  const flight = new Promise<string | null>((resolve) => { settle = resolve; });
+  sharedSessions.set(key, flight);
+  try {
+    const sent = await direct();
+    settle(sent.res.status === 200 ? sent.text : null);
+    if (sent.res.status !== 200 && sharedSessions.get(key) === flight) sharedSessions.delete(key);
+    return sent;
+  } catch (err) {
+    settle(null);
+    if (sharedSessions.get(key) === flight) sharedSessions.delete(key);
+    throw err;
+  }
+}
+
+function checkExpectations(
+  step: HttpStep,
+  status: number,
+  text: string,
+  json: unknown,
+  headers: Headers,
+  vars: Record<string, string>
+): string | null {
+  const expected = step.expected_status ?? 200;
+  const allowed = Array.isArray(expected) ? expected : [expected];
+  if (!allowed.includes(status)) {
+    return `expected status ${allowed.join('/')} got ${status}: ${text.slice(0, 160)}`;
+  }
+  const forStatus = step.expect_by_status?.[String(status)];
+  if (forStatus) {
+    const failure = checkExpectations({ ...step, ...forStatus, expected_status: status, expect_by_status: undefined, expect_headers: undefined }, status, text, json, headers, vars);
+    if (failure) return `for status ${status}: ${failure}`;
+  }
+  if (step.expected_body_contains) {
+    const needle = substitute(step.expected_body_contains, vars);
+    if (!text.includes(needle)) return `body missing expected fragment "${needle}"`;
+  }
+  if (step.expected_body_not_contains) {
+    const needle = substitute(step.expected_body_not_contains, vars);
+    if (text.includes(needle)) return `body unexpectedly contains "${needle}"`;
+  }
+  for (const ex of step.expect_json || []) {
+    const actual = getPath(json, ex.path);
+    if (ex.exists !== undefined) {
+      const exists = actual !== undefined && actual !== null;
+      if (exists !== ex.exists) return `expect_json ${ex.path}: exists=${exists}, wanted ${ex.exists}`;
+    }
+    if (ex.equals !== undefined) {
+      const want = typeof ex.equals === 'string' ? substitute(ex.equals, vars) : ex.equals;
+      // A captured variable is always text; compared with a number or boolean it means that value's text.
+      const templated = typeof ex.equals === 'string' && ex.equals.includes('{{');
+      const same = templated && (typeof actual === 'number' || typeof actual === 'boolean') ? String(actual) === want : actual === want;
+      if (!same) {
+        return `expect_json ${ex.path}: got ${JSON.stringify(actual)}, wanted ${JSON.stringify(want)}`;
+      }
+    }
+    if (ex.contains !== undefined) {
+      const needle = substitute(ex.contains, vars);
+      const found = Array.isArray(actual)
+        ? actual.map((v) => (typeof v === 'object' ? JSON.stringify(v) : String(v))).some((v) => v.includes(needle))
+        : String(actual ?? '').includes(needle);
+      if (!found) return `expect_json ${ex.path}: ${JSON.stringify(actual)?.slice(0, 160)} does not contain "${needle}"`;
+    }
+    if (ex.some !== undefined) {
+      const fields = Object.entries(ex.some);
+      const found = fields.length > 0 && Array.isArray(actual) && actual.some(item => fields.every(([path, expected]) => {
+        const value = getPath(item, path);
+        if (expected && typeof expected === 'object' && 'at_or_after' in expected) {
+          const threshold = Number(substitute(String(expected.at_or_after), vars));
+          const timestamp = typeof value === 'string' ? Date.parse(value) : NaN;
+          return Number.isFinite(threshold) && Number.isFinite(timestamp) && timestamp >= threshold;
+        }
+        const want = typeof expected === 'string' ? substitute(expected, vars) : expected;
+        return typeof expected === 'string' && expected.includes('{{') && (typeof value === 'number' || typeof value === 'boolean')
+          ? String(value) === want : value === want;
+      }));
+      if (!found) return `expect_json ${ex.path}: no single entry matches ${JSON.stringify(ex.some)}`;
+    }
+    if (ex.min_length !== undefined) {
+      const len = Array.isArray(actual) ? actual.length : typeof actual === 'string' ? actual.length : -1;
+      if (len < ex.min_length) return `expect_json ${ex.path}: length ${len} < ${ex.min_length}`;
+    }
+    if (ex.max_length !== undefined) {
+      const len = Array.isArray(actual) ? actual.length : typeof actual === 'string' ? actual.length : -1;
+      if (len < 0 || len > ex.max_length) return `expect_json ${ex.path}: length ${len} > ${ex.max_length}`;
+    }
+    if (ex.min !== undefined) {
+      const num = Number(actual);
+      const bound = Number(substitute(String(ex.min), vars));
+      if (!Number.isFinite(bound)) return `expect_json ${ex.path}: min did not resolve to a finite number`;
+      if (actual === null || actual === undefined || !Number.isFinite(num) || num < bound) return `expect_json ${ex.path}: ${JSON.stringify(actual)} < ${bound}`;
+    }
+    if (ex.max !== undefined) {
+      const num = Number(actual);
+      const bound = Number(substitute(String(ex.max), vars));
+      if (!Number.isFinite(bound)) return `expect_json ${ex.path}: max did not resolve to a finite number`;
+      if (actual === null || actual === undefined || !Number.isFinite(num) || num > bound) return `expect_json ${ex.path}: ${JSON.stringify(actual)} > ${bound}`;
+    }
+    if (ex.matches !== undefined) {
+      const text = typeof actual === 'string' ? actual : actual === undefined ? '' : JSON.stringify(actual);
+      if (!new RegExp(substitute(ex.matches, vars)).test(text)) return `expect_json ${ex.path}: ${JSON.stringify(actual)?.slice(0, 160)} does not match /${ex.matches}/`;
+    }
+  }
+  for (const eh of step.expect_headers || []) {
+    const value = headers.get(eh.name);
+    if (eh.exists !== undefined) {
+      const exists = value !== null && value !== '';
+      if (exists !== eh.exists) return `header ${eh.name}: exists=${exists}, wanted ${eh.exists}`;
+    }
+    if (eh.contains !== undefined && !(value || '').toLowerCase().includes(eh.contains.toLowerCase())) {
+      return `header ${eh.name}: "${value}" does not contain "${eh.contains}"`;
+    }
+    if (eh.not_contains !== undefined && (value || '').toLowerCase().includes(eh.not_contains.toLowerCase())) {
+      return `header ${eh.name}: "${value}" contains forbidden "${eh.not_contains}"`;
+    }
+  }
+  return null;
 }
 
 export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
+  const trace: Trace = { exchanges: [], vars: {} };
+  const result = await execute(input, trace);
+  // A request that never got its response (refused, timed out) is evidence too.
+  if (trace.current) {
+    trace.exchanges.push({ ...trace.current, outcome: 'failed', error: result.message });
+    trace.current = undefined;
+  }
+
+  // A prerequisite can fail after earlier setup has already created data.
+  // Cleanup guards handle resources that were never created; the finalizer
+  // must still run for resources created before a skip, failure or cancellation.
+  const cleanupFailures = await executeCleanup(input, trace);
+  if (cleanupFailures.length) {
+    if (result.status === 'passed' || result.status === 'skipped') result.status = 'failed';
+    result.classification ||= 'cleanup_failure';
+    result.message = `${result.message}; cleanup failed: ${cleanupFailures.join('; ')}`.slice(0, 900);
+    result.remarks = [...(result.remarks || []), `Cleanup failed: ${cleanupFailures.join('; ')}.`];
+  }
+  if (!result.remarks?.length) result.remarks = [result.message];
+
+  const secrets = secretValues(trace.vars);
+  const item = writeJsonEvidence('http_transcript', 'http', {
+    captured_at: new Date().toISOString(),
+    base_url: input.baseUrl,
+    status: result.status,
+    message: redactText(result.message, secrets),
+    duration_ms: result.duration_ms,
+    exchanges: trace.exchanges.map((e) => ({
+      ...e,
+      request: {
+        method: e.request.method,
+        url: redactText(e.request.url, secrets),
+        headers: redact(e.request.headers, secrets),
+        body: redactBody(e.request.body, secrets),
+      },
+      response: e.response && {
+        ...e.response,
+        headers: redact(e.response.headers, secrets),
+        body: redactBody(e.response.body, secrets),
+      },
+    })),
+  });
+  return { ...result, evidence: item ? [item] : [] };
+}
+
+async function executeCleanup(input: HttpRunInput, trace: Trace): Promise<string[]> {
+  const steps = input.cleanupSteps || [];
+  if (!steps.length) return [];
+
+  const errors: string[] = [];
+  const timeoutMs = Math.max(1000, (input.cleanupTimeoutSeconds || 30) * 1000);
+  const deadline = Date.now() + timeoutMs;
+  const base = input.baseUrl.replace(/\/$/, '');
+
+  for (const [idx, step] of steps.entries()) {
+    const method = (step.method || 'GET').toUpperCase();
+    const rawUrl = step.url
+      ? substitute(step.url, trace.vars)
+      : `${base}${substitute(step.path || '/', trace.vars)}`;
+    const description = step.description || `cleanup ${method} ${rawUrl}`;
+    if (step.action !== 'request') {
+      errors.push(`step ${idx + 1}: unknown cleanup action ${step.action}`);
+      continue;
+    }
+    const missing = (step.skip_if_missing || []).filter((name) => trace.vars[name] === undefined);
+    if (missing.length) {
+      trace.exchanges.push({
+        step: (input.steps?.length || 0) + idx + 1,
+        description,
+        request: { method, url: rawUrl },
+        outcome: 'tolerated',
+        failure: `cleanup skipped; variables not captured: ${missing.join(', ')}`,
+      });
+      continue;
+    }
+    if (/\{\{\s*[\w.-]+\s*\}\}/.test(rawUrl)) {
+      trace.exchanges.push({
+        step: (input.steps?.length || 0) + idx + 1,
+        description,
+        request: { method, url: rawUrl },
+        outcome: 'tolerated',
+        failure: 'cleanup skipped because a case-owned resource was not created',
+      });
+      continue;
+    }
+
+    let body: string | undefined;
+    try { body = requestBody(step, trace.vars); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`step ${idx + 1} (${description}): ${message}`);
+      trace.exchanges.push({ step: (input.steps?.length || 0) + idx + 1, description,
+        request: { method, url: rawUrl }, outcome: 'failed', error: message });
+      continue;
+    }
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    for (const [key, value] of Object.entries(step.headers || {})) headers[key.toLowerCase()] = substitute(value, trace.vars);
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      errors.push(`step ${idx + 1} (${description}): cleanup time budget exhausted`);
+      continue;
+    }
+
+    const request = { method, url: rawUrl, headers, body };
+    trace.current = { step: (input.steps?.length || 0) + idx + 1, description, request };
+    const started = Date.now();
+    try {
+      const { res: response, text, reused } = await sendStep(step, request, trace.vars, AbortSignal.timeout(Math.min(10000, remainingMs)));
+      let json: unknown;
+      try { json = JSON.parse(text); } catch { /* non-JSON body */ }
+      const failure = checkExpectations(step, response.status, text, json, response.headers, trace.vars);
+      trace.exchanges.push({
+        ...trace.current,
+        response: { status: response.status, headers: Object.fromEntries(response.headers.entries()), body: text, latency_ms: Date.now() - started },
+        ...(reused ? { note: SESSION_REUSED_NOTE } : {}),
+        attempts: 1,
+        outcome: failure ? 'failed' : 'passed',
+        failure: failure || undefined,
+      });
+      if (failure) errors.push(`step ${idx + 1} (${description}): ${failure}`);
+      else {
+        for (const [name, jsonPath] of Object.entries(step.save || {})) {
+          const captured = getPath(json, jsonPath);
+          if (captured !== undefined) trace.vars[name] = captureText(captured);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      trace.exchanges.push({ ...trace.current, outcome: 'failed', error: message });
+      errors.push(`step ${idx + 1} (${description}): ${message}`);
+    } finally {
+      trace.current = undefined;
+    }
+  }
+
+  return errors;
+}
+
+async function execute(input: HttpRunInput, trace: Trace): Promise<HttpRunResult> {
   const start = Date.now();
   const timeout = (input.timeoutSeconds || 15) * 1000;
-  const transcript: string[] = [];
+  const base = input.baseUrl.replace(/\/$/, '');
+  const vars: Record<string, string> = {
+    base,
+    // Per-run uniqueness for correlation ids: "TE-{{ts}}-{{rand}}" never collides
+    // across runs, so poll-until steps can find exactly the record this run created.
+    ts: String(Date.now()),
+    rand: Math.random().toString(16).slice(2, 8),
+    ...(input.vars || {}),
+  };
+  trace.vars = vars;
+
+  /** One traced round trip: the request is on record before the response (or the failure) arrives. */
+  const exchange = async (
+    step: number,
+    description: string | undefined,
+    method: string,
+    url: string,
+    headers?: Record<string, string>,
+    body?: string,
+    source?: HttpStep
+  ) => {
+    trace.current = { step, description, request: { method, url, headers, body } };
+    const t0 = Date.now();
+    const signal = input.signal ? AbortSignal.any([AbortSignal.timeout(timeout), input.signal]) : AbortSignal.timeout(timeout);
+    const { res, text, reused } = await sendStep(source || { action: 'request' }, { method, url, headers, body }, vars, signal);
+    const latency = Date.now() - t0;
+    const recorded: Exchange = {
+      ...trace.current,
+      response: { status: res.status, headers: Object.fromEntries(res.headers.entries()), body: text, latency_ms: latency },
+      ...(reused ? { note: SESSION_REUSED_NOTE } : {}),
+    };
+    trace.current = undefined;
+    return { res, text, latency, recorded };
+  };
 
   try {
-    // Named scripts
+    // Named scripts (legacy)
     if (input.script === 'health' || input.script === 'smoke_health') {
-      const url = `${input.baseUrl.replace(/\/$/, '')}/health`;
-      const t0 = Date.now();
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeout) });
-      const latency = Date.now() - t0;
-      const text = await res.text();
-      record(transcript, 'GET', url, undefined, res, text, latency);
+      const url = `${vars.base}/health`;
+      const { res, text, latency, recorded } = await exchange(1, 'health', 'GET', url);
+      trace.exchanges.push({ ...recorded, attempts: 1, outcome: res.ok ? 'passed' : 'failed' });
       if (!res.ok) {
         return {
           status: 'failed',
@@ -64,7 +562,6 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
           duration_ms: Date.now() - start,
           classification: res.status >= 500 ? 'environment_problem' : 'assertion_failure',
           metrics: { latency_ms: latency, status_code: res.status },
-          transcript,
         };
       }
       return {
@@ -72,72 +569,128 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
         message: `health OK (${res.status}) in ${latency}ms`,
         duration_ms: Date.now() - start,
         metrics: { latency_ms: latency, status_code: res.status },
-        transcript,
       };
     }
 
-    // Step chain
     if (input.steps?.length) {
       const results: string[] = [];
-      for (const step of input.steps) {
+      const remarks: string[] = [];
+      let lastLatency = 0;
+      let lastStatus = 0;
+
+      for (const [idx, step] of input.steps.entries()) {
+        if (input.signal?.aborted) throw new Error('aborted: run timed out or was cancelled');
         if (step.action !== 'request') throw new Error(`Unknown http action: ${step.action}`);
         const method = (step.method || 'GET').toUpperCase();
-        const url = `${input.baseUrl.replace(/\/$/, '')}${step.path || '/'}`;
-        const t0 = Date.now();
-        const res = await fetch(url, {
-          method,
-          headers: { 'content-type': 'application/json', ...(step.headers || {}) },
-          body: step.body !== undefined ? JSON.stringify(step.body) : undefined,
-          signal: AbortSignal.timeout(timeout),
+
+        const doRequest = async () => {
+          const rawUrl = step.url
+            ? substitute(step.url, vars)
+            : `${vars.base}${substitute(step.path || '/', vars)}`;
+          const body = requestBody(step, vars);
+          const headers: Record<string, string> = { 'content-type': 'application/json' };
+          for (const [k, v] of Object.entries(step.headers || {})) headers[k.toLowerCase()] = substitute(v, vars);
+          const { res, text, latency, recorded } = await exchange(idx + 1, step.description, method, rawUrl, headers, body, step);
+          lastLatency = latency;
+          lastStatus = res.status;
+          let json: unknown = undefined;
+          try { json = JSON.parse(text); } catch { /* non-JSON body */ }
+          return { rawUrl, res, text, json, recorded };
+        };
+
+        let attempts = 1;
+        let outcome = await doRequest();
+        let failure = checkExpectations(step, outcome.res.status, outcome.text, outcome.json, outcome.res.headers, vars);
+
+        if (failure && step.poll) {
+          const deadline = Date.now() + (step.poll.timeout_ms ?? 8000);
+          const interval = step.poll.interval_ms ?? 500;
+          while (failure && Date.now() < deadline && !input.signal?.aborted) {
+            await new Promise((r) => setTimeout(r, interval));
+            attempts++;
+            outcome = await doRequest();
+            failure = checkExpectations(step, outcome.res.status, outcome.text, outcome.json, outcome.res.headers, vars);
+          }
+        }
+
+        trace.exchanges.push({
+          ...outcome.recorded,
+          attempts,
+          outcome: !failure ? 'passed' : step.allow_failure ? 'tolerated' : step.precondition ? 'precondition_not_met' : 'failed',
+          failure: failure || undefined,
         });
-        const latency = Date.now() - t0;
-        const text = await res.text();
-        record(transcript, method, url, step.body, res, text, latency);
-        const expected = step.expected_status ?? 200;
-        if (res.status !== expected) {
+
+        // Preserve identities from successful writes even when an assertion
+        // about their response fails. Otherwise finally cannot remove the new
+        // resource. Compare before saving so a step cannot overwrite a prior
+        // captured value and accidentally compare its response to itself.
+        if (outcome.res.ok || !failure) {
+          for (const [name, jsonPath] of Object.entries(step.save || {})) {
+            const captured = getPath(outcome.json, jsonPath);
+            if (captured !== undefined) vars[name] = captureText(captured);
+          }
+        }
+
+        if (failure) {
+          if (step.allow_failure) {
+            results.push(`step ${idx + 1} (${step.description || method}) tolerated: ${failure}`);
+            remarks.push(`${stepLabel(step, idx, method)}: did not pass (${failure}) — tolerated, the test continues.`);
+            continue;
+          }
+          if (step.precondition) {
+            remarks.push(`${stepLabel(step, idx, method)}: the target is not ready for this test (${failure}). Test skipped, not failed.`);
+            return {
+              status: 'skipped',
+              message: `Precondition not met — step ${idx + 1}${step.description ? ` (${step.description})` : ''}: ${failure}`,
+              duration_ms: Date.now() - start,
+              metrics: { latency_ms: lastLatency, status_code: lastStatus, skipped_at_step: idx + 1 },
+              remarks,
+            };
+          }
+          remarks.push(`${stepLabel(step, idx, method)}: FAILED — ${failure}.`, `Result: failed at step ${idx + 1} of ${input.steps.length}.`);
           return {
             status: 'failed',
-            message: `${method} ${step.path} expected ${expected} got ${res.status}`,
+            message: `step ${idx + 1}${step.description ? ` (${step.description})` : ''}: ${failure}`,
             duration_ms: Date.now() - start,
-            classification: 'assertion_failure',
-            metrics: { latency_ms: latency, status_code: res.status },
-            transcript,
+            classification: /status 401|status 403/.test(failure) ? 'authentication_problem' : 'assertion_failure',
+            metrics: { latency_ms: lastLatency, status_code: lastStatus, failed_step: idx + 1 },
+            remarks,
           };
         }
-        if (step.expected_body_contains && !text.includes(step.expected_body_contains)) {
-          return {
-            status: 'failed',
-            message: `Body missing expected fragment: ${step.expected_body_contains}`,
-            duration_ms: Date.now() - start,
-            classification: 'assertion_failure',
-            metrics: { latency_ms: latency, status_code: res.status },
-            transcript,
-          };
-        }
-        results.push(`${method} ${step.path || '/'} → ${res.status} (${latency}ms)`);
+
+        results.push(`${method} ${step.description || outcome.rawUrl.replace(/^https?:\/\/[^/]+/, '')} → ${outcome.res.status} (${lastLatency}ms)`);
+        remarks.push(`${stepLabel(step, idx, method)}: ${outcome.recorded.note ? 'already signed in — the session this worker holds was checked and reused' : statusWords(outcome.res.status)} in ${lastLatency} ms${attempts > 1 ? ` after ${attempts} attempts` : ''}.`);
       }
+
+      remarks.push(`Result: all ${input.steps.length} steps passed in ${Date.now() - start} ms.`);
       return {
         status: 'passed',
-        message: results.join('; '),
+        message: results.join('; ').slice(0, 900),
         duration_ms: Date.now() - start,
-        transcript,
+        metrics: { latency_ms: lastLatency, status_code: lastStatus, steps: input.steps.length },
+        remarks,
+      };
+    }
+
+    if (input.cleanupSteps?.length) {
+      return {
+        status: 'passed',
+        message: 'cleanup-only run',
+        duration_ms: Date.now() - start,
       };
     }
 
     // Default: GET baseUrl
-    const t0 = Date.now();
-    const res = await fetch(input.baseUrl, { signal: AbortSignal.timeout(timeout) });
-    record(transcript, 'GET', input.baseUrl, undefined, res, await res.text(), Date.now() - t0);
+    const { res, recorded } = await exchange(1, 'default GET', 'GET', base);
+    trace.exchanges.push({ ...recorded, attempts: 1, outcome: res.ok ? 'passed' : 'failed' });
     return {
       status: res.ok ? 'passed' : 'failed',
-      message: `GET ${input.baseUrl} → ${res.status}`,
+      message: `GET ${base} → ${res.status}`,
       duration_ms: Date.now() - start,
       metrics: { status_code: res.status },
-      transcript,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    transcript.push(`!!! ${msg}`);
     let classification = 'unknown';
     if (/timeout|aborted/i.test(msg)) classification = 'timeout';
     else if (/ECONNREFUSED|fetch failed|network/i.test(msg)) classification = 'network_failure';
@@ -146,7 +699,6 @@ export async function runHttp(input: HttpRunInput): Promise<HttpRunResult> {
       message: msg.slice(0, 500),
       duration_ms: Date.now() - start,
       classification,
-      transcript,
     };
   }
 }

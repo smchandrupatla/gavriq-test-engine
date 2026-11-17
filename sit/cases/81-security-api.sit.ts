@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import http from "node:http";
+import { request as httpRequest } from "node:http";
 import { ENV } from "../lib/env.ts";
 import { apiJson } from "../lib/client.ts";
 
@@ -9,21 +9,24 @@ test("OWASP API1 unauthenticated catalogue read is rejected", async () => {
   assert.ok([401, 403, 404].includes(res.status), `expected auth wall, got ${res.status}`);
 });
 
-test("ASVS V4 unused TRACE method is not a successful probe", async () => {
-  // fetch()/undici refuse to send TRACE at all (it's on the fetch spec's forbidden-method
-  // list and throws "'TRACE' HTTP method is unsupported" before any request is sent) — this
-  // goes straight to node:http so the assertion actually exercises the server's own handling.
-  const status = await new Promise<number>((resolve, reject) => {
-    const req = http.request(`${ENV.apiBase}/api/v1/capabilities`, { method: "TRACE", timeout: 5000 }, (res) => {
+// fetch() refuses to send TRACE at all (the Fetch standard forbids the method), so the
+// probe never reached the API and the case failed inside the client. node:http sends it.
+function traceStatus(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, { method: "TRACE", timeout: 5000 }, (res) => {
       res.resume();
-      resolve(res.statusCode || 0);
+      resolve(res.statusCode ?? 0);
     });
-    req.on("error", reject);
     req.on("timeout", () => req.destroy(new Error("TRACE probe timed out")));
+    req.on("error", reject);
     req.end();
   });
+}
+
+test("ASVS V4 unused TRACE method is not a successful probe", async () => {
+  const status = await traceStatus(`${ENV.apiBase}/api/v1/capabilities`);
   assert.notEqual(status, 200, "TRACE must not echo the request");
-  assert.ok([400, 404, 405, 501].includes(status) || status >= 400);
+  assert.ok(status >= 400, `TRACE answered ${status}`);
 });
 
 test("ASVS V16 error envelope has code and requestId, not a stack", async () => {

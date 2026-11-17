@@ -69,8 +69,10 @@ describe('e2e api flow', () => {
     }
 
     const cases = await api('/api/v1/test-cases?limit=50');
+    // A plain HTTP case: imported SIT files are catalogued as http too, but are
+    // evidenced by their SIT output, not by the transcript this test uploads.
     const healthCase = (cases.body.data || []).find(
-      (c: any) => c.key === 'TC-SB-HEALTH' || c.execution_method === 'http'
+      (c: any) => c.key === 'TC-SB-HEALTH' || (c.execution_method === 'http' && !String(c.script || '').includes('.sit.ts'))
     );
     if (!healthCase) {
       t.skip('No HTTP test case — run npm run seed');
@@ -116,6 +118,22 @@ describe('e2e api flow', () => {
     const health = await fetch(`${baseUrl}/health`);
     const ok = health.ok;
 
+    // A result only counts with evidence behind it: upload the transcript first.
+    const transcript = {
+      exchanges: [{ step: 1, request: { method: 'GET', url: `${baseUrl}/health` }, response: { status: health.status } }],
+    };
+    const uploaded = await api('/api/v1/evidence/upload', {
+      method: 'POST',
+      body: JSON.stringify({
+        execution_id: execId,
+        name: `e2e-health-${Date.now()}.json`,
+        evidence_type: 'http_transcript',
+        content_type: 'application/json',
+        content_base64: Buffer.from(JSON.stringify(transcript)).toString('base64'),
+      }),
+    });
+    assert.equal(uploaded.status, 201, JSON.stringify(uploaded.body));
+
     const result = await api(`/api/v1/executions/${execId}/results`, {
       method: 'POST',
       body: JSON.stringify({
@@ -125,6 +143,7 @@ describe('e2e api flow', () => {
         duration_ms: 50,
         message: ok ? 'e2e health OK' : 'e2e health failed',
         metrics: { status_code: health.status },
+        evidence: [{ type: 'http_transcript', storage_key: uploaded.body.data.storage_key, content_type: 'application/json' }],
       }),
     });
     assert.equal(result.status, 201, JSON.stringify(result.body));

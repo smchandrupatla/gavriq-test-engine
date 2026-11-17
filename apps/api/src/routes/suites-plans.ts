@@ -169,17 +169,7 @@ export async function suitePlanRoutes(app: FastifyInstance) {
     return reply.send({ data: rows[0] });
   });
 
-  app.delete<{ Params: { id: string } }>('/api/v1/suites/:id', async (req, reply) => {
-    const suite = await findSuite(req.params.id);
-    if (!suite) return reply.status(404).send({ error: 'Suite not found' });
-    if (suite.suite_type !== CUSTOM_SUITE_TYPE) {
-      return reply.status(409).send({ error: 'Seeded and imported suites cannot be deleted here.' });
-    }
-    // Past executions keep their results; test_suite_id is set to NULL by the FK.
-    await query('DELETE FROM test_suites WHERE id = $1', [suite.id]);
-    await audit(req, 'suite.delete', 'test_suite', suite.id, { key: suite.key });
-    return reply.send({ data: { deleted: suite.id } });
-  });
+
 
   // Bulk suite membership (test_case_id -> test_suite_id), for building a
   // consolidated categorized catalog view without an N+1 fetch per suite.
@@ -258,6 +248,31 @@ export async function suitePlanRoutes(app: FastifyInstance) {
       return reply.send({ data: { removed: req.params.caseId } });
     }
   );
+
+  // Delete one suite. Membership (test_case_suites) cascades; the cases themselves
+  // are untouched — they just lose this grouping. Executions built from this suite
+  // keep their history (test_suite_id is set null, not the row deleted).
+  app.delete<{ Params: { id: string } }>('/api/v1/suites/:id', async (req, reply) => {
+    const { rows } = await query(
+      `DELETE FROM test_suites WHERE id::text = $1 OR key = $1 RETURNING id`,
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Suite not found' });
+    return reply.send({ data: { deleted: rows[0].id } });
+  });
+
+  // Bulk delete: every suite for one application, e.g. to clear the catalog
+  // before re-organizing cases into new suites. application_id is required —
+  // there is no "delete every suite in the system" call.
+  app.delete('/api/v1/suites', async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    if (!q.application_id) return reply.status(400).send({ error: 'application_id is required' });
+    const { rows } = await query(
+      `DELETE FROM test_suites WHERE application_id = $1 RETURNING id`,
+      [q.application_id]
+    );
+    return reply.send({ data: { deleted: rows.length } });
+  });
 
   // Plans
   app.get('/api/v1/plans', async (req, reply) => {

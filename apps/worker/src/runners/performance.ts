@@ -1,44 +1,43 @@
 /**
  * Lightweight performance runner (Prompt 5 foundation).
  * Concurrent HTTP load without requiring an external k6 binary.
- * Captures latency percentiles, throughput, error rate, and a per-window time series
- * so the console can graph each run.
+ * Captures latency percentiles, throughput, error rate.
  */
 export interface PerfRunInput {
   baseUrl: string;
   script?: string;
+  /** Absolute or {{var}}-templated target; overrides baseUrl + path when set. */
+  url?: string;
+  vars?: Record<string, string>;
   path?: string;
   method?: string;
   concurrency?: number;
   requests?: number;
-  timeoutSeconds?: number;
-  /** Endurance mode: keep issuing requests until this many seconds pass (capped at 1800). */
+  /**
+   * Soak mode: keep issuing requests for this long instead of stopping at a
+   * fixed request count (endurance cases). Capped at 15 minutes.
+   */
   durationSeconds?: number;
+  timeoutSeconds?: number;
   headers?: Record<string, string>;
   body?: unknown;
+  /**
+   * Status code (or list of codes) that count as "the responder answered
+   * correctly" for THIS benchmark. Defaults to 2xx. A perf engineer
+   * benchmarking the 401 responder (login reject, authz guard) sets this
+   * to 401, or `[401, 429]` to also count the brute-force throttle as a
+   * correct response under burst. Arrays are always a list of exact
+   * codes — never a range.
+   */
+  expectStatus?: number | number[];
   /** Optional SLA thresholds */
   sla?: {
     p95_ms?: number;
     error_rate_pct?: number;
     min_rps?: number;
   };
-}
-
-export interface Sample {
-  t_ms: number;
-  latency_ms: number;
-  ok: boolean;
-  status: number;
-}
-
-export interface TimeBucket {
-  t_s: number;
-  requests: number;
-  errors: number;
-  latency_avg_ms: number;
-  latency_p50_ms: number;
-  latency_p95_ms: number;
-  latency_max_ms: number;
+  /** Stops issuing new requests once aborted (e.g. the engine's per-test-type timeout, or a run cancel). */
+  signal?: AbortSignal;
 }
 
 export interface PerfRunResult {
@@ -46,6 +45,8 @@ export interface PerfRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
+  /** What happened, in plain words (the run's remarks). */
+  remarks?: string[];
   metrics: {
     total_requests: number;
     success: number;
@@ -59,10 +60,6 @@ export interface PerfRunResult {
     latency_p95_ms: number;
     latency_p99_ms: number;
   };
-  /** One point per window of the run, for latency and throughput graphs. */
-  timeseries: TimeBucket[];
-  /** Every request, for the raw-samples evidence file. */
-  samples: Sample[];
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -71,90 +68,82 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.max(0, idx)] ?? 0;
 }
 
-/** Group samples into fixed windows (default 1s) keyed by when each request started. */
-export function bucketize(samples: Sample[], bucketMs = 1000): TimeBucket[] {
-  if (!samples.length) return [];
-  const byBucket = new Map<number, Sample[]>();
-  for (const s of samples) {
-    const b = Math.floor(s.t_ms / bucketMs);
-    const list = byBucket.get(b);
-    if (list) list.push(s);
-    else byBucket.set(b, [s]);
-  }
-  const last = Math.max(...byBucket.keys());
-  const out: TimeBucket[] = [];
-  for (let b = 0; b <= last; b++) {
-    const list = byBucket.get(b) || [];
-    const lat = list.map((s) => s.latency_ms).sort((x, y) => x - y);
-    out.push({
-      t_s: (b * bucketMs) / 1000,
-      requests: list.length,
-      errors: list.filter((s) => !s.ok).length,
-      latency_avg_ms: lat.length ? Math.round(lat.reduce((a, v) => a + v, 0) / lat.length) : 0,
-      latency_p50_ms: percentile(lat, 50),
-      latency_p95_ms: percentile(lat, 95),
-      latency_max_ms: lat[lat.length - 1] || 0,
-    });
-  }
-  return out;
-}
-
 export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult> {
   const start = Date.now();
   const concurrency = Math.max(1, Math.min(input.concurrency || 5, 50));
-  const durationMs = Math.min(Math.max(0, input.durationSeconds || 0), 1800) * 1000;
-  // A duration-bound (endurance) run is limited by time, not by a request count.
-  const total = durationMs ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(input.requests || 20, 500));
+  const soakMs = input.durationSeconds ? Math.min(input.durationSeconds, 900) * 1000 : 0;
+  const deadline = soakMs ? start + soakMs : 0;
+  const limit = soakMs ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.min(input.requests || 20, 500));
   const path = input.path || (input.script === 'health' ? '/health' : '/');
   const method = (input.method || 'GET').toUpperCase();
-  const url = `${input.baseUrl.replace(/\/$/, '')}${path}`;
+  const vars: Record<string, string> = { base: input.baseUrl.replace(/\/$/, ''), ...(input.vars || {}) };
+  const url = input.url
+    ? input.url.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, name) => vars[name] ?? `{{${name}}}`)
+    : `${vars.base}${path}`;
   const timeout = (input.timeoutSeconds || 10) * 1000;
 
   const latencies: number[] = [];
-  const samples: Sample[] = [];
   let success = 0;
   let failed = 0;
+  // First failure seen, so a fully failing run says why (unreachable target,
+  // 401, ...) instead of only reporting an error rate.
+  let firstError = '';
+  // Status predicate: 2xx is the default "answered correctly" window. A
+  // caller may opt into a specific status (401 reject-path) or a list of
+  // acceptable codes ([401, 429] = reject OR throttle both count). An array
+  // is always interpreted as a list of exact codes, never a range — that
+  // was the first draft and the heuristic (gap >= 10 → range) swallowed
+  // too much. Writing a case like `expect_status: [401, 429]` means those
+  // two codes, nothing in between.
+  const want = input.expectStatus;
+  const statusOk = (status: number): boolean => {
+    if (want === undefined) return status >= 200 && status < 300;
+    if (Array.isArray(want)) return want.includes(status);
+    return status === want;
+  };
 
   let next = 0;
   async function worker() {
-    while (next < total) {
-      if (durationMs && Date.now() - start >= durationMs) return;
-      const i = next++;
-      if (i >= total) return;
+    while (next < limit && (!deadline || Date.now() < deadline) && !input.signal?.aborted) {
+      next++;
       const t0 = Date.now();
       try {
+        const signal = input.signal ? AbortSignal.any([AbortSignal.timeout(timeout), input.signal]) : AbortSignal.timeout(timeout);
         const res = await fetch(url, {
           method,
           headers: { 'content-type': 'application/json', ...(input.headers || {}) },
           body: input.body !== undefined ? JSON.stringify(input.body) : undefined,
-          signal: AbortSignal.timeout(timeout),
+          signal,
         });
+        // Drain the body so the connection returns to the pool.
         await res.arrayBuffer().catch(() => undefined);
         const ms = Date.now() - t0;
         latencies.push(ms);
-        samples.push({ t_ms: t0 - start, latency_ms: ms, ok: res.ok, status: res.status });
-        if (res.ok) success++;
-        else failed++;
-      } catch {
-        const ms = Date.now() - t0;
-        latencies.push(ms);
-        samples.push({ t_ms: t0 - start, latency_ms: ms, ok: false, status: 0 });
+        if (statusOk(res.status)) success++;
+        else {
+          failed++;
+          firstError ||= `HTTP ${res.status}`;
+        }
+      } catch (err) {
+        latencies.push(Date.now() - t0);
         failed++;
+        const e = err as Error & { cause?: { code?: string; message?: string } };
+        firstError ||= [e.message, e.cause?.code || e.cause?.message].filter(Boolean).join(': ');
       }
     }
   }
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
+  const total = success + failed;
   const duration = Date.now() - start;
-  const sent = samples.length;
   const sorted = [...latencies].sort((a, b) => a - b);
   const metrics = {
-    total_requests: sent,
+    total_requests: total,
     success,
     failed,
-    error_rate_pct: sent ? Math.round((failed / sent) * 1000) / 10 : 0,
-    rps: duration > 0 ? Math.round((sent / duration) * 1000 * 10) / 10 : 0,
+    error_rate_pct: total ? Math.round((failed / total) * 1000) / 10 : 0,
+    rps: duration > 0 ? Math.round((total / duration) * 1000 * 10) / 10 : 0,
     latency_min_ms: sorted[0] || 0,
     latency_max_ms: sorted[sorted.length - 1] || 0,
     latency_avg_ms: sorted.length
@@ -164,7 +153,25 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
     latency_p95_ms: percentile(sorted, 95),
     latency_p99_ms: percentile(sorted, 99),
   };
-  const timeseries = bucketize(samples, durationMs > 120_000 ? 5000 : 1000);
+
+  // Nothing answered at all: the target is unreachable or rejects the probe.
+  // That is an environment verdict, not a latency/SLA measurement.
+  const told = [
+    `Sent ${total} requests, ${concurrency} at a time, to ${method} ${url}${soakMs ? ` over ${Math.round(duration / 1000)} seconds` : ''}.`,
+    `${success} succeeded, ${failed} failed (${metrics.error_rate_pct}% failure rate), ${metrics.rps} requests per second.`,
+    `Half of the answers arrived within ${metrics.latency_p50_ms} ms; 95 out of 100 within ${metrics.latency_p95_ms} ms; the slowest took ${metrics.latency_max_ms} ms.`,
+  ];
+  if (total > 0 && failed === total) {
+    const unreachable = !/^HTTP \d+/.test(firstError);
+    return {
+      status: 'failed',
+      message: `perf ${method} ${url}: 0/${total} requests succeeded (${firstError || 'no response'})`,
+      duration_ms: duration,
+      classification: unreachable ? 'network_failure' : 'environment_problem',
+      metrics,
+      remarks: [told[0]!, `No request succeeded (${firstError || 'no response'}) — the target is ${unreachable ? 'unreachable' : 'rejecting the probe'}, so no timing could be measured.`],
+    };
+  }
 
   const sla = input.sla || {};
   const violations: string[] = [];
@@ -185,18 +192,15 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
       duration_ms: duration,
       classification: 'assertion_failure',
       metrics,
-      timeseries,
-      samples,
+      remarks: [...told, `Result: outside the agreed limits — ${violations.join('; ')}.`],
     };
   }
 
   return {
-    status: failed === sent ? 'failed' : 'passed',
-    message: `perf ${method} ${path}: ${success}/${sent} ok, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
+    status: 'passed',
+    message: `perf ${method} ${input.url ? url : path}: ${success}/${total} ok${soakMs ? ` over ${Math.round(duration / 1000)}s` : ''}, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
     duration_ms: duration,
-    classification: failed === sent ? 'environment_problem' : undefined,
     metrics,
-    timeseries,
-    samples,
+    remarks: [...told, 'Result: within the agreed limits.'],
   };
 }

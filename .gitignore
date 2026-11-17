@@ -4,7 +4,19 @@ node_modules/
 !.env.example
 *.log
 coverage/
-data/
+data/*
+!data/iso20022-upload/
 secrets/
+# Runner output of a host worker; the engine's evidence store is the record
+evidence/
 
 .docker-results/
+# Infra agent pid file (scripts/start-infra-agent.ps1); its logs are covered by *.log
+infra-agent.pid
+# Record agent pid file (scripts/start-record-agent.ps1); its logs are covered by *.log
+record-agent.pid
+
+# Scratch written by the author-time harness (dev/scripts/run-catalog-local.ts)
+.tmp/harness-evidence/
+.tmp/lane*/
+.tmp/*.json

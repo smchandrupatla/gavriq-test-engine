@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>Sand Bench Test Engine</h1><nav aria-label="Main"><button data-nav="dashboard">Dashboard</button><button data-nav="cases">Test Cases</button><button data-nav="runs">Test Runs</button></nav><span id="run-status">idle</span><span id="targets"></span><a href="/catalog" title="Consolidated, categorized test-case catalog">Test Catalog</a><a href="/" title="Test Engine control-plane dashboard">Test Engine dashboard</a></header>
+<header><h1>Sand Bench Test Engine</h1><nav aria-label="Main"><button data-nav="dashboard">Dashboard</button><button data-nav="cases">Test Cases</button><button data-nav="runs">Test Runs</button></nav><div id="selector-container"><label for="app-select">Application: </label><select id="app-select"><option value="">Loading applications...</option></select><label for="env-select">Environment: </label><select id="env-select"><option value="">Loading environments...</option></select></div><span id="run-status">idle</span><span id="targets"></span><a href="/catalog" title="Consolidated, categorized test-case catalog">Test Catalog</a><a href="/" title="Test Engine control-plane dashboard">Test Engine dashboard</a></header>
 <main><p id="error" role="alert"></p><div id="page-body"></div><details><summary>Execution log</summary><pre id="log"></pre></details></main>
 <dialog id="detail"><div class="dialog-head"><h2 id="detail-title"></h2><button id="close-detail" aria-label="Close detail">Close</button></div><div id="detail-body"></div></dialog>
 <script>

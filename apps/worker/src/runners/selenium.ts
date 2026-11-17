@@ -1,20 +1,24 @@
 /**
  * Selenium WebDriver runner for out-of-container UI tests.
- * Every run leaves proof: a PNG of the final screen (pass or fail) and a step log.
- * Set CAPTURE_SCREENSHOTS=failure to keep only failure screenshots.
- * Evidence written under EVIDENCE_DIR (default ./evidence).
+ * Evidence: a PNG screenshot of the final page state on pass and on fail, plus
+ * a step log, written under EVIDENCE_DIR (default ./evidence).
  */
 import { Builder, By, until, type WebDriver } from 'selenium-webdriver';
 import chrome from 'selenium-webdriver/chrome.js';
-import { saveLog, savePng, type EvidenceRef } from '../evidence.js';
+import { redact, secretValues, writeEvidence, writeJsonEvidence, type EvidenceItem } from '../evidence.js';
+import { runSandbenchUploadSelenium } from './sandbench-upload-selenium.js';
 
 export interface SeleniumRunInput {
   script?: string;
   baseUrl: string;
   timeoutSeconds?: number;
-  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string }>;
-  /** Evidence file name prefix (execution + case key). */
-  evidencePrefix?: string;
+  steps?: Array<{ action: string; selector?: string; value?: string; expected?: string; must_contain?: string; timeout_ms?: number; description?: string; text?: string; markdown_file?: string }>;
+  viewport?: { width: number; height: number };
+  vars?: Record<string, string>;
+  /** Run with a visible browser window instead of headless. Defaults to headless, overridable via SELENIUM_HEADLESS=false. */
+  headless?: boolean;
+  /** Aborted when the run is cancelled: the browser is quit at once instead of finishing the case. */
+  signal?: AbortSignal;
 }
 
 export interface SeleniumRunResult {
@@ -22,23 +26,48 @@ export interface SeleniumRunResult {
   message: string;
   duration_ms: number;
   classification?: string;
-  evidence?: EvidenceRef[];
+  evidence?: EvidenceItem[];
+  /** What happened, in plain words: one line per step, then the outcome (the run's remarks). */
+  remarks?: string[];
 }
 
-async function buildDriver(): Promise<WebDriver> {
+interface StepRecord {
+  step: number;
+  action: string;
+  description?: string;
+  text?: string;
+  selector?: string;
+  value?: string;
+  expected?: string;
+  outcome: 'passed' | 'failed';
+  duration_ms: number;
+  error?: string;
+}
+
+interface RunLog {
+  steps: StepRecord[];
+  vars: Record<string, string>;
+  url?: string;
+  title?: string;
+}
+
+async function buildDriver(viewport?: { width: number; height: number }, headless?: boolean): Promise<WebDriver> {
   const options = new chrome.Options();
   const chromeBin = process.env.CHROME_BIN || process.env.CHROMIUM_PATH;
   if (chromeBin) {
     options.setChromeBinaryPath(chromeBin);
   }
-  options.addArguments(
-    '--headless=new',
+  const size = viewport || { width: 1280, height: 800 };
+  const useHeadless = headless ?? process.env.SELENIUM_HEADLESS !== 'false';
+  const args = [
     '--no-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--window-size=1280,800',
-    '--disable-software-rasterizer'
-  );
+    `--window-size=${size.width},${size.height}`,
+    '--disable-software-rasterizer',
+  ];
+  if (useHeadless) args.unshift('--headless=new');
+  options.addArguments(...args);
 
   const builder = new Builder().forBrowser('chrome').setChromeOptions(options);
   const serviceBuilder = process.env.CHROMEDRIVER_PATH
@@ -50,11 +79,16 @@ async function buildDriver(): Promise<WebDriver> {
   return builder.build();
 }
 
-async function captureScreenshot(driver: WebDriver, prefix: string, label: string): Promise<EvidenceRef | null> {
+async function captureScreenshot(driver: WebDriver, prefix: string): Promise<EvidenceItem | null> {
   try {
     const b64 = await driver.takeScreenshot();
-    return savePng(prefix, Buffer.from(b64, 'base64'), {
-      label, url: await driver.getCurrentUrl().catch(() => null), title: await driver.getTitle().catch(() => null),
+    return writeEvidence({
+      type: 'screenshot',
+      prefix,
+      ext: 'png',
+      content: Buffer.from(b64, 'base64'),
+      contentType: 'image/png',
+      metadata: { url: await driver.getCurrentUrl().catch(() => undefined), outcome: prefix },
     });
   } catch (err) {
     console.warn('[selenium] screenshot failed:', (err as Error).message);
@@ -154,25 +188,63 @@ const NAMED_SCRIPTS: Record<string, (driver: WebDriver, baseUrl: string) => Prom
 };
 
 export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunResult> {
+  const log: RunLog = { steps: [], vars: {} };
+  const result = await execute(input, log);
+  const steps = writeJsonEvidence(
+    'log',
+    'selenium-steps',
+    redact(
+      {
+        captured_at: new Date().toISOString(),
+        browser: 'chrome',
+        viewport: input.viewport || { width: 1280, height: 800 },
+        base_url: input.baseUrl,
+        status: result.status,
+        message: result.message,
+        duration_ms: result.duration_ms,
+        final_url: log.url,
+        final_title: log.title,
+        steps: log.steps,
+      },
+      secretValues(log.vars)
+    )
+  );
+  return { ...result, remarks: remarksOf(log, result), evidence: [...(result.evidence || []), ...(steps ? [steps] : [])] };
+}
+
+/** One plain line per step from the step log, then the outcome (the run's remarks). */
+function remarksOf(log: RunLog, result: { status: string; message: string; duration_ms: number }): string[] {
+  const lines = log.steps.map((s) => `Step ${s.step} — ${(s.text || s.description || s.action).replace(/\.$/, '')}: ${s.outcome === 'passed' ? 'done' : `FAILED — ${s.error || 'no detail'}`} (${s.duration_ms} ms).`);
+  lines.push(result.status === 'passed' ? `Result: passed in ${result.duration_ms} ms.` : `Result: ${result.status} — ${result.message}.`);
+  return lines;
+}
+
+async function execute(input: SeleniumRunInput, log: RunLog): Promise<SeleniumRunResult> {
   const start = Date.now();
   let driver: WebDriver | null = null;
-  const evidence: EvidenceRef[] = [];
-  const passShots = process.env.CAPTURE_SCREENSHOTS !== 'failure';
-  const prefix = input.evidencePrefix || 'selenium';
-  const log: string[] = [`# selenium run against ${input.baseUrl}`, `# script: ${input.script || (input.steps?.length ? `${input.steps.length} steps` : 'load base URL')}`];
-  const note = (line: string) => log.push(`[+${((Date.now() - start) / 1000).toFixed(1)}s] ${line}`);
-  const shot = async (label: string) => {
+  const evidence: EvidenceItem[] = [];
+
+  const vars: Record<string, string> = { base: input.baseUrl.replace(/\/$/, ''), ...(input.vars || {}) };
+  log.vars = vars;
+
+  /** Final page state goes on record before the driver quits — a pass is evidenced like a fail. */
+  const settle = async (outcome: 'pass' | 'fail') => {
     if (!driver) return;
-    const ref = await captureScreenshot(driver, `${prefix}-${label}`, label);
-    if (ref) { evidence.push(ref); note(`screenshot ${label}`); }
+    log.url = await driver.getCurrentUrl().catch(() => undefined);
+    log.title = await driver.getTitle().catch(() => undefined);
+    const shot = await captureScreenshot(driver, outcome);
+    if (shot) evidence.push(shot);
   };
-  const finishLog = () => {
-    const ref = saveLog(`${prefix}-steps`, log);
-    if (ref) evidence.unshift(ref);
-  };
+  const sub = (v: string) => v.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, name) => vars[name] ?? `{{${name}}}`);
+
+  // Cancelling quits the browser; the command in flight then fails and the finally below cleans up.
+  const onAbort = () => { driver?.quit().catch(() => undefined); };
+  input.signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
-    driver = await buildDriver();
+    if (input.signal?.aborted) throw new Error('Run cancelled');
+    driver = await buildDriver(input.viewport, input.headless);
+    if (input.signal?.aborted) throw new Error('Run cancelled');
     const timeout = (input.timeoutSeconds || 30) * 1000;
     await driver.manage().setTimeouts({ pageLoad: timeout, implicit: 5000 });
 
@@ -180,65 +252,188 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
 
     const named = input.script ? NAMED_SCRIPTS[input.script] : undefined;
     if (named) {
-      note(`named script ${input.script}`);
+      const t0 = Date.now();
       message = await named(driver, input.baseUrl);
-      note(message);
+      log.steps.push({ step: 1, action: `script:${input.script}`, description: message, outcome: 'passed', duration_ms: Date.now() - t0 });
     } else if (input.steps?.length) {
-      await driver.get(input.baseUrl);
-      note(`opened ${input.baseUrl}`);
-      for (const [idx, step] of input.steps.entries()) {
-        note(`step ${idx + 1}: ${step.action}${step.selector ? ` ${step.selector}` : ''}${step.value ? ` = ${step.value}` : ''}${step.expected ? ` expect "${step.expected}"` : ''}`);
-        switch (step.action) {
-          case 'navigate':
-            await driver.get(step.value || input.baseUrl);
-            break;
-          case 'click':
-            if (!step.selector) throw new Error('click requires selector');
-            await driver.findElement(By.css(step.selector)).click();
-            break;
-          case 'type':
-            if (!step.selector) throw new Error('type requires selector');
-            {
-              const el = await driver.findElement(By.css(step.selector));
-              await el.clear();
-              await el.sendKeys(step.value || '');
+      await driver.get(input.baseUrl.replace(/\/$/, ''));
+      const notes: string[] = [];
+      for (const [idx, raw] of input.steps.entries()) {
+        const step = {
+          ...raw,
+          value: raw.value !== undefined ? sub(raw.value) : undefined,
+          expected: raw.expected !== undefined ? sub(raw.expected) : undefined,
+        };
+        const label = `step ${idx + 1}${step.description ? ` (${step.description})` : ` ${step.action}`}`;
+        const t0 = Date.now();
+        const record = {
+          step: idx + 1,
+          action: step.action,
+          description: step.description,
+          text: (raw as { text?: string }).text,
+          selector: step.selector,
+          // Typed input is not logged verbatim — it is where credentials go.
+          value: step.action === 'type' ? `(${(step.value || '').length} chars)` : step.value,
+          expected: step.expected,
+        };
+        try {
+          switch (step.action) {
+            case 'sandbench_upload': {
+              if (!step.value) throw new Error('sandbench_upload requires a fixture filename');
+              const summary = await runSandbenchUploadSelenium(driver, {
+                fileName: step.value,
+                markdownFileName: step.markdown_file,
+                baseUrl: input.baseUrl.replace(/\/$/, ''),
+                vars: input.vars,
+                timeoutMs: step.timeout_ms ?? 120000,
+                onVisible: async (visibleDriver) => {
+                  const shot = await captureScreenshot(visibleDriver, 'sandbench-upload');
+                  if (shot) evidence.push(shot);
+                },
+              });
+              notes.push(summary);
+              break;
             }
-            break;
-          case 'assert_text':
-            {
-              const body = await driver.findElement(By.css('body')).getText();
-              if (step.expected && !body.includes(step.expected)) {
-                throw new Error(`assert_text failed: expected "${step.expected}"`);
+            case 'navigate':
+              await driver.get(step.value || vars.base);
+              break;
+            case 'click':
+              if (!step.selector) throw new Error('click requires selector');
+              {
+                // Selenium raises "stale element reference" when the DOM node
+                // the find returned is detached between the find and the
+                // click — a common race on views that re-render their sidebar
+                // after an async fetch settles. Retry a few times, re-locating
+                // the element each attempt, before failing the step.
+                let lastError: unknown;
+                for (let attempt = 0; attempt < 4; attempt++) {
+                  try {
+                    const el = await driver.findElement(By.css(step.selector));
+                    await el.click();
+                    lastError = undefined;
+                    break;
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    if (!/stale element reference/i.test(msg)) throw err;
+                    lastError = err;
+                    await driver.sleep(250);
+                  }
+                }
+                if (lastError) throw lastError;
               }
-            }
-            break;
-          case 'assert_title':
-            {
-              const title = await driver.getTitle();
-              if (step.expected && !title.includes(step.expected)) {
-                throw new Error(`assert_title failed: got "${title}"`);
+              break;
+            case 'type':
+              if (!step.selector) throw new Error('type requires selector');
+              {
+                const el = await driver.findElement(By.css(step.selector));
+                await el.clear();
+                await el.sendKeys(step.value || '');
               }
-            }
-            break;
-          case 'wait':
-            await driver.sleep(Number(step.value) || 1000);
-            break;
-          default:
-            throw new Error(`Unknown step action: ${step.action}`);
+              break;
+            case 'select':
+              // Option by value or by label, whichever the <select> has.
+              if (!step.selector) throw new Error('select requires selector');
+              {
+                const options = await driver.findElements(By.css(`${step.selector} option`));
+                let chosen = null;
+                for (const option of options) {
+                  if ((await option.getAttribute('value')) === step.value || (await option.getText()).trim() === step.value) {
+                    chosen = option;
+                    break;
+                  }
+                }
+                if (!chosen) throw new Error(`select: "${step.selector}" has no option "${step.value}"`);
+                await chosen.click();
+              }
+              break;
+            case 'wait_for':
+              if (!step.selector) throw new Error('wait_for requires selector');
+              await driver.wait(until.elementLocated(By.css(step.selector)), step.timeout_ms ?? 15000);
+              break;
+            case 'wait_for_hidden':
+              // Passes when the element is gone, not displayed, or carries a
+              // "hidden" class (the console gate's mount signal).
+              if (!step.selector) throw new Error('wait_for_hidden requires selector');
+              await driver.wait(async () => {
+                const els = await driver!.findElements(By.css(step.selector!));
+                if (!els.length) return true;
+                const el = els[0]!;
+                const cls = (await el.getAttribute('class')) || '';
+                if (cls.split(/\s+/).includes('hidden')) return true;
+                return !(await el.isDisplayed().catch(() => false));
+              }, step.timeout_ms ?? 15000, `"${step.selector}" never hid`);
+              break;
+            case 'assert_text':
+              {
+                // Case-insensitive: CSS text-transform makes rendered text differ
+                // from source casing (e.g. "SAND BENCH" for "Sand Bench"). Check
+                // both the rendered body text (what a sighted user reads) and
+                // the full textContent (what an assistive reader can hear,
+                // including nav labels inside a collapsed accordion), so a label
+                // that exists in the DOM but sits in a collapsed sidebar group
+                // still counts as present.
+                const body = await driver.findElement(By.css('body'));
+                const visible = (await body.getText()).toLowerCase();
+                const text = (await driver.executeScript('return document.body.textContent || ""') as string).toLowerCase();
+                const haystack = visible + '\n' + text;
+                const want = step.must_contain ?? step.expected;
+                if (want && !haystack.includes(want.toLowerCase())) {
+                  throw new Error(`assert_text failed: expected "${want}"`);
+                }
+              }
+              break;
+            case 'assert_selector_text':
+              {
+                if (!step.selector) throw new Error('assert_selector_text requires selector');
+                const el = await driver.wait(until.elementLocated(By.css(step.selector)), step.timeout_ms ?? 10000);
+                const text = ((await el.getText()) || '').trim();
+                const want = step.must_contain ?? step.expected;
+                if (want && !text.includes(want)) {
+                  throw new Error(`assert_selector_text failed: "${step.selector}" is "${text.slice(0, 120)}", expected "${want}"`);
+                }
+              }
+              break;
+            case 'assert_selector_count_min':
+              {
+                if (!step.selector) throw new Error('assert_selector_count_min requires selector');
+                const els = await driver.findElements(By.css(step.selector));
+                const min = Number(step.value) || 1;
+                if (els.length < min) throw new Error(`only ${els.length} elements match "${step.selector}", expected >= ${min}`);
+              }
+              break;
+            case 'assert_title':
+              {
+                const title = await driver.getTitle();
+                const want = step.must_contain ?? step.expected;
+                if (want && !title.includes(want)) {
+                  throw new Error(`assert_title failed: got "${title}"`);
+                }
+              }
+              break;
+            case 'wait':
+              await driver.sleep(Number(step.value) || 1000);
+              break;
+            default:
+              throw new Error(`Unknown step action: ${step.action}`);
+          }
+          log.steps.push({ ...record, outcome: 'passed', duration_ms: Date.now() - t0 });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.steps.push({ ...record, outcome: 'failed', duration_ms: Date.now() - t0, error: msg.slice(0, 500) });
+          throw new Error(`${label}: ${msg}`);
         }
-        if (passShots && idx < 20 && step.action !== 'wait') await shot(`step-${idx + 1}`);
       }
-      message = `Executed ${input.steps.length} steps`;
+      const suffix = input.viewport ? ` at ${input.viewport.width}x${input.viewport.height}` : '';
+      message = notes.length ? `Executed ${input.steps.length} steps${suffix}: ${notes.join(' | ')}` : `Executed ${input.steps.length} steps${suffix}`;
     } else {
+      const t0 = Date.now();
       await driver.get(input.baseUrl);
       await driver.wait(until.elementLocated(By.css('body')), 10000);
       message = `Loaded ${input.baseUrl}`;
-      note(message);
+      log.steps.push({ step: 1, action: 'navigate', value: input.baseUrl, outcome: 'passed', duration_ms: Date.now() - t0 });
     }
 
-    if (passShots && !input.steps?.length) await shot('final');
-    note('PASSED');
-    finishLog();
+    await settle('pass');
 
     return {
       status: 'passed',
@@ -254,9 +449,10 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
     else if (/assert|expected/i.test(msg)) classification = 'assertion_failure';
     else if (/element|selector|not found/i.test(msg)) classification = 'script_problem';
 
-    note(`FAILED: ${msg}`);
-    await shot('failure');
-    finishLog();
+    if (!log.steps.some((s) => s.outcome === 'failed')) {
+      log.steps.push({ step: log.steps.length + 1, action: driver ? 'run' : 'launch', outcome: 'failed', duration_ms: Date.now() - start, error: msg.slice(0, 500) });
+    }
+    await settle('fail');
 
     return {
       status: 'failed',
@@ -266,6 +462,7 @@ export async function runSelenium(input: SeleniumRunInput): Promise<SeleniumRunR
       evidence,
     };
   } finally {
+    input.signal?.removeEventListener('abort', onAbort);
     if (driver) {
       try {
         await driver.quit();

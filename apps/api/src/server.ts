@@ -2,15 +2,18 @@
 /**
  * GAVRIQ Test Engine — Control Plane API + Unified UI
  */
-import Fastify from 'fastify';
-import { readFileSync, existsSync } from 'node:fs';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import { migrate, query } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
 import { registerTargets } from './targets.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
+import { testBenchRoutes } from './routes/test-bench.js';
 import { caseEvidenceRoutes } from './routes/case-evidence.js';
 import { environmentRoutes } from './routes/environments.js';
 import { executionRoutes } from './routes/executions.js';
@@ -25,9 +28,31 @@ import { evidenceRoutes } from './routes/evidence.js';
 import { sitCatalogRoutes } from './routes/sit-catalog.js';
 import { sitRunRoutes } from './routes/sit-runs.js';
 import { opsRoutes } from './routes/ops.js';
+import { uiRoutes } from './routes/ui.js';
+import { triggerRoutes } from './routes/trigger.js';
+import { deploymentRoutes } from './routes/deployments.js';
+import { infraRoutes } from './routes/infra.js';
+import { infraTick } from './infra.js';
+import { settingsRoutes } from './routes/settings.js';
+import { reportRoutes } from './routes/reports.js';
+import { insightRoutes } from './routes/insights.js';
+import { registerEvidenceGate } from './evidence-gate.js';
+import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
+import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
 import { defectRoutes } from './routes/defects.js';
+import { recordRoutes } from './routes/record.js';
+import { feedbackLoopRoutes } from './routes/feedback-loop.js';
+import { deployLoopRoutes } from './routes/deploy-loop.js';
+import { cycleRunRoutes } from './routes/cycle-runs.js';
+import { defectLogRoutes } from './routes/defect-log.js';
+import { feedbackLoopTick } from './feedback-loop.js';
+import { deployLoopTick } from './deploy-loop.js';
+import { fixLoopTick } from './run-fix-loop.js';
+import { fixLoopRoutes } from './routes/run-fix-loop.js';
+import { fixProposalRoutes } from './routes/fix-proposals.js';
+import { catalogSourceRoutes } from './routes/catalog-source.js';
+import { webhookRoutes } from './routes/webhook.js';
 import { securityScanRoutes } from './routes/security-scans.js';
-import { startScheduler } from './schedule/service.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -61,10 +86,20 @@ function mimeFor(file: string): string {
   return 'application/octet-stream';
 }
 
-function readPublic(rel: string): { body: Buffer; type: string } | null {
+const gzipAsync = promisify(gzip);
+const COMPRESSIBLE = /^(application\/(json|javascript)|text\/(html|css|plain|javascript)|image\/svg)/;
+
+/** Serve a UI asset with a size/mtime ETag so repeat loads revalidate with a 304 instead of re-downloading. */
+function sendPublic(req: FastifyRequest, reply: FastifyReply, rel: string, notFound = 'Not found') {
   const file = path.normalize(path.join(publicDir, rel));
-  if (!file.startsWith(publicDir) || !existsSync(file)) return null;
-  return { body: readFileSync(file), type: mimeFor(file) };
+  if (!file.startsWith(publicDir) || !existsSync(file) || !statSync(file).isFile()) {
+    return reply.code(404).type('text/plain').send(notFound);
+  }
+  const st = statSync(file);
+  const etag = `W/"${st.size.toString(16)}-${Math.floor(st.mtimeMs).toString(16)}"`;
+  reply.header('etag', etag).header('cache-control', 'no-cache');
+  if (req.headers['if-none-match'] === etag) return reply.code(304).send();
+  return reply.type(mimeFor(file)).send(readFileSync(file));
 }
 
 async function main() {
@@ -97,6 +132,19 @@ async function main() {
     await resolveActorAsync(req);
   });
 
+  // gzip text responses (JSON catalog payloads shrink ~5-8x); streams and hijacked SSE are untouched.
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (typeof payload !== 'string' && !Buffer.isBuffer(payload)) return payload;
+    if (reply.getHeader('content-encoding')) return payload;
+    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return payload;
+    if (!COMPRESSIBLE.test(String(reply.getHeader('content-type') || ''))) return payload;
+    if (Buffer.byteLength(payload) < 1024) return payload;
+    reply.header('content-encoding', 'gzip');
+    reply.header('vary', 'accept-encoding');
+    reply.removeHeader('content-length');
+    return gzipAsync(payload);
+  });
+
   app.get('/health', async () => ({
     status: 'ok',
     service: 'gavriq-test-engine',
@@ -111,59 +159,71 @@ async function main() {
   app.get('/ready', async () => ({ status: 'ready' }));
 
   // Unified shell at / (Overview · SIT · Catalog QA/QC)
-  app.get('/', async (_req, reply) => {
-    const file = readPublic('catalog/index.html');
-    if (!file) {
-      return reply.type('text/plain').send('Unified UI not found');
-    }
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/', async (req, reply) => sendPublic(req, reply, 'catalog/index.html', 'Unified UI not found'));
 
-  app.get('/console.js', async (_req, reply) => {
-    const file = readPublic('console.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
-  app.get('/console-ui.js', async (_req, reply) => {
-    const file = readPublic('console-ui.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
-  app.get('/console-pages.js', async (_req, reply) => {
-    const file = readPublic('console-pages.js');
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/console.js', async (req, reply) => sendPublic(req, reply, 'console.js'));
+  app.get('/console-ui.js', async (req, reply) => sendPublic(req, reply, 'console-ui.js'));
+  app.get('/console-pages.js', async (req, reply) => sendPublic(req, reply, 'console-pages.js'));
+
+  // Defect log: review what the engine logged, raise defects by hand, send them to the implementation manager.
+  app.get('/defect-log', async (req, reply) => sendPublic(req, reply, 'defect-log.html', 'Defect log not found'));
 
   // Same shell also at /catalog/
   app.get('/catalog', async (_req, reply) => reply.redirect('/catalog/'));
-  app.get('/catalog/', async (_req, reply) => {
-    const file = readPublic('catalog/index.html');
-    if (!file) return reply.code(404).type('text/plain').send('Catalog UI not found');
-    return reply.type(file.type).send(file.body);
-  });
+  app.get('/catalog/', async (req, reply) => sendPublic(req, reply, 'catalog/index.html', 'Catalog UI not found'));
   app.get('/catalog/*', async (req, reply) => {
     const rel = String((req.params as { '*': string })['*'] || '').replace(/\.\./g, '');
-    const file = readPublic(path.join('catalog', rel));
-    if (!file) return reply.code(404).send('Not found');
-    return reply.type(file.type).send(file.body);
+    return sendPublic(req, reply, path.join('catalog', rel));
   });
 
   if (rbacEnabled) {
     app.addHook('preHandler', async (req, reply) => {
-      const pathName = req.url.split('?')[0] ?? '';
+      const pathName = req.url.split('?')[0] ?? req.url;
       const method = req.method;
 
       if (pathName === '/health' || pathName === '/ready' || pathName === '/' || pathName === '/api/v1/meta') return;
+      if ((pathName === '/api/v1/evidence/upload' || pathName === '/api/v1/evidence/prune') && method === 'POST') {
+        return requirePermission('workers:manage')(req, reply);
+      }
       if (pathName.startsWith('/api/v1/evidence')) return;
+      if (pathName.startsWith('/api/v1/runs')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
+      if (pathName.startsWith('/api/v1/deployments')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'environments:deploy')(req, reply);
+      }
+      if (pathName.startsWith('/api/v1/infra')) {
+        if (method === 'GET') return requirePermission('tests:read')(req, reply);
+        // The infra agent authenticates like a worker (X-Worker-Key).
+        if (/^\/api\/v1\/infra\/(jobs\/claim|jobs\/[^/]+\/(progress|complete)|agents\/heartbeat)$/.test(pathName)) {
+          return requirePermission('workers:manage')(req, reply);
+        }
+        return requirePermission('environments:deploy')(req, reply);
+      }
+      // Create/update only — leaves sub-paths like .../run-tests, .../policy untouched.
+      if (
+        (method === 'POST' && (pathName === '/api/v1/applications' || pathName === '/api/v1/environments')) ||
+        ((method === 'PATCH' || method === 'PUT') && /^\/api\/v1\/(applications|environments)\/[^/]+$/.test(pathName))
+      ) {
+        return requirePermission('environments:write')(req, reply);
+      }
       if (pathName.startsWith('/api/v1/workers') && method === 'POST') return;
       if (pathName === '/api/v1/executions/claim') return;
       if (pathName === '/api/v1/build-results' && method === 'POST') return;
 
-      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/defect') || pathName.startsWith('/api/v1/schedule'))) {
+      if (method === 'GET' && (pathName.startsWith('/api/v1/test-cases') || pathName.startsWith('/api/v1/applications') || pathName.startsWith('/api/v1/dashboard') || pathName.startsWith('/api/v1/search') || pathName.startsWith('/api/v1/test-status') || pathName.startsWith('/api/v1/build-results') || pathName.startsWith('/api/v1/workers') || pathName.startsWith('/api/v1/executions') || pathName.startsWith('/api/v1/environments') || pathName.startsWith('/api/v1/suites') || pathName.startsWith('/api/v1/release-readiness') || pathName.startsWith('/api/v1/execution-results') || pathName.startsWith('/api/v1/ui/') || pathName.startsWith('/api/v1/defect'))) {
         return requirePermission('tests:read')(req, reply);
       }
-      if ((method === 'POST' || method === 'PATCH' || method === 'DELETE') && (pathName === '/api/v1/executions' || pathName === '/api/v1/sit-runs' || pathName.startsWith('/api/v1/schedule'))) {
+      if (method === 'POST' && (pathName === '/api/v1/ui/history' || pathName === '/api/v1/reports')) {
+        return requirePermission('tests:read')(req, reply);
+      }
+      if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs')) {
+        return requirePermission('executions:run')(req, reply);
+      }
+      if (pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/insights')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
+      if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
         return requirePermission('executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
@@ -182,11 +242,15 @@ async function main() {
     });
   }
 
+  // Evidence is the exit criterion of a run: verified in front of the result endpoints.
+  registerEvidenceGate(app);
+
   await app.register(metaRoutes);
   await app.register(sitCatalogRoutes);
   await app.register(sitRunRoutes);
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
+  await app.register(testBenchRoutes);
   await app.register(caseEvidenceRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
@@ -197,12 +261,117 @@ async function main() {
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
   await app.register(buildStatusRoutes);
+  await app.register(uiRoutes);
+  await app.register(triggerRoutes);
+  await app.register(deploymentRoutes);
+  await app.register(infraRoutes);
+  await app.register(settingsRoutes);
+  await app.register(reportRoutes);
+  await app.register(insightRoutes);
   await app.register(opsRoutes);
   await app.register(defectRoutes);
+  await app.register(feedbackLoopRoutes);
+  await app.register(defectLogRoutes);
+  await app.register(deployLoopRoutes);
+  await app.register(cycleRunRoutes);
+  await app.register(recordRoutes);
+  await app.register(fixLoopRoutes);
+  await app.register(fixProposalRoutes);
+  await app.register(catalogSourceRoutes);
+  await app.register(webhookRoutes);
   await app.register(securityScanRoutes);
 
   await app.listen({ port, host });
-  startScheduler();
+
+  // Evidence retention: once shortly after boot, then daily.
+  if (EVIDENCE_RETENTION_DAYS > 0) {
+    const prune = () =>
+      pruneEvidence(EVIDENCE_RETENTION_DAYS)
+        .then((r) => app.log.info(r, 'evidence retention'))
+        .catch((err) => app.log.warn({ err }, 'evidence retention failed'));
+    setTimeout(prune, 60_000).unref();
+    setInterval(prune, 24 * 60 * 60_000).unref();
+  }
+
+  // Run retention: reads the configured window fresh each tick, so a change made in the
+  // Configuration UI takes effect without a restart.
+  const pruneRunsTick = () =>
+    currentRunRetentionDays()
+      .then((days) => pruneRuns(days))
+      .then((r) => app.log.info(r, 'run retention'))
+      .catch((err) => app.log.warn({ err }, 'run retention failed'));
+  setTimeout(pruneRunsTick, 90_000).unref();
+  setInterval(pruneRunsTick, 60 * 60_000).unref();
+
+  // Infrastructure lifecycle: tear managed stacks down after their run / when idle / when up too long,
+  // and queue Docker housekeeping on its cadence (infra.ts). Decisions only — the infra agent does the work.
+  if (process.env.INFRA_TICK_MS !== '0') {
+    let infraBusy = false;
+    const infraTickSafe = () => {
+      if (infraBusy) return;
+      infraBusy = true;
+      infraTick()
+        .then((r) => {
+          if (r.reaped || r.after_run.length || r.teardowns.length || r.prune_queued) app.log.info(r, 'infra tick');
+        })
+        .catch((err) => app.log.warn({ err }, 'infra tick failed'))
+        .finally(() => { infraBusy = false; });
+    };
+    const every = Math.max(10_000, Number(process.env.INFRA_TICK_MS) || 60_000);
+    setTimeout(infraTickSafe, 30_000).unref();
+    setInterval(infraTickSafe, every).unref();
+  }
+
+  // Feedback loops (feedback-loop.ts): advance every running loop. Loops start stopped, so nothing runs
+  // until an operator starts one. FEEDBACK_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.FEEDBACK_LOOP_TICK_MS !== '0') {
+    let loopBusy = false;
+    const loopTickSafe = () => {
+      if (loopBusy) return;
+      loopBusy = true;
+      feedbackLoopTick()
+        .catch((err) => app.log.warn({ err }, 'feedback loop tick failed'))
+        .finally(() => { loopBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.FEEDBACK_LOOP_TICK_MS) || 20_000);
+    setInterval(loopTickSafe, every).unref();
+  }
+
+  // Per-run auto-fix loop (run-fix-loop.ts): drives a run that was opted into "auto-fix on
+  // failure", classifying each failing case (transient vs. real), redeploying when needed,
+  // and rerunning the still-failing subset up to a cap. FIX_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.FIX_LOOP_TICK_MS !== '0') {
+    let fixBusy = false;
+    const fixTickSafe = () => {
+      if (fixBusy) return;
+      fixBusy = true;
+      fixLoopTick()
+        .catch((err) => app.log.warn({ err }, 'fix loop tick failed'))
+        .finally(() => { fixBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.FIX_LOOP_TICK_MS) || 15_000);
+    setTimeout(fixTickSafe, 15_000).unref();
+    setInterval(fixTickSafe, every).unref();
+  }
+
+  // Deploy-failure loop (deploy-loop.ts): when a managed stack's deploy fails, the engine
+  // hands the failure to the application repo's agent and retries when they report a fix.
+  // Capped at 5 retries by default; after that the loop parks and the console banners the
+  // environment so a person can investigate. DEPLOY_LOOP_TICK_MS=0 turns the tick off.
+  if (process.env.DEPLOY_LOOP_TICK_MS !== '0') {
+    let deployBusy = false;
+    const deployTickSafe = () => {
+      if (deployBusy) return;
+      deployBusy = true;
+      deployLoopTick()
+        .catch((err) => app.log.warn({ err }, 'deploy loop tick failed'))
+        .finally(() => { deployBusy = false; });
+    };
+    const every = Math.max(5_000, Number(process.env.DEPLOY_LOOP_TICK_MS) || 20_000);
+    setTimeout(deployTickSafe, 45_000).unref();
+    setInterval(deployTickSafe, every).unref();
+  }
+
   console.log(`GAVRIQ Test Engine API + UI on http://${host}:${port} (rbac=${rbacEnabled} jwt=${Boolean(process.env.JWT_SECRET)})`);
   console.log(`[ui] publicDir=${publicDir} exists=${existsSync(publicDir)}`);
 }

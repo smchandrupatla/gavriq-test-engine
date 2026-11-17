@@ -3,7 +3,14 @@ import { query } from '../db/client.js';
 
 export async function workerRoutes(app: FastifyInstance) {
   app.get('/api/v1/workers', async (_req, reply) => {
-    const { rows } = await query('SELECT * FROM workers ORDER BY name');
+    // Stale heartbeat (> 60s) means offline regardless of last reported status —
+    // otherwise dead registrations show "online" forever.
+    const { rows } = await query(
+      `SELECT *,
+              CASE WHEN last_heartbeat IS NULL OR last_heartbeat < now() - interval '60 seconds'
+                   THEN 'offline' ELSE status END AS status
+       FROM workers ORDER BY name`
+    );
     return reply.send({ data: rows });
   });
 

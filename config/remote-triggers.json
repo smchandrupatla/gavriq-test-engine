@@ -1,0 +1,35 @@
+{
+  "$schema": "./remote-triggers.schema.json",
+  "comment": [
+    "Remote-execution triggers for the test engine. When a commit lands on the",
+    "configured branch of the remote repo, the source (GitHub, GitLab, a cron,",
+    "a curl) POSTs to:",
+    "",
+    "    POST /api/v1/webhooks/git/<project_key>",
+    "",
+    "The engine verifies the HMAC against the shared secret (named here by env",
+    "var, never stored in this file), fetches the local mirror from origin,",
+    "resolves the commit, and starts a deploy -> run-all -> teardown cycle on",
+    "the mapped environment via POST /api/v1/deployments (deploy_and_run).",
+    "",
+    "Each entry is independent, so adding a second application is one more",
+    "block below. Enable/disable per entry without deleting it."
+  ],
+  "triggers": [
+    {
+      "project_key": "sand-bench",
+      "enabled": true,
+      "repo_url": "https://github.com/smchandrupatla/sand-bench-enterprise.git",
+      "local_mirror": "../sand-bench-enterprise",
+      "remote_name": "origin",
+      "branch": "main",
+      "application": "sand-bench",
+      "environment": "sand-bench-staging",
+      "secret_env": "SAND_BENCH_WEBHOOK_SECRET",
+      "signature_header": "x-hub-signature-256",
+      "scope": {},
+      "reason": "remote commit on main",
+      "trigger_source": "remote-commit"
+    }
+  ]
+}
