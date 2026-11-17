@@ -2,18 +2,18 @@
 
 export const APPS = [
   { id: "sand-bench", title: "Sand Bench Enterprise", summary: "Rule assurance bench, official console, API." },
+  { id: "web-aurora", title: "Sand Bench Aurora", summary: "New Aurora web portal, built and tested screen by screen, kept separate from the existing console's cases." },
   { id: "testhub", title: "Testhub", summary: "External system simulator." },
   { id: "desks", title: "Channel desks", summary: "MQ, Kafka, and API desks." },
-  { id: "agentdesk", title: "Agent Desk", summary: "Workers and orchestration." },
   { id: "security", title: "Security tooling", summary: "Trivy, ZAP, Semgrep, Security Desk." },
 ];
 
 export function appOf(fileName = "", filePath = "") {
   const blob = `${filePath} ${fileName}`.replace(/\\/g, "/");
   const nested = blob.match(/cases\/apps\/([^/]+)\//) || blob.match(/apps\/([^/]+)\//);
-  if (nested && !blob.includes("apps/agentdesk")) return nested[1];
-  if (fileName.startsWith("90-") || blob.includes("agentdesk") || blob.includes("90-agents")) return "agentdesk";
-  if (fileName.startsWith("8") || /zap|sast|trivy|secportal/.test(blob)) return "security";
+  if (nested) return nested[1];
+  if (/^97[a-z]?-/.test(fileName)) return "web-aurora";
+  if (fileName.startsWith("8") || fileName.startsWith("93-") || fileName.startsWith("94-") || /zap|sast|trivy|secportal/.test(blob)) return "security";
   if (/^(10-|20-|30-)/.test(fileName)) return "testhub";
   return "sand-bench";
 }
@@ -24,7 +24,6 @@ export const TYPES = [
   { id: "gui", title: "GUI", summary: "Official console pages, Selenium screens, fields, workflows." },
   { id: "e2e", title: "End to end", summary: "First-run path a control owner can repeat." },
   { id: "security", title: "Security", summary: "ASVS 5.0 L1, OWASP API Top 10, vuln scan, pentest-lite." },
-  { id: "agents", title: "Agent Desk", summary: "Independent AI workers portal. Optional. Main app runs if it is down." },
   { id: "performance", title: "Performance", summary: "Bounded-duration soak/endurance and burst-concurrency checks against the main application." },
 ];
 
@@ -37,9 +36,23 @@ export const GROUPS = {
     { id: "worker", title: "Worker job queue" },
     { id: "dbviewer", title: "DB viewer cross-check" },
   ],
-  gui: [{ id: "smoke", title: "Console smoke" }],
-  e2e: [{ id: "first-run", title: "First-run path" }],
-  agents: [{ id: "workers", title: "Worker portal" }],
+  gui: [
+    { id: "smoke", title: "Console smoke" },
+    { id: "screens", title: "Screens open" },
+    { id: "fields", title: "Fields and controls" },
+    { id: "workflows", title: "Console workflows" },
+    { id: "converter", title: "Schema Converter" },
+    { id: "navigation", title: "Navigation and page health" },
+    { id: "aurora", title: "Aurora portal screens" },
+  ],
+  e2e: [
+    { id: "first-run", title: "First-run path" },
+    { id: "journeys", title: "Business journeys (import to scheduled feeder)" },
+    { id: "work-items", title: "Datasets, schedules, cases, suites, runs, rules" },
+    { id: "definitions", title: "Systems, definitions and schemes" },
+    { id: "feeders", title: "Data feeder variations" },
+    { id: "client-uat", title: "Client acceptance walkthroughs (UAT)" },
+  ],
   security: [
     { id: "authentication", title: "Authentication (ASVS V6)" },
     { id: "session", title: "Session (ASVS V7)" },
@@ -49,6 +62,8 @@ export const GROUPS = {
     { id: "sast", title: "SAST (Semgrep)" },
     { id: "dast", title: "DAST (OWASP ZAP)" },
     { id: "pentest", title: "Penetration-lite (login + injection)" },
+    { id: "server-side", title: "Server-side abuse (SSRF, traversal, resource exhaustion)" },
+    { id: "ui-pentest", title: "Screen penetration testing (stored/reflected XSS, headers, session)" },
   ],
   performance: [
     { id: "soak", title: "Soak / endurance (bounded duration)" },
@@ -61,18 +76,40 @@ export function suiteOf(fileName) {
   if (fileName.startsWith('64-')) return 'gui';
   if (fileName.startsWith("00-")) return "health";
   if (fileName.startsWith("30-") || fileName.startsWith("10-") || fileName.startsWith("20-") || fileName.startsWith("40-") || fileName.startsWith("50-")) return "integration";
-  if (fileName.startsWith("60-") || fileName.startsWith("61-") || fileName.startsWith("62-") || fileName.startsWith("63-")) return "gui";
-  if (fileName.startsWith("70-")) return "e2e";
+  // 60-69 are GUI cases; 70-75 walk business flows end to end; 76 checks every page loads cleanly.
+  // A file may carry a letter after its number (74b-, 75c-) when a group is split across files.
+  if (/^76[a-z]?-/.test(fileName)) return "gui";
+  if (/^6\d[a-z]?-/.test(fileName)) return "gui";
+  if (/^7\d[a-z]?-/.test(fileName)) return "e2e";
   if (fileName.startsWith("8")) return "security";
-  if (fileName.startsWith("90-")) return "agents";
+  if (fileName.startsWith("93-") || fileName.startsWith("94-")) return "security"; // screen pentest (UI, not "8"-prefixed)
   if (fileName.startsWith("91-") || fileName.startsWith("92-")) return "performance";
+  if (/^97[a-z]?-/.test(fileName)) return "gui"; // Aurora portal screens — own app, kept in the GUI suite type
+  // Client acceptance (UAT) walkthroughs: the client-agent plays the paying customer
+  // against a documented use case, one feature area per lettered file (98, 98b, 98c, ...),
+  // the same growing-without-new-two-digit-numbers pattern 74/74b.. and 75/75b.. already use.
+  if (/^98[a-z]?-/.test(fileName)) return "e2e";
   return "other";
 }
 
 export function groupOf(fileName, testName = "") {
   if (fileName.startsWith('51-') || fileName.startsWith('64-')) return 'use-cases';
+  if (/^97[a-z]?-/.test(fileName)) return 'aurora';
+  if (/^65[a-z]?-/.test(fileName)) return 'converter';
+  if (/^72[a-z]?-/.test(fileName)) return 'journeys';
+  if (/^73[a-z]?-/.test(fileName)) return 'work-items';
+  if (/^74[a-z]?-/.test(fileName)) return 'definitions';
+  if (/^75[a-z]?-/.test(fileName)) return 'feeders';
+  if (/^76[a-z]?-/.test(fileName)) return 'navigation';
+  if (/^98[a-z]?-/.test(fileName)) return 'client-uat';
   const n = `${fileName} ${testName}`.toLowerCase();
-  if (fileName.startsWith("90-")) return "workers";
+  // Pentest cases (86-89 API, 93-94 screens): explicit, so the heuristics below never
+  // second-guess a case this suite wrote on purpose.
+  if (fileName.startsWith("86-")) return "authentication";
+  if (fileName.startsWith("87-")) return "api-top10";
+  if (fileName.startsWith("88-")) return "pentest";
+  if (fileName.startsWith("89-")) return "server-side";
+  if (fileName.startsWith("93-") || fileName.startsWith("94-")) return "ui-pentest";
   if (fileName.startsWith("91-")) return "soak";
   if (fileName.startsWith("92-")) return "burst";
   if (fileName.startsWith("00-")) return "reachability";

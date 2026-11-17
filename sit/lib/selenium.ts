@@ -91,7 +91,7 @@ export async function openConsole(driver: WebDriver): Promise<void> {
   await signInThroughGate(driver);
   await driver.wait(async () => {
     const gates = await driver.findElements(By.id("gate"));
-    if (!gates.length) return true;
+    if (!gates.length) return false;
     const cls = (await gates[0].getAttribute("class")) || "";
     return cls.split(/\s+/).includes("hidden");
   }, 20000, "console gate never hid — sign-in/mount did not complete");
@@ -297,17 +297,17 @@ export async function clickButtonByLabel(driver: WebDriver, label: string): Prom
 }
 
 // Clicks the first element matching css whose text contains the given text — used for
-// the Message Designer wizard's family/message-type tiles, which are plain clickable
+// Create message definition's message tiles (.sbe-studio-msg) and other plain clickable
 // divs (not IconButtons) identified by their visible name.
 export async function clickTileByText(driver: WebDriver, css: string, text: string): Promise<void> {
   const el = await firstWithText(driver, css, text);
   await el.click();
 }
 
-// Waits for the console's success toast (rendered on every FormPageTemplate submit and
-// on the Message Designer wizard's "Create message(s)") and returns its text so the
-// caller can assert on it — the toast text is the UI's own claim of success, always
-// checked here alongside an independent check that the write actually landed.
+// Waits for the console's success toast (rendered on every FormPageTemplate submit, and
+// on the definition studio for Publish, Discard changes and dataset/profile saves) and
+// returns its text so the caller can assert on it — the toast text is the UI's own claim
+// of success, always checked here alongside an independent check that the write landed.
 export async function waitForToast(driver: WebDriver, timeoutMs = 8000): Promise<string> {
   const el = await driver.wait(until.elementLocated(By.css(".opsc-toast")), timeoutMs, "no success toast appeared");
   return ((await el.getText()) || "").trim();

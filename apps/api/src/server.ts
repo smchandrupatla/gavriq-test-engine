@@ -8,11 +8,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { gzip } from 'node:zlib';
-import { migrate } from './db/client.js';
+import { migrate, query } from './db/client.js';
 import { maybeAutoSeed } from './boot-seed.js';
+import { registerTargets } from './targets.js';
 import { applicationRoutes } from './routes/applications.js';
 import { testCaseRoutes } from './routes/test-cases.js';
 import { testBenchRoutes } from './routes/test-bench.js';
+import { caseEvidenceRoutes } from './routes/case-evidence.js';
 import { environmentRoutes } from './routes/environments.js';
 import { executionRoutes } from './routes/executions.js';
 import { workerRoutes } from './routes/workers.js';
@@ -50,6 +52,7 @@ import { fixLoopRoutes } from './routes/run-fix-loop.js';
 import { fixProposalRoutes } from './routes/fix-proposals.js';
 import { catalogSourceRoutes } from './routes/catalog-source.js';
 import { webhookRoutes } from './routes/webhook.js';
+import { securityScanRoutes } from './routes/security-scans.js';
 import { resolveActorAsync, requirePermission } from './middleware/rbac.js';
 
 const port = Number(process.env.PORT || process.env.TEST_ENGINE_PORT || 8787);
@@ -110,6 +113,13 @@ async function main() {
     await maybeAutoSeed();
   } catch (err) {
     console.warn('[boot] auto-seed warning:', (err as Error).message);
+  }
+
+  try {
+    const keys = await registerTargets(query);
+    if (keys.length) console.log(`[boot] registered targets: ${keys.join(', ')}`);
+  } catch (err) {
+    console.warn('[boot] target registration warning:', (err as Error).message);
   }
 
   const app = Fastify({
@@ -216,6 +226,13 @@ async function main() {
       if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
         return requirePermission('executions:run')(req, reply);
       }
+      if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
+        return requirePermission('executions:run')(req, reply);
+      }
+      // Security scans: the scanner posts with an executions:run token; reading needs tests:read.
+      if (pathName.startsWith('/api/v1/security')) {
+        return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
+      }
       if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && pathName.startsWith('/api/v1/test-cases')) {
         return requirePermission('tests:write')(req, reply);
       }
@@ -234,6 +251,7 @@ async function main() {
   await app.register(applicationRoutes);
   await app.register(testCaseRoutes);
   await app.register(testBenchRoutes);
+  await app.register(caseEvidenceRoutes);
   await app.register(environmentRoutes);
   await app.register(executionRoutes);
   await app.register(evidenceRoutes);
@@ -261,6 +279,7 @@ async function main() {
   await app.register(fixProposalRoutes);
   await app.register(catalogSourceRoutes);
   await app.register(webhookRoutes);
+  await app.register(securityScanRoutes);
 
   await app.listen({ port, host });
 

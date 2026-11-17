@@ -6,6 +6,10 @@ export const ENV = {
   apiBase: trimSlash(process.env.SIT_API_BASE || "http://api:8787"),
   testhubBase: trimSlash(process.env.SIT_TESTHUB_BASE || "http://testhub:8091"),
   webBase: trimSlash(process.env.SIT_WEB_BASE || "http://web:80"),
+  // Sand Bench Aurora: a separate portal, its own service in docker-compose.yml, sharing
+  // the same backend API. Kept as its own ENV entry so Aurora cases never fall back to
+  // the existing console's webBase if this is ever left unset.
+  auroraBase: trimSlash(process.env.SIT_AURORA_BASE || "http://web-aurora:80"),
   dbviewerBase: trimSlash(process.env.SIT_DBVIEWER_BASE || "http://dbviewer:8090"),
   tenantSlug: process.env.SIT_TENANT_SLUG || "acme-demo",
   username: process.env.SIT_USERNAME || "operator.acme",
