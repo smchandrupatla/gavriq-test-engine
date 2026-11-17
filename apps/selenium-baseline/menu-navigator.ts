@@ -5,7 +5,7 @@
  * Tracks menu state before and after each navigation to detect structural changes.
  */
 
-import type { By, WebDriver, WebElement } from 'selenium-webdriver';
+import { By, type WebDriver, type WebElement } from 'selenium-webdriver';
 import type { SeleniumBaselineConfig } from './config.js';
 
 export interface MenuItem {
@@ -61,8 +61,8 @@ export class MenuNavigator {
    * Returns a snapshot of the current menu structure.
    */
   async discoverMenu(): Promise<MenuState> {
-    const container = await this.driver.findElement(this.config.menuContainerSelector as unknown as By);
-    const itemElements = await container.findElements(this.config.menuItemSelector as unknown as By);
+    const container = await this.driver.findElement(By.css('.opsc-sidebar'));
+    const itemElements = await container.findElements(By.css('.opsc-navitem, .opsc-subnav a, aside a, [role="navigation"] a'));
 
     const items: MenuItem[] = [];
     for (const el of itemElements) {
@@ -200,6 +200,7 @@ export class MenuNavigator {
     for (let i = 0; i < before.items.length; i++) {
       const bItem = before.items[i];
       const aItem = after.items[i];
+      if (!bItem || !aItem) return false;
 
       if (bItem.label !== aItem.label) return false;
       if (bItem.hasChildren !== aItem.hasChildren) return false;

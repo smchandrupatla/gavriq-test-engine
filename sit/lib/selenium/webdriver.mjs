@@ -35,11 +35,15 @@ async function wd(method, pathname, body) {
   return json.value;
 }
 
-export async function openSession() {
+// `prompts: true` leaves JavaScript dialogs (confirm/alert) open so the case can read and
+// answer them with acceptAlert()/dismissAlert(); the default keeps the driver's own
+// dismiss-and-notify behaviour, which every existing case relies on.
+export async function openSession({ prompts = false } = {}) {
   const value = await wd("POST", "/session", {
     capabilities: {
       alwaysMatch: {
         browserName: "chrome",
+        ...(prompts ? { unhandledPromptBehavior: "ignore" } : {}),
         "goog:chromeOptions": {
           args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,900",
             ...(process.env.BASELINE_CONTAINER === '1' ? ['--host-resolver-rules=MAP unpkg.com ~NOTFOUND'] : [])],
@@ -54,6 +58,11 @@ export async function openSession() {
 export async function closeSession(id) {
   if (!id) return;
   try { await wd("DELETE", `/session/${id}`); } catch { /* ignore */ }
+}
+
+const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
+function refArg(arg) {
+  return arg && typeof arg === "object" && typeof arg.el === "string" ? { [ELEMENT_KEY]: arg.el } : arg;
 }
 
 export function session(id) {
@@ -83,6 +92,21 @@ export function session(id) {
     },
     async text(el) { return wd("GET", `${base}/element/${el}/text`); },
     async shot() { return wd("GET", `${base}/screenshot`); },
+    // Runs a script in the page. Element ids returned by find()/finds() are passed as
+    // { el: id } and reach the script as the real DOM node (see flow.mjs).
+    async exec(script, args = []) { return wd("POST", `${base}/execute/sync`, { script, args: args.map(refArg) }); },
+    async execAsync(script, args = []) { return wd("POST", `${base}/execute/async`, { script, args: args.map(refArg) }); },
+    async attr(el, name) { return wd("GET", `${base}/element/${el}/attribute/${encodeURIComponent(name)}`); },
+    async prop(el, name) { return wd("GET", `${base}/element/${el}/property/${encodeURIComponent(name)}`); },
+    async displayed(el) { return wd("GET", `${base}/element/${el}/displayed`); },
+    async enabled(el) { return wd("GET", `${base}/element/${el}/enabled`); },
+    async selected(el) { return wd("GET", `${base}/element/${el}/selected`); },
+    async alertText() { return wd("GET", `${base}/alert/text`); },
+    async acceptAlert() { await wd("POST", `${base}/alert/accept`, {}); },
+    async dismissAlert() { await wd("POST", `${base}/alert/dismiss`, {}); },
+    async back() { await wd("POST", `${base}/back`, {}); },
+    async refresh() { await wd("POST", `${base}/refresh`, {}); },
+    async setWindowSize(width, height) { await wd("POST", `${base}/window/rect`, { width, height }); },
   };
 }
 
@@ -121,12 +145,12 @@ export async function recordSkip(name, reason) {
  * @param {(sess: Session) => Promise<T>} fn
  * @returns {Promise<{ skipped: true, reason: string } | { skipped: false, result: T }>}
  */
-export async function withBrowser(fn) {
+export async function withBrowser(fn, options = {}) {
   const ready = await seleniumReady();
   if (!ready) {
     return { skipped: true, reason: `Selenium not reachable at ${seleniumUrl()}. Start profile selenium.` };
   }
-  const id = await openSession();
+  const id = await openSession(options);
   const sess = session(id);
   try {
     return { skipped: false, result: await fn(sess) };

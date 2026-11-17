@@ -25,6 +25,9 @@ ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# SIT cases drive the same system Chromium.
+ENV SIT_CHROME_BINARY=/usr/bin/chromium
+ENV SIT_CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -44,6 +47,10 @@ COPY sit ./sit
 COPY dev ./dev
 COPY docs/use-cases ./docs/use-cases
 COPY data/iso20022-upload ./data/iso20022-upload
+# The SIT runner executes sit/cases/*.sit.ts; without these the worker reported
+# "SIT file not found" for every imported SIT case.
+COPY tests/helpers ./tests/helpers
+COPY tests/fixtures ./tests/fixtures
 COPY tsconfig.json* ./
 
 ENV NODE_ENV=production

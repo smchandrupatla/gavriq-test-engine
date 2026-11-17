@@ -1,4 +1,4 @@
-﻿# Consolidated Test Engine (control-plane API + dashboard) and SIT console â€” one
+# Consolidated Test Engine (control-plane API + dashboard) and SIT console â€” one
 # image/container, one external port. scripts/consolidated-entrypoint.mjs runs both as
 # independent Node child processes behind a small reverse proxy (/sit/* -> console,
 # everything else -> API), so a crash in one doesn't take the other down even though
@@ -27,10 +27,14 @@ RUN env -u PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD \
 
 COPY apps ./apps
 COPY sit ./sit
+# Helpers and fixtures synced from Sand Bench with sit/ (scripts/sync-sandbench-sit.mjs)
+COPY tests/helpers ./tests/helpers
+COPY tests/fixtures ./tests/fixtures
 COPY dev ./dev
 COPY docs ./docs
 COPY data ./data
 COPY config ./config
+COPY targets ./targets
 COPY tsconfig.json* ./
 COPY scripts/consolidated-entrypoint.mjs ./scripts/consolidated-entrypoint.mjs
 

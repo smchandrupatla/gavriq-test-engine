@@ -5,7 +5,7 @@ import { seleniumReady, withBrowser, saveShot, recordSkip } from "../lib/seleniu
 import { enterConsole, clickLabel, sourceHas, bootFailed } from "../lib/selenium/console.mjs";
 
 test("every official page has a field or control contract", () => {
-  assert.deepEqual(officialPageIds().filter((id) => !(contractFor(id).texts || []).length), []);
+  assert.deepEqual(officialPageIds().filter((id: string) => !(contractFor(id).texts || []).length), []);
 });
 
 // Same baseline-aware sampling as 61-selenium-screens.sit.ts: cap how many pageIds
@@ -24,7 +24,7 @@ for (const pageId of sampledPageIds()) {
   test(`Selenium fields on ${pageId}`, async (t) => {
     if (!(await seleniumReady())) { await recordSkip(`fields-${pageId}`, "selenium down"); t.skip("Selenium Chrome is optional"); return; }
     const contract = contractFor(pageId);
-    const run = await withBrowser(async (sess) => {
+    const run = await withBrowser(async (sess: any) => {
       await enterConsole(sess);
       await clickLabel(sess, contract.family);
       if (contract.texts?.[0]) await clickLabel(sess, contract.texts[0]);

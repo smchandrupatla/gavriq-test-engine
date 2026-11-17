@@ -259,8 +259,8 @@ export async function testCaseRoutes(app: FastifyInstance) {
            created_by, objective, component, environment, estimated_duration, visibility,
            automation_link, test_data, attachments, flakiness_notes, known_workarounds, common_failure_causes
          ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::test_type,'other'),$10,$11,COALESCE($12,'[]'::jsonb),
-           $13,COALESCE($14,'{}'::jsonb),$15,$16,$17,COALESCE($18,'[]'::jsonb),$19,
+           $1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9::test_type,'other'),$10::test_level,$11,COALESCE($12,'[]'::jsonb),
+           $13,COALESCE($14,'{}'::jsonb),$15::execution_location,$16,$17,COALESCE($18,'[]'::jsonb),$19,
            COALESCE($20,'[]'::jsonb),COALESCE($21,'{}'::jsonb),COALESCE($22,300),
            COALESCE($23,'{"max":0}'::jsonb),COALESCE($24::severity,'medium'),COALESCE($25::priority,'p2'),
            COALESCE($26::text[],'{}'),$27,$28,COALESCE($29::automation_status,'manual'),

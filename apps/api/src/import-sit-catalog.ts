@@ -81,7 +81,7 @@ async function main() {
     `INSERT INTO applications (key, name, description, status)
      VALUES ('sand-bench', 'Sand Bench', 'Sand Bench enterprise deployment under test', 'active')
      ON CONFLICT (key) DO UPDATE SET updated_at = now()
-     RETURNING id`
+     RETURNING id`,
   );
   const appId = app.rows[0]!.id as string;
 

@@ -12,7 +12,7 @@ async function needChrome(t: TestContext, name: string) {
 
 test("workflow: gate → Overview first-run strip", async (t) => {
   if (!(await needChrome(t, "wf-overview"))) return;
-  const run = await withBrowser(async (sess) => {
+  const run = await withBrowser(async (sess: any) => {
     await enterConsole(sess);
     await clickLabel(sess, "Overview");
     return { html: await sess.source(), shot: await saveShot(sess, "wf-overview") };
@@ -24,7 +24,7 @@ test("workflow: gate → Overview first-run strip", async (t) => {
 
 test("workflow: Overview → Import schema", async (t) => {
   if (!(await needChrome(t, "wf-import"))) return;
-  const run = await withBrowser(async (sess) => {
+  const run = await withBrowser(async (sess: any) => {
     await enterConsole(sess);
     await clickLabel(sess, "Message Designer");
     await clickLabel(sess, "Import schema");
@@ -37,7 +37,7 @@ test("workflow: Overview → Import schema", async (t) => {
 
 test("workflow: Create new rule surfaces condition kinds", async (t) => {
   if (!(await needChrome(t, "wf-rule-create"))) return;
-  const run = await withBrowser(async (sess) => {
+  const run = await withBrowser(async (sess: any) => {
     await enterConsole(sess);
     await clickLabel(sess, "Rule Bench");
     await clickLabel(sess, "Create new rule");
@@ -50,7 +50,7 @@ test("workflow: Create new rule surfaces condition kinds", async (t) => {
 
 test("workflow: New test run shows File / API / MQ / Kafka", async (t) => {
   if (!(await needChrome(t, "wf-new-run"))) return;
-  const run = await withBrowser(async (sess) => {
+  const run = await withBrowser(async (sess: any) => {
     await enterConsole(sess);
     await clickLabel(sess, "Test Runs");
     await clickLabel(sess, "New test run");
@@ -63,7 +63,7 @@ test("workflow: New test run shows File / API / MQ / Kafka", async (t) => {
 
 test("workflow: Configuration test-connection controls", async (t) => {
   if (!(await needChrome(t, "wf-config"))) return;
-  const run = await withBrowser(async (sess) => {
+  const run = await withBrowser(async (sess: any) => {
     await enterConsole(sess);
     await clickLabel(sess, "Configuration");
     return { html: await sess.source(), shot: await saveShot(sess, "wf-config") };

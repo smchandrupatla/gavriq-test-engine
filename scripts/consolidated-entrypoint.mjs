@@ -48,6 +48,9 @@ function startChild(name, command, args, env) {
 startChild('api', 'npx', ['tsx', 'apps/api/src/server.ts'], {
   PORT: String(API_INTERNAL_PORT),
   HOST: '127.0.0.1',
+  // The API proxies SIT runs to the console; without this it looks on :8098, where
+  // nothing listens inside this container.
+  SIT_CONSOLE_BASE: process.env.SIT_CONSOLE_BASE || `http://127.0.0.1:${SIT_INTERNAL_PORT}`,
 });
 
 startChild('sit', 'node', ['sit/console.mjs'], {

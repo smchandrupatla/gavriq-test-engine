@@ -38,6 +38,7 @@ const KNOWN_FILES = [
   '61-selenium-screens.sit.ts',
   '62-selenium-fields.sit.ts',
   '63-selenium-workflows.sit.ts',
+  '63-selenium-message-definition-wizard.sit.ts',
   '64-use-case-ui.sit.ts',
   '66-official-clicks.sit.ts',
   '67-feature-access-ui.sit.ts',
@@ -104,7 +105,7 @@ function extractTestNames(source: string): string[] {
   const names: string[] = [];
   const re = /\b(?:test|it)\s*\(\s*[`'"]([^`'"\n]+)[`'"]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) names.push(m[1]);
+  while ((m = re.exec(source))) names.push(m[1]!);
   return [...new Set(names)];
 }
 

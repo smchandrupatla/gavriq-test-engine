@@ -109,12 +109,27 @@ describe('defect loop API', { skip: !BASE && 'set ENGINE_IT_BASE to run' }, () =
     assert.equal(report.defects[0].rerun_attempts, 2);
     assert.equal(report.rerun_count, 2);
 
-    // 6. The same failure later is a regression: new report, defect reopened into it.
+    // 6. The same failure later is a regression: a new report with a new defect
+    //    linked to the verified one; the verified report keeps its record.
     await call('POST', '/api/v1/executions', { test_case_ids: [bad] });
     const regress = await runAsWorker({ [bad]: 'failed' });
     assert.equal(regress.body.defects.outcome, 'report');
     assert.equal(regress.body.defects.regressed, 1);
     assert.equal(regress.body.defects.created, 0);
+    const fresh = (await call('GET', `/api/v1/defect-reports/${regress.body.defects.report_key}`)).body.data;
+    assert.equal(fresh.defects.length, 1);
+    assert.equal(fresh.defects[0].status, 'open');
+    assert.equal(fresh.defects[0].regression_of, defect.id);
+    assert.equal(fresh.defects[0].regression_of_key, defect.key);
+    const old = (await call('GET', `/api/v1/defect-reports/${reportKey}`)).body.data;
+    assert.equal(old.status, 'verified');
+    assert.equal(old.defects.length, 1);
+    assert.equal(old.defects[0].status, 'verified');
+
+    // A further failure of the same signature only counts against the new defect.
+    await call('POST', '/api/v1/executions', { test_case_ids: [bad] });
+    const again2 = await runAsWorker({ [bad]: 'failed' });
+    assert.equal(again2.body.defects.outcome, 'recurring_only');
 
     const overview = await call('GET', '/api/v1/defect-manager/overview');
     assert.ok(overview.body.data.awaiting_pm >= 1);
