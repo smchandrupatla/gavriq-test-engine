@@ -85,6 +85,15 @@ export function namePattern(testName: string): string {
   return `^${nameSource(testName)}$`;
 }
 
+/** Alias kept for tests written against the earlier name. */
+export const testNamePattern = namePattern;
+
+/** Totals from the node:test TAP footer (# pass N, # fail N, # skipped N). */
+export function tapCounts(tap: string): { pass: number; fail: number; skipped: number } {
+  const n = (label: string) => Number((new RegExp(`^# ${label} (\\d+)`, 'm').exec(tap) || [])[1] || 0);
+  return { pass: n('pass'), fail: n('fail'), skipped: n('skipped') };
+}
+
 /**
  * The SIT source of a deployed commit, when the worker has it: exported sources
  * live under SIT_SOURCES_DIR (default `<worker root>/sbe-src`, where the compose

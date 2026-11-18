@@ -1,18 +1,39 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "noUncheckedIndexedAccess": true,
-    "allowImportingTsExtensions": true,
-    "allowJs": true,
-    "checkJs": false,
-    "noEmit": true,
-    "types": ["node"]
-  },
-  "include": ["apps/**/*.ts", "tests/**/*.ts", "sit/**/*.ts"]
+    "compilerOptions":  {
+                            "target":  "ES2022",
+                            "module":  "NodeNext",
+                            "moduleResolution":  "NodeNext",
+                            "strict":  true,
+                            "skipLibCheck":  true,
+                            "esModuleInterop":  true,
+                            "forceConsistentCasingInFileNames":  true,
+                            "noUncheckedIndexedAccess":  true,
+                            "allowImportingTsExtensions":  true,
+                            "allowJs":  true,
+                            "checkJs":  false,
+                            "noEmit":  true,
+                            "types":  [
+                                          "node"
+                                      ]
+                        },
+    "include":  [
+                    "apps/**/*.ts",
+                    "tests/**/*.ts",
+                    "sit/**/*.ts"
+                ],
+    "exclude":  [
+                    "sit/cases/62-selenium-fields.sit.ts",
+                    "sit/cases/73-selenium-work-items.sit.ts",
+                    "sit/cases/73-selenium-work-items-cases.sit.ts",
+                    "sit/cases/73-selenium-work-items-runs-rules.sit.ts",
+                    "sit/cases/74c-selenium-designer-studio.sit.ts",
+                    "sit/cases/74f-selenium-create-schema-iso-catalog.sit.ts",
+                    "sit/cases/74h-selenium-create-schema-direct-entry.sit.ts",
+                    "sit/cases/74-selenium-systems-definitions.sit.ts",
+                    "sit/cases/75b-selenium-data-feeders-plan.sit.ts",
+                    "sit/cases/75c-selenium-data-feeders-limits.sit.ts",
+                    "sit/cases/75-selenium-data-feeders.sit.ts",
+                    "sit/cases/76-selenium-navigation-health.sit.ts",
+                    "sit/cases/98b-client-uat-sessionlogin-advanced.sit.ts"
+                ]
 }

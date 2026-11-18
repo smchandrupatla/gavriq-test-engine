@@ -71,7 +71,7 @@ describe('Test Engine self-test catalogue', () => {
       }
       for (const id of executionIds) {
         assert.ok(
-          (testCase.cleanupSteps || []).some((step: Step) => step.url === `{{engine}}/api/v1/executions/{{${id}}}/cancel`),
+          ((testCase.cleanupSteps || []) as Step[]).some((step: Step) => step.url === `{{engine}}/api/v1/executions/{{${id}}}/cancel`),
           `${testCase.key}: execution ${id} has no cleanup step`,
         );
       }

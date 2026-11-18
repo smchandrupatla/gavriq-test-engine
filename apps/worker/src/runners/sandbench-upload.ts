@@ -148,7 +148,7 @@ export async function runSandbenchUpload(page: Page, input: SandbenchUploadInput
     requireCondition(await download.text() === content, 'downloaded schema content differs from the per-run fixture');
     if (markdown !== undefined) {
       const mdSource = stored.files.find((file) => file.kind === 'markdown');
-      requireCondition(mdSource?.fileName === input.markdownFileName && mdSource.sha256 === createHash('sha256').update(markdown).digest('hex'), 'stored Markdown filename or SHA-256 differs from the original fixture');
+      requireCondition(mdSource?.fileName === input.markdownFileName && mdSource?.sha256 === createHash('sha256').update(markdown).digest('hex'), 'stored Markdown filename or SHA-256 differs from the original fixture');
       const mdDownload = await api(`${UPLOAD_PATH}/${encodeURIComponent(createdId)}/files/markdown`);
       requireCondition(await mdDownload.text() === markdown, 'downloaded Markdown content differs from the original fixture');
     }
