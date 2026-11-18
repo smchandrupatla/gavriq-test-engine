@@ -22,6 +22,7 @@ import { suitePlanRoutes } from './routes/suites-plans.js';
 import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
+import { schedulerRoutes } from './routes/scheduler.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
@@ -220,7 +221,7 @@ async function main() {
       if (method === 'POST' && (pathName === '/api/v1/executions' || pathName === '/api/v1/executions/run-all' || pathName === '/api/v1/sit-runs')) {
         return requirePermission('executions:run')(req, reply);
       }
-      if (pathName.startsWith('/api/v1/schedules') || pathName.startsWith('/api/v1/insights')) {
+      if (pathName.startsWith('/api/v1/schedule') || pathName.startsWith('/api/v1/insights')) {
         return requirePermission(method === 'GET' ? 'tests:read' : 'executions:run')(req, reply);
       }
       if ((method === 'POST' || method === 'PATCH') && (pathName.startsWith('/api/v1/defect') || pathName.endsWith('/ingest-defects'))) {
@@ -260,6 +261,7 @@ async function main() {
   await app.register(analyticsRoutes);
   await app.register(intelligenceRoutes);
   await app.register(scheduleRoutes);
+  await app.register(schedulerRoutes);
   await app.register(buildStatusRoutes);
   await app.register(uiRoutes);
   await app.register(triggerRoutes);
