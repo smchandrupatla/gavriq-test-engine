@@ -161,7 +161,8 @@ they appear. Typed input in browser steps is logged by length only. Bodies are c
 | Variable | Where | Default | Purpose |
 |----------|-------|---------|---------|
 | `EVIDENCE_GATE` | API | `report` | `enforce` applies the gate; `report` records what it would do without changing a status; `off` disables it |
-| `EVIDENCE_DIR` | API, worker | `./evidence` | Evidence store (API) and local scratch before upload (worker) |
+| `EVIDENCE_DIR` | worker | OS temp dir `gte-evidence` | Local scratch before upload; deleted after the engine stores the artefact in its database. Never inside the repository |
+| `LEGACY_EVIDENCE_DIR` | API | unset | One-time import of files an older engine left in a volume into the database |
 | `EVIDENCE_MAX_BYTES` | API | `5242880` | Largest single evidence file |
 | `TRIGGER_API_KEYS` | API | unset | `name:key,name:key`; a caller sending `X-Api-Key` acts as `app:<name>` with the `automation_agent` role. Keys under 16 characters are ignored |
 | `EVIDENCE_RETENTION_DAYS` | API | `0` | Evidence older than this is deleted daily (files first, then rows); `0` keeps everything. `POST /api/v1/evidence/prune {older_than_days}` runs it on demand |

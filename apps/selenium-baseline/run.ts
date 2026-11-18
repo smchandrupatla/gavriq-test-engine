@@ -13,7 +13,7 @@
  *   SELENIUM_TIMEOUT_MS   Timeout for operations (default: 15000)
  *   SELENIUM_BROWSER      Browser to use (default: chrome)
  *   SELENIUM_HEADLESS     Run headless (default: true)
- *   REPORTING_DIR         Directory for screenshots (default: ./evidence/selenium-baseline)
+ *   REPORTING_DIR         Directory for screenshots (default: <os temp>/gte-selenium-baseline)
  *   LOCATOR_STRATEGY      Default locator strategy (default: css)
  */
 

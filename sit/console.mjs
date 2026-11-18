@@ -8,6 +8,7 @@ import pg from "pg";
 import { ENV, SERVICES } from "./lib/env.ts";
 import { runAllCases, reportToTesthub, listCaseFiles } from "./lib/runner.mjs";
 import { TYPES, GROUPS, suiteOf, groupOf } from "./lib/catalog.mjs";
+import { evidenceDir } from "./lib/selenium/webdriver.mjs";
 import { extractTestCases } from "../dev/scripts/extract-tests.mjs";
 import { specificationCases, regressionCases, useCases, useCaseDocument } from './lib/use-cases.mjs';
 
@@ -309,8 +310,8 @@ const server = createServer(async (req, res) => {
     }
     if (pathname === "/api/runs" && req.method === "GET") return json(res, 200, { data: [...state.history].reverse() });
     if (pathname === "/api/evidence" && req.method === "GET") {
-      const evidenceDir = path.join(publicDir, "evidence");
-      const files = existsSync(evidenceDir) ? readdirSync(evidenceDir).sort() : [];
+      const dir = evidenceDir();
+      const files = existsSync(dir) ? readdirSync(dir).sort() : [];
       return json(res, 200, { data: files.map((name) => ({ name, path: `/sit/evidence/${name}` })) });
     }
     if (pathname.startsWith("/api/runs/") && req.method === "GET") {
@@ -336,7 +337,7 @@ const server = createServer(async (req, res) => {
     if (pathname.startsWith('/evidence/') && req.method === 'GET') {
       const name = decodeURIComponent(pathname.slice('/evidence/'.length));
       if (!/^[a-zA-Z0-9_.-]+\.(json|png)$/.test(name)) return json(res, 404, { error: 'Unknown evidence' });
-      const file = path.join(publicDir, 'evidence', name);
+      const file = path.join(evidenceDir(), name);
       if (!existsSync(file)) return json(res, 404, { error: 'Unknown evidence' });
       res.writeHead(200, { 'content-type': name.endsWith('.png') ? 'image/png' : 'application/json', 'x-content-type-options': 'nosniff' });
       return res.end(await readFile(file));

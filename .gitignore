@@ -7,8 +7,15 @@ coverage/
 data/*
 !data/iso20022-upload/
 secrets/
-# Runner output of a host worker; the engine's evidence store is the record
+# Test results, evidence and screenshots are never committed: the engine records them in its
+# database (evidence_blobs, execution_results). Runner scratch lives in the OS temp dir.
 evidence/
+sit/public/evidence/
+.tmp/*.png
+*-result.json
+*-results.json
+test-results/
+playwright-report/
 
 .docker-results/
 # Infra agent pid file (scripts/start-infra-agent.ps1); its logs are covered by *.log

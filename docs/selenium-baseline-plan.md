@@ -174,7 +174,7 @@ if (!result.passed) {
 | `SELENIUM_TIMEOUT_MS` | `15000` | Operation timeout |
 | `SELENIUM_BROWSER` | `chrome` | chrome / firefox / edge |
 | `SELENIUM_HEADLESS` | `true` | Headless mode |
-| `REPORTING_DIR` | `./evidence/selenium-baseline` | Screenshot output |
+| `REPORTING_DIR` | `<os temp>/gte-selenium-baseline` | Screenshot output |
 | `LOCATOR_STRATEGY` | `css` | css / xpath / id / name |
 | `MENU_CONTAINER_SELECTOR` | `.opsc-nav` | Sidebar nav container |
 | `MENU_ITEM_SELECTOR` | `.opsc-navitem` | Nav item selector |

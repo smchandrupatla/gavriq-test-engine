@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { chromium } from 'playwright';
 
 const browser = await chromium.launch();
@@ -8,7 +10,7 @@ page.on('pageerror', (err) => errors.push('pageerror: ' + err.message));
 
 await page.goto('http://127.0.0.1:18787/catalog', { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-await page.screenshot({ path: 'C:/GitHub/gavriq-test-engine/catalog-overview.png', fullPage: true });
+await page.screenshot({ path: path.join(os.tmpdir(), 'catalog-overview.png'), fullPage: true });
 
 const sideNavCount = await page.locator('#sideNav .nav-item').count();
 console.log('nav items:', sideNavCount);
