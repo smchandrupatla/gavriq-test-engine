@@ -540,6 +540,17 @@ CREATE TABLE IF NOT EXISTS evidence (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The bytes behind an evidence row (screenshots, transcripts, logs). The database is the
+-- only store: nothing is written to the repository or to a volume.
+CREATE TABLE IF NOT EXISTS evidence_blobs (
+  storage_key  TEXT PRIMARY KEY,
+  content      BYTEA NOT NULL,
+  content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size_bytes   BIGINT NOT NULL,
+  sha256       TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Evidence is always read per result (run screen, evidence gate, reports).
 CREATE INDEX IF NOT EXISTS idx_evidence_result ON evidence(execution_result_id);
 

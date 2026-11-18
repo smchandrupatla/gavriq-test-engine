@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export function seleniumUrl() {
@@ -6,7 +7,8 @@ export function seleniumUrl() {
 }
 
 export function evidenceDir() {
-  return process.env.SIT_EVIDENCE_DIR || path.resolve(process.cwd(), "sit/public/evidence");
+  // Scratch outside the repository; the engine's database is the record.
+  return process.env.SIT_EVIDENCE_DIR || process.env.EVIDENCE_DIR || path.join(os.tmpdir(), "gte-evidence");
 }
 
 export async function seleniumReady(timeoutMs = 1500) {

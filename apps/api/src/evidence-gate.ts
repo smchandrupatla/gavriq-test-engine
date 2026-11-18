@@ -18,7 +18,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { query } from './db/client.js';
-import { hashEvidence, statEvidence } from './evidence-store.js';
+import { statEvidence } from './evidence-store.js';
 
 export type GateMode = 'enforce' | 'report' | 'off';
 
@@ -76,12 +76,12 @@ interface ClaimedEvidence {
   [k: string]: unknown;
 }
 
-export function evaluateEvidence(status: string, method: string, claimed: ClaimedEvidence[]): { verdict: EvidenceVerdict; verified: ClaimedEvidence[] } {
+export async function evaluateEvidence(status: string, method: string, claimed: ClaimedEvidence[]): Promise<{ verdict: EvidenceVerdict; verified: ClaimedEvidence[] }> {
   const verified: ClaimedEvidence[] = [];
   const unverified: string[] = [];
   for (const ev of claimed) {
     const key = String(ev?.storage_key || '');
-    const found = key ? statEvidence(key) : null;
+    const found = key ? await statEvidence(key) : null;
     if (!found) {
       unverified.push(key || '(no storage_key)');
       continue;
@@ -89,7 +89,7 @@ export function evaluateEvidence(status: string, method: string, claimed: Claime
     verified.push({
       ...ev,
       size_bytes: found.size,
-      metadata: { ...(ev.metadata || {}), verified: true, sha256: hashEvidence(key) },
+      metadata: { ...(ev.metadata || {}), verified: true, sha256: found.sha256 },
     });
   }
 
@@ -187,7 +187,7 @@ export function registerEvidenceGate(app: FastifyInstance) {
         : { rows: [] as any[] };
       const method = effectiveMethod(tc.rows[0]?.execution_method, tc.rows[0]?.script);
       const status = String(b.status || '');
-      const { verdict, verified } = evaluateEvidence(status, method, Array.isArray(b.evidence) ? b.evidence : []);
+      const { verdict, verified } = await evaluateEvidence(status, method, Array.isArray(b.evidence) ? b.evidence : []);
 
       b.evidence = verified;
       b.metrics = { ...(b.metrics || {}), evidence_gate: { mode, ...verdict } };
