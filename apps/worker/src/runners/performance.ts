@@ -40,6 +40,20 @@ export interface PerfRunInput {
   signal?: AbortSignal;
 }
 
+/** One request as it happened; 	_ms is its start, relative to the start of the run. */
+export interface Sample { t_ms: number; latency_ms: number; ok: boolean; status: number }
+
+/** Requests, errors and latency of one window of the run (default one second). */
+export interface TimeBucket {
+  t_s: number;
+  requests: number;
+  errors: number;
+  latency_avg_ms: number;
+  latency_p50_ms: number;
+  latency_p95_ms: number;
+  latency_max_ms: number;
+}
+
 export interface PerfRunResult {
   status: 'passed' | 'failed' | 'error';
   message: string;
@@ -60,12 +74,43 @@ export interface PerfRunResult {
     latency_p95_ms: number;
     latency_p99_ms: number;
   };
+  /** Per-window series the console graphs; samples are every request sent. */
+  timeseries: TimeBucket[];
+  samples: Sample[];
 }
 
 function percentile(sorted: number[], p: number): number {
   if (!sorted.length) return 0;
   const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
   return sorted[Math.max(0, idx)] ?? 0;
+}
+
+/** Group samples into fixed windows (default 1s) keyed by when each request started. */
+export function bucketize(samples: Sample[], bucketMs = 1000): TimeBucket[] {
+  if (!samples.length) return [];
+  const byBucket = new Map<number, Sample[]>();
+  for (const s of samples) {
+    const b = Math.floor(s.t_ms / bucketMs);
+    const list = byBucket.get(b);
+    if (list) list.push(s);
+    else byBucket.set(b, [s]);
+  }
+  const last = Math.max(...byBucket.keys());
+  const out: TimeBucket[] = [];
+  for (let b = 0; b <= last; b++) {
+    const list = byBucket.get(b) || [];
+    const lat = list.map((s) => s.latency_ms).sort((x, y) => x - y);
+    out.push({
+      t_s: (b * bucketMs) / 1000,
+      requests: list.length,
+      errors: list.filter((s) => !s.ok).length,
+      latency_avg_ms: lat.length ? Math.round(lat.reduce((a, v) => a + v, 0) / lat.length) : 0,
+      latency_p50_ms: percentile(lat, 50),
+      latency_p95_ms: percentile(lat, 95),
+      latency_max_ms: lat[lat.length - 1] || 0,
+    });
+  }
+  return out;
 }
 
 export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult> {
@@ -83,6 +128,7 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
   const timeout = (input.timeoutSeconds || 10) * 1000;
 
   const latencies: number[] = [];
+  const samples: Sample[] = [];
   let success = 0;
   let failed = 0;
   // First failure seen, so a fully failing run says why (unreachable target,
@@ -119,13 +165,17 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
         await res.arrayBuffer().catch(() => undefined);
         const ms = Date.now() - t0;
         latencies.push(ms);
-        if (statusOk(res.status)) success++;
+        const ok = statusOk(res.status);
+        samples.push({ t_ms: t0 - start, latency_ms: ms, ok, status: res.status });
+        if (ok) success++;
         else {
           failed++;
           firstError ||= `HTTP ${res.status}`;
         }
       } catch (err) {
-        latencies.push(Date.now() - t0);
+        const ms = Date.now() - t0;
+        latencies.push(ms);
+        samples.push({ t_ms: t0 - start, latency_ms: ms, ok: false, status: 0 });
         failed++;
         const e = err as Error & { cause?: { code?: string; message?: string } };
         firstError ||= [e.message, e.cause?.code || e.cause?.message].filter(Boolean).join(': ');
@@ -137,6 +187,7 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
 
   const total = success + failed;
   const duration = Date.now() - start;
+  const timeseries = bucketize(samples, duration > 120_000 ? 5000 : 1000);
   const sorted = [...latencies].sort((a, b) => a - b);
   const metrics = {
     total_requests: total,
@@ -169,6 +220,8 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
       duration_ms: duration,
       classification: unreachable ? 'network_failure' : 'environment_problem',
       metrics,
+      timeseries,
+      samples,
       remarks: [told[0]!, `No request succeeded (${firstError || 'no response'}) — the target is ${unreachable ? 'unreachable' : 'rejecting the probe'}, so no timing could be measured.`],
     };
   }
@@ -192,6 +245,8 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
       duration_ms: duration,
       classification: 'assertion_failure',
       metrics,
+      timeseries,
+      samples,
       remarks: [...told, `Result: outside the agreed limits — ${violations.join('; ')}.`],
     };
   }
@@ -201,6 +256,8 @@ export async function runPerformance(input: PerfRunInput): Promise<PerfRunResult
     message: `perf ${method} ${input.url ? url : path}: ${success}/${total} ok${soakMs ? ` over ${Math.round(duration / 1000)}s` : ''}, p95=${metrics.latency_p95_ms}ms, rps=${metrics.rps}`,
     duration_ms: duration,
     metrics,
+    timeseries,
+    samples,
     remarks: [...told, 'Result: within the agreed limits.'],
   };
 }

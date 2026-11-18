@@ -263,7 +263,7 @@ export function autoAttachCleanups<T extends { key: string; method: string; step
       const only2xx = expected.every((x: number) => x && x >= 200 && x < 300);
       if (!only2xx) continue;
       for (const pat of AUTO_CLEANUP_PATTERNS) {
-        if (method !== pat.method || !pat.urlRegex.test(path)) continue;
+        if (method !== pat.method || !path || !pat.urlRegex.test(path)) continue;
         if (c.atomicityNote && path !== '/api/v1/runs') continue; // preserve author-owned cleanup for other resources
         if (path === '/api/v1/runs' && s.save) {
           // Sand Bench returns runId, not id. Keep authored variable names so
@@ -334,7 +334,7 @@ export function annotateAppendOnlyCases<T extends { key: string; method: string;
       if (m === 'GET') return false;
       const statuses = Array.isArray(s.expected_status) ? s.expected_status : [s.expected_status ?? 200];
       if (!statuses.some((status: number) => status >= 200 && status < 300)) return false;
-      const url = String(s.url || '').replace(/^\{\{[^}]+\}\}/, '').split('?')[0];
+      const url = String(s.url || '').replace(/^\{\{[^}]+\}\}/, '').split('?')[0] ?? '';
       return APPEND_ONLY_WRITE_PATHS.some((p) => url === p || url.startsWith(`${p}/`) || url.startsWith(`${p}?`));
     });
     if (writesAppendOnly) {

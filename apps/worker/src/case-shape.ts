@@ -43,7 +43,7 @@ export function validateCaseShape(tc: any, vars: Record<string, string>): string
   const collectRefs = (node: unknown, out: Set<string>): void => {
     if (node == null) return;
     if (typeof node === 'string') {
-      for (const m of node.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)) out.add(m[1]);
+      for (const m of node.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)) out.add(m[1]!);
       return;
     }
     if (Array.isArray(node)) { for (const x of node) collectRefs(x, out); return; }

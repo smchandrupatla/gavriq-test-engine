@@ -13,10 +13,11 @@
  *   await runBaseline({ workflowChecks: [...] });
  */
 
-import { By, type until } from 'selenium-webdriver';
+import { By, until } from 'selenium-webdriver';
 import type { WebDriver } from 'selenium-webdriver';
 import type { SeleniumBaselineConfig } from './config.js';
 import { ScreenValidator } from './screen-validator.js';
+import { MenuNavigator } from './menu-navigator.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -255,8 +256,8 @@ export async function runWorkflowChecks(
         const body = (await pollDb(
           dbViewerBase,
           wf.dbCheckPath,
-          (b: { data?: Array<Record<string, unknown>> }) =>
-            Boolean(b.data?.some((row) => row[wf.dbRowMatchField] !== undefined)),
+          (raw: unknown) =>
+            Boolean((raw as { data?: Array<Record<string, unknown>> }).data?.some((row) => row[wf.dbRowMatchField] !== undefined)),
           pollTimeout,
         )) as { data?: Array<Record<string, unknown>> };
         dbOk = Boolean(body.data?.some((row) => row[wf.dbRowMatchField] !== undefined));

@@ -15,6 +15,8 @@ import { runSandbenchUpload } from './sandbench-upload.js';
 
 export interface PlaywrightStep {
   action: string;
+  /** assert_no_horizontal_overflow: pixels of overflow tolerated (default 2). */
+  max_overflow_px?: number;
   selector?: string;
   value?: string;
   expected?: string;
@@ -463,7 +465,7 @@ async function execute(input: PlaywrightRunInput, log: RunLog): Promise<Playwrig
                 if (typeof raw.password === 'string') return substitute(raw.password, vars);
                 if (typeof raw.expected === 'string') {
                   const m = raw.expected.match(/\{\{\s*([\w.-]+)\s*\}\}/);
-                  if (m) return vars[m[1]] ?? substitute(`{{${m[1]}}}`, vars);
+                  if (m) return vars[m[1]!] ?? substitute(`{{${m[1]}}}`, vars);
                   return substitute(raw.expected, vars);
                 }
                 return vars.password || '';
