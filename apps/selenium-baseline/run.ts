@@ -63,6 +63,7 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
   const reporter = new FailureReporter();
   const summaryGen = new TestRunSummaryGenerator();
   let totalTested = 0;
+  let workflowResults: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }> | undefined;
 
   console.log('=== Selenium Baseline Framework ===');
   console.log(`Target URL: ${config.baseUrl}`);
@@ -148,7 +149,6 @@ export async function runBaseline(options?: BaselineRunOptions): Promise<Baselin
     }
 
     // 4. Run workflow checks (DB-persistence)
-    let workflowResults: Array<{ name: string; toastOk: boolean; dbOk: boolean; fixedFieldsOk: boolean; error: string | null }> | undefined;
     if (options?.workflowChecks?.length) {
       console.log('\n=== Workflow Checks ===');
       const wfResults = await runWorkflowChecks(driver, config, { workflows: options.workflowChecks });

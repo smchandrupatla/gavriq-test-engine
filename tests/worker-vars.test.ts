@@ -23,8 +23,8 @@ describe('worker buildVars — per-worker user pool pin', () => {
     const fn = WORKER.match(/function workerPoolSlot\(workerId: string, mod: number\): number \{([\s\S]*?)\n\}/);
     assert.ok(fn, 'workerPoolSlot must be present');
     // The 32-bit djb2 variant used by catalog/user-pool.ts.
-    assert.match(fn![1], /\(\(h << 5\) - h \+ workerId\.charCodeAt\(i\)\) \| 0/);
-    assert.match(fn![1], /Math\.abs\(h\) % mod/);
+    assert.match(fn![1]!, /\(\(h << 5\) - h \+ workerId\.charCodeAt\(i\)\) \| 0/);
+    assert.match(fn![1]!, /Math\.abs\(h\) % mod/);
   });
 
   it('exposes {{worker_id}} / {{worker_slot}} / {{worker_user}} / {{worker_pass}} / {{worker_admin}} to runners', () => {

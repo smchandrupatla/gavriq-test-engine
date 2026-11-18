@@ -46,6 +46,8 @@ describe('defect loop API', { skip: !BASE && 'set ENGINE_IT_BASE to run' }, () =
   it('files, fixes, reruns and verifies a defect; refuses shortcuts', async () => {
     const apps = await call('GET', '/api/v1/applications');
     const app = apps.body.data.find((a: any) => a.key === 'sand-bench');
+    // Reports from an application that does not auto-approve are held until a person sends them.
+    assert.equal((await call('PUT', '/api/v1/defect-log/settings/sand-bench', { auto_approve: true })).status, 200);
     const mk = async (k: string) => (await call('POST', '/api/v1/test-cases', {
       key: `IT-${tag}-${k}`, name: `Defect loop ${k}`, application_id: app.id, test_type: 'api',
     })).body.data.id as string;
@@ -53,7 +55,7 @@ describe('defect loop API', { skip: !BASE && 'set ENGINE_IT_BASE to run' }, () =
     const bad = await mk('bad');
 
     // 1. A failing run files a report with one defect.
-    const q = await call('POST', '/api/v1/executions', { test_case_ids: [good, bad] });
+    const q = await call('POST', '/api/v1/executions', { test_case_ids: [good, bad], metadata: { application_key: 'sand-bench' } });
     assert.equal(q.status, 202);
     const done = await runAsWorker({ [bad]: 'failed' });
     assert.equal(done.body.defects.outcome, 'report');
@@ -111,7 +113,7 @@ describe('defect loop API', { skip: !BASE && 'set ENGINE_IT_BASE to run' }, () =
 
     // 6. The same failure later is a regression: a new report with a new defect
     //    linked to the verified one; the verified report keeps its record.
-    await call('POST', '/api/v1/executions', { test_case_ids: [bad] });
+    await call('POST', '/api/v1/executions', { test_case_ids: [bad], metadata: { application_key: 'sand-bench' } });
     const regress = await runAsWorker({ [bad]: 'failed' });
     assert.equal(regress.body.defects.outcome, 'report');
     assert.equal(regress.body.defects.regressed, 1);
@@ -127,7 +129,7 @@ describe('defect loop API', { skip: !BASE && 'set ENGINE_IT_BASE to run' }, () =
     assert.equal(old.defects[0].status, 'verified');
 
     // A further failure of the same signature only counts against the new defect.
-    await call('POST', '/api/v1/executions', { test_case_ids: [bad] });
+    await call('POST', '/api/v1/executions', { test_case_ids: [bad], metadata: { application_key: 'sand-bench' } });
     const again2 = await runAsWorker({ [bad]: 'failed' });
     assert.equal(again2.body.defects.outcome, 'recurring_only');
 

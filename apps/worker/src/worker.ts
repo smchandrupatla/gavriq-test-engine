@@ -360,7 +360,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       });
       return {
         status: r.status === 'skipped' ? 'skipped' : r.status,
-        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
         duration_ms: r.duration_ms,
         message: r.message,
         remarks: r.remarks,
@@ -417,7 +417,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       });
       return {
         status: r.status,
-        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
         duration_ms: r.duration_ms,
         message: r.message,
         remarks: r.remarks,
@@ -440,7 +440,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
       });
       return {
         status: r.status,
-        verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+        verdict: r.status === 'passed' ? 'pass' : 'fail',
         duration_ms: r.duration_ms,
         message: r.message,
         remarks: r.remarks,
@@ -497,7 +497,7 @@ async function executeCase(tc: any, baseUrl: string, env: any, headlessOverride?
         message: r.message,
         remarks: r.remarks,
         classification: r.classification || null,
-        metrics: r.metrics,
+        metrics: { ...r.metrics, timeseries: r.timeseries },
         evidence: [],
       };
     });
@@ -677,7 +677,7 @@ async function runJob(execution: any) {
           const timedOut = groupSignal.aborted && r.status !== 'passed' && r.status !== 'skipped';
           const next = await report(g.id, g.tc, started, {
             status: timedOut ? 'timed_out' : r.status === 'skipped' ? 'skipped' : r.status,
-            verdict: r.status === 'passed' ? 'pass' : r.status === 'skipped' ? undefined : 'fail',
+            verdict: r.status === 'passed' ? 'pass' : 'fail',
             duration_ms: r.duration_ms,
             message: timedOut ? `Timed out: the SIT file ${sit.file} was stopped after ${Math.round(limitMs / 60_000)} minute(s) before this test finished` : r.message,
             remarks: [
