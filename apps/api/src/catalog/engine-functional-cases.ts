@@ -441,6 +441,17 @@ C.push(
       GET('/api/v1/evidence/file?key=evidence%2Fno-such-file.png', { expected_status: 404, expect_json: [{ path: 'error', equals: 'File not found' }, { path: 'key', equals: 'no-such-file.png' }], description: 'unknown key' }),
       GET('/api/v1/evidence/file', { expected_status: 404, description: 'no key' }),
     ],
+  }),
+  api({
+    key: 'TE-API-EVIDENCE-IN-DATABASE', name: 'Evidence is kept in the database and read back unchanged',
+    objective: 'Confirm an artefact handed to the engine is stored in its database and comes back byte-for-byte, so no evidence depends on a file on disk or in the repository.',
+    description: 'POST /api/v1/evidence/upload (preflight probe, one fixed file name that is overwritten each time, the same as a worker start-up check) stores the bytes in the evidence_blobs table; GET /api/v1/evidence/file must return exactly those bytes with a safe content type, and a key that tries to escape the store must be refused.',
+    severity: 'high',
+    steps: [
+      POST('/api/v1/evidence/upload', { body: { probe: true, name: 'selftest-database-store.txt', evidence_type: 'log', content_type: 'text/plain', content_base64: 'ZXZpZGVuY2UgaXMgc3RvcmVkIGluIHRoZSBkYXRhYmFzZQ==' }, expected_status: 201, expect_json: [{ path: 'data.storage_key', equals: 'evidence/_probe/selftest-database-store.txt' }, { path: 'data.size_bytes', equals: 34 }], description: 'hand the engine a small artefact' }),
+      GET('/api/v1/evidence/file?key=evidence%2F_probe%2Fselftest-database-store.txt', { expected_status: 200, expected_body_contains: 'evidence is stored in the database', description: 'read it back from the database, unchanged' }),
+      GET('/api/v1/evidence/file?key=evidence%2F..%2F..%2Fpackage.json', { expected_status: 404, description: 'a key that escapes the store is refused' }),
+    ],
   })
 );
 
