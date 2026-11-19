@@ -169,6 +169,15 @@ describe('http runner', () => {
       } finally { createdRecords.delete(id); }
     }
   });
+  it('attaches no Sand Bench run cleanup to a case that starts runs on the engine itself', () => {
+    const fixture = { key: 'engine-run', method: 'http', cleanupSteps: [] as any[], steps: [
+      { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', body: { dry_run: true }, expected_status: 200 },
+    ] };
+    autoAttachCleanups([fixture]);
+    assert.equal(fixture.cleanupSteps.length, 0, 'the engine has no run-delete route and no {{api}}/{{token}}');
+    assert.deepEqual(Object.keys((fixture.steps[0] as any).save ?? {}), [], 'the step must not gain a save either');
+    assert.doesNotMatch(JSON.stringify(fixture), /\{\{(api|token)\}\}/);
+  });
   it('requires all event fields to match one entry instead of unrelated rows', async () => {
     const expect_json = [{ path: 'data', some: { eventCode: 'wanted', 'context.assetId': '{{ownedId}}' } }];
     const vars = { ownedId: 'owned' };

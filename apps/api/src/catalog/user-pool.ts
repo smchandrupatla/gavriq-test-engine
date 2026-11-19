@@ -265,6 +265,10 @@ export function autoAttachCleanups<T extends { key: string; method: string; step
       for (const pat of AUTO_CLEANUP_PATTERNS) {
         if (method !== pat.method || !path || !pat.urlRegex.test(path)) continue;
         if (c.atomicityNote && path !== '/api/v1/runs') continue; // preserve author-owned cleanup for other resources
+        // The Sand Bench run cleanup (DELETE {{api}}/api/v1/runs/…, Bearer {{token}}) does not exist
+        // on the engine: it has no run-delete route, and its environments define neither api nor token.
+        // Engine cases own and cancel their runs themselves, so there is nothing to attach.
+        if (path === '/api/v1/runs' && /^\{\{engine\}\}/.test(url)) continue;
         if (path === '/api/v1/runs' && s.save) {
           // Sand Bench returns runId, not id. Keep authored variable names so
           // later steps still address the record created by this case.
