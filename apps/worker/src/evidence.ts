@@ -12,7 +12,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import os from 'node:os';
 import path from 'node:path';
 
-export const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.resolve(process.cwd(), 'evidence');
+// Scratch only, and never inside the repository: artefacts are uploaded to the engine's
+// database and the local copy is deleted.
+export const EVIDENCE_DIR = process.env.EVIDENCE_DIR || path.join(os.tmpdir(), 'gte-evidence');
 
 export interface EvidenceItem {
   type: string;

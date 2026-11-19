@@ -39,7 +39,9 @@ services:
       RBAC_ENABLED: "false"
       AUTO_SEED: "true"
       TARGET_BASE_URL: ${TARGET_BASE_URL:-http://host.docker.internal:8001}
-      EVIDENCE_DIR: /data/evidence
+      # Evidence bytes live in the database. This volume is only read once, to import
+      # files an older engine left behind; it is never written.
+      LEGACY_EVIDENCE_DIR: /data/evidence
       # Evidence gate: enforce | report | off (docs/RUN-TRIGGER-AND-EVIDENCE.md)
       EVIDENCE_GATE: ${EVIDENCE_GATE:-report}
       EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-0}
@@ -73,7 +75,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - test-engine-evidence:/data/evidence
+      - test-engine-evidence:/data/evidence:ro
       - sit-console-data:/data
       - sandbench-logs:/var/log/sandbench
       - type: bind
@@ -136,7 +138,8 @@ services:
       CHROME_BIN: /usr/bin/chromium
       CHROMEDRIVER_PATH: /usr/bin/chromedriver
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      EVIDENCE_DIR: /data/evidence
+      # Scratch only: artefacts are uploaded to the engine's database, then deleted.
+      EVIDENCE_DIR: /tmp/gte-evidence
       # Sand Bench demo credentials. The DB stores which env var name holds a
       # secret (`secret_env`), never the secret itself; the worker resolves it
       # from its own process environment. Dev stack ships 'password'; override
@@ -148,7 +151,6 @@ services:
       # lane, set by deploy/staging/user-pool.mjs. Fictional, staging only.
       SB_STAGING_POOL_PASSWORD: ${SB_STAGING_POOL_PASSWORD:-SandBench-Pool-Stage-01}
     volumes:
-      - test-engine-evidence:/data/evidence
       # The same exported sources: a SIT case runs the file of the commit deployed
       # on its environment (apps/worker/src/runners/sit.ts sitSourceRoot). Mounted
       # under /app so the files resolve their packages from the worker's node_modules.

@@ -1,26 +1,13 @@
 /**
  * Evidence listing, upload, and file serve from the evidence store.
  * Workers upload artefacts per execution (storage_key evidence/<execution-id>/<file>);
- * legacy flat keys (evidence/fail-….png, written into a shared volume) still resolve.
+ * the bytes are stored in the database (evidence_blobs), never on disk.
  */
 import type { FastifyInstance } from 'fastify';
-import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { query } from '../db/client.js';
-import { EVIDENCE_RETENTION_DAYS, evidenceUrl, pruneEvidence, saveEvidence, statEvidence } from '../evidence-store.js';
+import { EVIDENCE_RETENTION_DAYS, evidenceUrl, pruneEvidence, readEvidence, saveEvidence } from '../evidence-store.js';
 import { audit } from '../middleware/rbac.js';
-
-const CONTENT_TYPES: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.json': 'application/json',
-  '.txt': 'text/plain; charset=utf-8',
-  '.log': 'text/plain; charset=utf-8',
-  '.tap': 'text/plain; charset=utf-8',
-  '.html': 'text/plain; charset=utf-8', // never rendered: captured pages are served as source
-};
 
 export async function evidenceRoutes(app: FastifyInstance) {
   // Evidence for one execution result
@@ -83,7 +70,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
     }
 
     try {
-      const saved = saveEvidence(folder, name, Buffer.from(encoded, 'base64'));
+      const saved = await saveEvidence(folder, name, Buffer.from(encoded, 'base64'));
       if (typeof b.sha256 === 'string' && b.sha256 && b.sha256 !== saved.sha256) {
         return reply.status(422).send({ error: 'sha256 mismatch — upload corrupted', expected: b.sha256, actual: saved.sha256 });
       }
@@ -106,14 +93,13 @@ export async function evidenceRoutes(app: FastifyInstance) {
   app.get('/api/v1/evidence/file', async (req, reply) => {
     const q = req.query as { key?: string };
     const key = q.key || '';
-    const found = key ? statEvidence(key) : null;
+    const found = key ? await readEvidence(key) : null;
     if (!found) {
       return reply.status(404).send({ error: 'File not found', key: path.basename(key) });
     }
-    const type = CONTENT_TYPES[path.extname(found.path).toLowerCase()] || 'application/octet-stream';
     return reply
       .header('x-content-type-options', 'nosniff')
-      .type(type)
-      .send(createReadStream(found.path));
+      .type(found.contentType)
+      .send(found.data);
   });
 }

@@ -9,9 +9,8 @@
  * all three, so the numbers never disagree between the preview and the file.
  */
 import type { FastifyInstance } from 'fastify';
-import { readFileSync } from 'node:fs';
 import { query } from '../db/client.js';
-import { statEvidence } from '../evidence-store.js';
+import { readEvidence } from '../evidence-store.js';
 import { escapeHtml as esc, renderHtmlToPdf } from '../report-pdf.js';
 
 const FAILED = ['failed', 'error', 'timed_out'];
@@ -314,19 +313,27 @@ function stepsHtml(steps: unknown): string {
   }).join('')}</ol>`;
 }
 
-function embedImage(storageKey: string, budget: { images: number; bytes: number }): string | null {
-  const found = statEvidence(storageKey);
-  if (!found) return null;
-  if (budget.images >= MAX_EMBEDDED_IMAGES || budget.bytes + found.size > MAX_EMBEDDED_BYTES) return null;
-  const ext = storageKey.toLowerCase().split('.').pop() || 'png';
-  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
-  budget.images++; budget.bytes += found.size;
-  return `data:${mime};base64,${readFileSync(found.path).toString('base64')}`;
+/** Screenshots a report embeds, read from the database up front (the HTML builder is synchronous). */
+export async function loadReportImages(report: Report): Promise<Map<string, string>> {
+  const images = new Map<string, string>();
+  if (!report.meta.filters.include_evidence) return images;
+  const budget = { images: 0, bytes: 0 };
+  for (const c of report.cases) for (const x of c.runs) for (const ev of x.evidence) {
+    const isImg = String(ev.content_type || '').startsWith('image') || /\.(png|jpe?g|webp)$/i.test(ev.storage_key);
+    if (!isImg || images.has(ev.storage_key)) continue;
+    if (budget.images >= MAX_EMBEDDED_IMAGES) return images;
+    const found = await readEvidence(ev.storage_key);
+    if (!found || budget.bytes + found.data.length > MAX_EMBEDDED_BYTES) continue;
+    const ext = ev.storage_key.toLowerCase().split('.').pop() || 'png';
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+    budget.images++; budget.bytes += found.data.length;
+    images.set(ev.storage_key, `data:${mime};base64,${found.data.toString('base64')}`);
+  }
+  return images;
 }
 
-export function reportToHtml(report: Report): string {
+export function reportToHtml(report: Report, images: Map<string, string> = new Map()): string {
   const m = report.meta, d = report.dashboard;
-  const budget = { images: 0, bytes: 0 };
   const kpi = (label: string, value: unknown, sub?: string, cls = '') =>
     `<div class="kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value ${cls}">${esc(value)}</div>${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ''}</div>`;
 
@@ -378,7 +385,7 @@ export function reportToHtml(report: Report): string {
           }${
             m.filters.include_evidence && x.evidence.length ? `<tr><td colspan="6"><div class="evidence">${x.evidence.map((ev) => {
               const isImg = String(ev.content_type || '').startsWith('image') || /\.(png|jpe?g|webp)$/i.test(ev.storage_key);
-              const src = isImg ? embedImage(ev.storage_key, budget) : null;
+              const src = isImg ? images.get(ev.storage_key) ?? null : null;
               return src
                 ? `<figure><img src="${src}" alt="${esc(ev.type)}"><figcaption>${esc(ev.type)}</figcaption></figure>`
                 : `<span class="tag">${esc(ev.type)}${ev.size_bytes ? ' · ' + esc(Math.round(ev.size_bytes / 1024)) + ' KB' : ''}${isImg ? ' (image not available)' : ''}</span>`;
@@ -476,7 +483,7 @@ export async function reportRoutes(app: FastifyInstance) {
         .send(reportToCsv(report));
     }
     if (format === 'pdf') {
-      const pdf = await renderHtmlToPdf(reportToHtml(report), { footerLabel: `${report.meta.title} · ${report.meta.ref} · GAVRIQ Test Engine` });
+      const pdf = await renderHtmlToPdf(reportToHtml(report, await loadReportImages(report)), { footerLabel: `${report.meta.title} · ${report.meta.ref} · GAVRIQ Test Engine` });
       return reply
         .header('content-type', 'application/pdf')
         .header('content-disposition', `attachment; filename="${base}.pdf"`)
