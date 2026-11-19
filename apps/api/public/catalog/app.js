@@ -1612,6 +1612,22 @@ function renderHistory(){
   }
   el('content').innerHTML=body;
 }
+// One card per performance case in the run: headline numbers plus response-time and throughput graphs
+// from the per-window series the worker records in metrics.timeseries (drawn by drawCharts()).
+function perfCardsHtml(r,names){
+  return (r.results||[]).filter(x=>x.metrics&&Array.isArray(x.metrics.timeseries)&&x.metrics.timeseries.length).map((x,i)=>{
+    const m=x.metrics,c=names.get(x.test_case_id)||{name:x.test_case_name||x.test_case_id};
+    const id='perf'+i+'-'+state.charts.size;
+    state.charts.set(id+'l',{type:'latency',runs:m.timeseries});
+    state.charts.set(id+'t',{type:'throughput',runs:m.timeseries});
+    const ms=v=>v==null?'—':esc(v)+' ms';
+    return `<div class="card"><div class="card-head"><h2>Performance · ${esc(c.name)}</h2><span class="muted small">${esc(m.total_requests)} requests · ${esc(m.rps)} per second · ${esc(m.error_rate_pct)}% failed · typical ${ms(m.latency_p50_ms)} · slowest 5% ${ms(m.latency_p95_ms)}</span></div>
+      <div class="hp-charts">
+        <figure class="viz"><figcaption><span>Response time over the run</span><span class="legend"><span><i style="background:var(--viz-rate)"></i>Typical (p50)</span><span><i style="background:#e0ab52"></i>Slowest 5% (p95)</span></span></figcaption><div class="chart" data-chart="${id}l"></div></figure>
+        <figure class="viz"><figcaption><span>Requests per second</span><span class="legend"><span><i style="background:var(--viz-pass)"></i>Succeeded</span><span><i style="background:var(--viz-fail)"></i>Failed</span></span></figcaption><div class="chart" data-chart="${id}t"></div></figure>
+      </div></div>`;
+  }).join('');
+}
 function renderRun(){
   const r=state.run;
   el('viewTitle').textContent='Run';
@@ -1694,6 +1710,7 @@ function renderRun(){
       </div></div>
     ${planCard}
     ${TB.remarksHtml(r)}
+    ${perfCardsHtml(r,names)}
     <div class="card"><div class="card-head"><h2>Evidence</h2><span class="muted small">${plural(evidenceList.length,'item')} · ${active&&!stalled?`updates every ${POLL_ACTIVE/1000}s`:active?`checking every ${POLL_IDLE/1000}s`:'final'}</span></div><div class="hp-body">${gallery}</div></div>`;
 }
 function renderBuilds(){
