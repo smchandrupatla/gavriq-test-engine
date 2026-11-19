@@ -180,6 +180,42 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
   return { status: 202, body: { data: exec.rows[0], message: 'Execution queued from schedule' } };
 }
 
+/**
+ * Fire one schedule, optionally claiming the occurrence first.
+ *
+ * `claiming` makes the claim a compare-and-set on last_run_at against
+ * `expectedLastRunAt` (what the caller saw when it judged the schedule due), so
+ * the in-process ticker, a standalone poller and overlapping polls queue one
+ * run between them; the losers get `claimed: false` and nothing is queued. A
+ * person pressing "Run now" does not claim and always fires.
+ */
+export async function claimAndFire(
+  s: any,
+  opts: { requested_by: string; environment_id?: string | null; claiming: boolean; expectedLastRunAt?: string | Date | null }
+): Promise<{ claimed: boolean; status: number; body: any; queued?: any }> {
+  const expected = opts.claiming ? opts.expectedLastRunAt ?? null : null;
+  if (opts.claiming) {
+    // JSON carries milliseconds; the column holds microseconds.
+    const claimed = await query(
+      `UPDATE schedules SET last_run_at = now()
+       WHERE id = $1 AND date_trunc('milliseconds', last_run_at) IS NOT DISTINCT FROM date_trunc('milliseconds', $2::timestamptz)
+       RETURNING id`,
+      [s.id, expected]
+    );
+    if (!claimed.rows[0]) return { claimed: false, status: 409, body: { error: 'Schedule was already fired for this occurrence', code: 'already_fired' } };
+  }
+  const outcome = await fire(s, {
+    requested_by: opts.requested_by,
+    trigger_source: 'schedule',
+    environment_id: opts.environment_id ?? null,
+  });
+  // Nothing was queued: give the claim back so the occurrence is not silently consumed.
+  if (opts.claiming && outcome.status !== 202) {
+    await query(`UPDATE schedules SET last_run_at = $2::timestamptz WHERE id = $1`, [s.id, expected]);
+  }
+  return { claimed: true, ...outcome };
+}
+
 export async function scheduleRoutes(app: FastifyInstance) {
   const tz = defaultTimeZone();
 
@@ -314,27 +350,12 @@ export async function scheduleRoutes(app: FastifyInstance) {
       if (environmentId === undefined && req.body?.environment) return reply.status(404).send({ error: 'Environment not found' });
 
       const claiming = !!req.body && 'expected_last_run_at' in req.body;
-      const expected = claiming ? req.body!.expected_last_run_at ?? null : null;
-      if (claiming) {
-        // JSON carries milliseconds; the column holds microseconds.
-        const claimed = await query(
-          `UPDATE schedules SET last_run_at = now()
-           WHERE id = $1 AND date_trunc('milliseconds', last_run_at) IS NOT DISTINCT FROM date_trunc('milliseconds', $2::timestamptz)
-           RETURNING id`,
-          [rows[0].id, expected]
-        );
-        if (!claimed.rows[0]) return reply.status(409).send({ error: 'Schedule was already fired for this occurrence', code: 'already_fired' });
-      }
-
-      const outcome = await fire(rows[0], {
+      const outcome = await claimAndFire(rows[0], {
         requested_by: req.body?.requested_by || req.actor?.id || 'scheduler',
-        trigger_source: 'schedule',
         environment_id: environmentId ?? null,
+        claiming,
+        expectedLastRunAt: claiming ? req.body!.expected_last_run_at ?? null : null,
       });
-      // Nothing was queued: give the claim back so the occurrence is not silently consumed.
-      if (claiming && outcome.status !== 202) {
-        await query(`UPDATE schedules SET last_run_at = $2::timestamptz WHERE id = $1`, [rows[0].id, expected]);
-      }
       if (outcome.status === 202) await audit(req, 'schedule.run', 'schedule', rows[0].id, outcome.queued || {});
       return reply.status(outcome.status).send(outcome.body);
     }

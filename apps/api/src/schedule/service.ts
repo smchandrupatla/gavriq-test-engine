@@ -331,6 +331,9 @@ export async function backfillNextRuns() {
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let ticking = false;
+/** Set by the API's own ticker (schedule-ticker.ts) so the plan page reports it truthfully. */
+let externalTicker = false;
+export function setTickerRunning(running: boolean) { externalTicker = running; }
 
 export function startScheduler(intervalMs = Number(process.env.SCHEDULER_TICK_MS || 30_000)) {
   if (timer || process.env.SCHEDULER_IN_PROCESS === 'false') return;
@@ -390,7 +393,7 @@ export async function executionPlan(hours = 168, perSchedule = 48) {
 
   return {
     now: now.toISOString(), horizon: horizon.toISOString(), default_timezone: DEFAULT_TZ,
-    ticker: { in_process: process.env.SCHEDULER_IN_PROCESS !== 'false', running: Boolean(timer) },
+    ticker: { in_process: process.env.SCHEDULER_IN_PROCESS !== 'false', running: Boolean(timer) || externalTicker },
     schedules, upcoming: upcomingRuns.slice(0, 500), recent, defects,
   };
 }
