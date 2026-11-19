@@ -4,7 +4,8 @@
  * repository: one runnable case per test, exactly one.
  *
  *   tsx apps/api/src/import-sit-catalog.ts --env sand-bench-staging
- *   tsx apps/api/src/import-sit-catalog.ts --source <dir with sit/cases> [--dry-run]
+ *   tsx apps/api/src/import-sit-catalog.ts --source <dir with sit/cases> [--dry-run] [--keep-stale]
+ *   (--keep-stale adds and updates only; nothing is archived)
  *
  * The suite belongs to a commit of the application. `--env` reads it from the
  * exported source of the commit DEPLOYED on that environment (the folder
@@ -41,6 +42,8 @@ const opt = (name: string) => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const DRY_RUN = argv.includes('--dry-run');
+// Register and update what the source holds, but leave every other registration as it is.
+const KEEP_STALE = argv.includes('--keep-stale');
 
 class DryRun extends Error {
   constructor(public summary: { duplicates: number; stale: number }) {
@@ -195,7 +198,7 @@ async function main() {
 
     // Every other SIT registration that a run would still pick up (active or draft): a second
     // copy of a kept test, or a test the deployed suite no longer has.
-    const surplus = existing.filter((row: any) => !keep.has(row.id) && row.lifecycle !== 'archived' && row.lifecycle !== 'deprecated');
+    const surplus = KEEP_STALE ? [] : existing.filter((row: any) => !keep.has(row.id) && row.lifecycle !== 'archived' && row.lifecycle !== 'deprecated');
     const wanted = new Set(tests.map((t) => sitScriptFor(t.file, t.name)));
     const duplicates = surplus.filter((row: any) => { const i = identityOf(row); return i !== null && wanted.has(i); }).length;
     if (argv.includes('--list-stale')) {
