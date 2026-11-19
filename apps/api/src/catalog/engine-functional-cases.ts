@@ -1216,6 +1216,12 @@ C.push(
 // commit gate = cheap API shape checks; release gate = cross-endpoint
 // contracts gating a release.
 // ---------------------------------------------------------------------
+/** Stop the run a case queued, whatever number of executions it spread over. Safe to repeat: a run with nothing left to stop answers 200. */
+const CANCEL_RUN = (runVar: string) => POST(`/api/v1/runs/{{${runVar}}}/cancel`, {
+  body: {}, expected_status: [200, 404], skip_if_missing: [runVar],
+  description: 'cancel the run this case queued',
+});
+
 C.push(
   {
     key: 'TE-CG-API-RUNS-SCOPE-TYPES',
@@ -1227,12 +1233,13 @@ C.push(
     steps: [
       { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', headers: { 'content-type': 'application/json' },
         body: { application: 'gavriq-test-engine', environment: 'engine-local', scope: { test_types: ['smoke'] }, trigger_source: 'commit-gate' },
-        expected_status: 202,
+        expected_status: 202, save: { cg_run: 'data.run_id' },
         expect_json: [{ path: 'data.run_id', exists: true }, { path: 'data.total_cases', min: 1 }],
         description: 'POST /runs with scope.test_types' },
     ],
+    cleanupSteps: [CANCEL_RUN('cg_run')],
     tags: ['commit-gate', 'test-engine', 'api', 'scope-resolver'],
-    dataProfile: { profile: 'write-once', data: 'POST /api/v1/runs with scope.test_types=["smoke"].', source: 'Hand-crafted.' },
+    dataProfile: { profile: 'atomic', data: 'POST /api/v1/runs with scope.test_types=["smoke"]; the queued run is cancelled afterwards.', source: 'Hand-crafted.' },
     expected: 'HTTP 202 with run_id + total_cases >= 1.',
   },
   {
@@ -1245,12 +1252,13 @@ C.push(
     steps: [
       { action: 'request', method: 'POST', url: '{{engine}}/api/v1/runs', headers: { 'content-type': 'application/json' },
         body: { application: 'gavriq-test-engine', environment: 'engine-local', trigger_source: 'commit-gate' },
-        expected_status: 202,
+        expected_status: 202, save: { cg_run: 'data.run_id' },
         expect_json: [{ path: 'data.run_id', exists: true }, { path: 'data.total_cases', min: 1 }],
         description: 'POST /runs with no scope' },
     ],
+    cleanupSteps: [CANCEL_RUN('cg_run')],
     tags: ['commit-gate', 'test-engine', 'api', 'scope-resolver'],
-    dataProfile: { profile: 'write-once', data: 'POST /api/v1/runs without a scope.', source: 'Hand-crafted.' },
+    dataProfile: { profile: 'atomic', data: 'POST /api/v1/runs without a scope; the queued run is cancelled afterwards.', source: 'Hand-crafted.' },
     expected: 'HTTP 202 with run_id + total_cases >= 1.',
   },
   {
@@ -1319,8 +1327,9 @@ C.push(
         expect_json: [{ path: 'data.0.total', min: 1 }, { path: 'data.0.executions', min: 1 }, { path: 'data.0.id', exists: true }],
         description: 'row aggregates total + executions + id' },
     ],
+    cleanupSteps: [CANCEL_RUN('rg_run')],
     tags: ['release-gate', 'test-engine', 'integration', 'run-groups'],
-    dataProfile: { profile: 'read-after-write', data: 'POST /runs → GET /ui/run-groups.', source: 'Hand-crafted.' },
+    dataProfile: { profile: 'atomic', data: 'POST /runs → GET /ui/run-groups; the queued run is cancelled afterwards.', source: 'Hand-crafted.' },
     expected: 'The grouped row has aggregate counts without client iteration.',
   }
 );

@@ -161,6 +161,27 @@ describe('Test Engine self-test catalogue', () => {
     }
   });
 
+  // A run the case starts queues real executions on the target; left there, they
+  // fill the queue (the isolated cases then skip) or, on a live engine, get
+  // claimed by a worker. Dry runs and requests that are refused queue nothing.
+  it('cancels every run it starts on the engine', () => {
+    const problems: string[] = [];
+    for (const c of ENGINE_CASES) {
+      if (c.method !== 'http') continue;
+      const cleanup = ((c as any).cleanupSteps || []) as Step[];
+      for (const [i, step] of stepsOf(c).entries()) {
+        if (step.action !== 'request' || String(step.method || 'GET').toUpperCase() !== 'POST') continue;
+        if (!/^\{\{engine\}\}\/api\/v1\/(runs|executions\/run-all)(\?|$)/.test(String(step.url || ''))) continue;
+        if (step.precondition || step.body?.dry_run === true) continue;
+        const statuses = (Array.isArray(step.expected_status) ? step.expected_status : [step.expected_status]) as number[];
+        if (!statuses.every((s) => s >= 200 && s < 300)) continue;
+        const cancelled = [...stepsOf(c), ...cleanup].some((s) => /\/(runs|executions)\/\{\{[^}]+\}\}\/cancel$/.test(String(s.url || '')));
+        if (!cancelled) problems.push(`${c.key} step ${i + 1}: starts a run and never cancels it`);
+      }
+    }
+    assert.deepEqual(problems, []);
+  });
+
   it('never calls the routes that would disturb a shared engine', () => {
     const forbidden = ['/api/v1/ops/seed-sandbench', '/api/v1/executions/cancel-all', '/api/v1/evidence/prune', '/api/v1/sit-runs'];
     for (const c of ENGINE_CASES) {
