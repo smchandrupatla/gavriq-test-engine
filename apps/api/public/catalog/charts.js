@@ -268,5 +268,96 @@ const Charts = (() => {
     });
   }
 
-  return { stacked, rate, hbars };
+  /**
+   * Performance run, per time window (buckets from the worker: { t_s, requests, errors, latency_p50_ms, latency_p95_ms }).
+   *   latency     p50 and p95 response time over the run (lines, ms)
+   *   throughput  requests per window (columns), with the failed share in the fail colour
+   * Windows with no requests leave a gap in the latency lines.
+   */
+  const P95 = '#e0ab52';
+  function windowOf(b) { return b.length > 1 ? (b[1].t_s - b[0].t_s) || 1 : 1; }
+  function crosshair(host, svg, b, cx, pw, ph, rowsOf) {
+    const cross = node('line', { y1: PAD.t, y2: PAD.t + ph, class: 'cross', visibility: 'hidden' }, svg);
+    const overlay = node('rect', { x: PAD.l, y: PAD.t, width: pw, height: ph, class: 'hit', tabindex: 0, 'aria-label': 'Use left and right arrow keys to step through time windows.' }, svg);
+    let cur = b.length - 1;
+    const show = (i) => {
+      cross.setAttribute('visibility', 'visible');
+      cross.setAttribute('x1', cx(i));
+      cross.setAttribute('x2', cx(i));
+      showTip(host, cx(i), PAD.t, `${b[i].t_s}s into the run`, rowsOf(b[i]));
+    };
+    overlay.addEventListener('pointermove', (e) => {
+      const x = e.clientX - svg.getBoundingClientRect().left;
+      cur = b.reduce((best, _p, j) => (Math.abs(cx(j) - x) < Math.abs(cx(best) - x) ? j : best), 0);
+      show(cur);
+    });
+    overlay.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(host); });
+    overlay.addEventListener('focus', () => show(cur));
+    overlay.addEventListener('blur', () => { cross.setAttribute('visibility', 'hidden'); hideTip(host); });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      cur = Math.min(b.length - 1, Math.max(0, cur + (e.key === 'ArrowRight' ? 1 : -1)));
+      show(cur);
+    });
+  }
+  function timeLabels(svg, b, cx, pw) {
+    const step = Math.max(1, Math.ceil((b.length * 40) / pw));
+    for (let i = b.length - 1; i >= 0; i -= step) label(svg, cx(i), H - 6, b[i].t_s + 's');
+  }
+
+  function latency(host, b) {
+    const { svg, w, pw, ph } = frame(host, `Response time over ${b.length} time windows`);
+    const max = niceMax(Math.max(1, ...b.map((x) => (x.requests ? x.latency_p95_ms : 0))));
+    const y = (v) => PAD.t + ph - (v / max) * ph;
+    const cx = (i) => PAD.l + (b.length <= 1 ? pw / 2 : (pw * i) / (b.length - 1));
+    yAxis(svg, w, [0, max / 2, max], y, (v) => v + 'ms');
+    const path = (key) => {
+      let d = '', pen = false;
+      b.forEach((x, i) => {
+        if (!x.requests) { pen = false; return; }
+        d += (pen ? 'L' : 'M') + cx(i).toFixed(1) + ',' + y(x[key]).toFixed(1);
+        pen = true;
+      });
+      return d;
+    };
+    const p95 = node('path', { d: path('latency_p95_ms'), class: 'line' }, svg);
+    p95.style.stroke = P95;
+    node('path', { d: path('latency_p50_ms'), class: 'line' }, svg);
+    const lastIdx = b.map((x) => x.requests > 0).lastIndexOf(true);
+    if (lastIdx >= 0) {
+      node('circle', { cx: cx(lastIdx), cy: y(b[lastIdx].latency_p50_ms), r: 4, class: 'dot' }, svg);
+      label(svg, cx(lastIdx) + 8, y(b[lastIdx].latency_p50_ms) + 4, b[lastIdx].latency_p50_ms + 'ms', 'start', 'end-label');
+    }
+    timeLabels(svg, b, cx, pw);
+    crosshair(host, svg, b, cx, pw, ph, (x) => x.requests
+      ? [[x.latency_p50_ms + 'ms', 'p50 (typical)', 'var(--viz-rate)'], [x.latency_p95_ms + 'ms', 'p95 (slowest 5%)', P95], [x.latency_max_ms + 'ms', 'slowest', 'var(--viz-other)']]
+      : [['—', 'no requests in this window', 'var(--viz-other)']]);
+  }
+
+  function throughput(host, b) {
+    const { svg, w, pw, ph } = frame(host, `Requests per second over ${b.length} time windows`);
+    const win = windowOf(b);
+    const rps = (x) => x.requests / win;
+    const max = niceMax(Math.max(1, ...b.map(rps)));
+    const y = (v) => PAD.t + ph - (v / max) * ph;
+    yAxis(svg, w, [0, max / 2, max], y, (v) => String(+v.toFixed(1)));
+    const band = pw / b.length, bw = Math.max(1, Math.min(BAR_MAX, band - GAP));
+    const cx = (i) => PAD.l + band * i + band / 2;
+    b.forEach((x, i) => {
+      if (!x.requests) return;
+      const total = rps(x), bad = x.errors / win, top = y(total), mid = y(total - bad), base = y(0);
+      const g = node('g', { class: 'col' }, svg);
+      // Succeeded sits on the baseline; the failed share stacks on top and takes the rounded end.
+      if (total > bad) node('path', { d: colPath(cx(i) - bw / 2, mid, bw, Math.max(base - mid, 0.5), !bad), fill: 'var(--viz-pass)', class: 'mark' }, g);
+      if (bad) node('path', { d: colPath(cx(i) - bw / 2, top, bw, Math.max(mid - top, 0.5), true), fill: 'var(--viz-fail)', class: 'mark' }, g);
+    });
+    timeLabels(svg, b, cx, pw);
+    crosshair(host, svg, b, cx, pw, ph, (x) => [
+      [+rps(x).toFixed(1), 'requests per second', 'var(--viz-pass)'],
+      [x.errors, 'failed', 'var(--viz-fail)'],
+    ]);
+  }
+
+  return { stacked, rate, hbars, latency, throughput };
 })();
