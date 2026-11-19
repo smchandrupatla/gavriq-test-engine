@@ -43,6 +43,7 @@ safety policy prohibits their category (`load`, `soak`, `chaos`, `security_scan`
 | Call | Returns |
 |------|---------|
 | `GET /api/v1/runs/:runId` | `state`, `verdict`, `exit_criteria`, totals, per-execution progress, `problems`, `missing_evidence` |
+| `POST /api/v1/runs/:runId/cancel` | Cancels the run's queued, preparing and running executions; answers `{ run_id, executions, cancelled }` (200 with `cancelled: 0` when nothing is left to stop, 404 for an unknown run) |
 | `GET /api/v1/runs/:runId/evidence` | Every case with its evidence items: type, size, SHA-256, download URL |
 | `GET /api/v1/runs?application=&environment=` | Recent runs |
 

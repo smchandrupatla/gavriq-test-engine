@@ -6,6 +6,7 @@
  *   GET  /api/v1/runs                 recent runs (filter by application / environment)
  *   GET  /api/v1/runs/:runId          state, verdict and exit criteria of a run
  *   GET  /api/v1/runs/:runId/evidence evidence manifest of a run
+ *   POST /api/v1/runs/:runId/cancel   cancel the run's queued, preparing and running executions
  *
  * A run is a group of executions (one per suite) sharing metadata.run_group, the
  * same grouping /executions/run-all uses, so those groups resolve here as well;
@@ -606,6 +607,27 @@ export async function triggerRoutes(app: FastifyInstance) {
       };
     }
     return reply.send({ data: { ...summary, problems, missing_evidence: missingEvidence, sla: slaStatus } });
+  });
+
+  // Stops one run and nothing else (unlike /executions/cancel-all): only this run's
+  // executions that have not finished. A run with nothing left to stop answers 200
+  // with cancelled: 0, so a caller can call it again to clean up without branching.
+  app.post<{ Params: { runId: string } }>('/api/v1/runs/:runId/cancel', async (req, reply) => {
+    const run = await loadRun(req.params.runId);
+    if (!run) return reply.status(404).send({ error: 'Run not found' });
+    const ids = run.executions.filter((e: any) => ACTIVE.includes(e.status)).map((e: any) => e.id);
+    let cancelled = 0;
+    if (ids.length) {
+      const { rows } = await query(
+        `UPDATE executions SET status = 'cancelled', finished_at = now()
+         WHERE id = ANY($1::uuid[]) AND status IN ('queued','preparing','running')
+         RETURNING id`,
+        [ids]
+      );
+      cancelled = rows.length;
+    }
+    await audit(req, 'run.cancel', 'run', undefined, { run_id: req.params.runId, cancelled });
+    return reply.send({ data: { run_id: req.params.runId, executions: run.executions.length, cancelled } });
   });
 
   app.get<{ Params: { runId: string } }>('/api/v1/runs/:runId/evidence', async (req, reply) => {
