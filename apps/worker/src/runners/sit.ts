@@ -100,6 +100,17 @@ export function tapCounts(tap: string): { pass: number; fail: number; skipped: n
  * file mounts the staging exports) in a folder named after the first twelve
  * characters of the commit — the layout deploy/staging/deploy.mjs writes.
  */
+/**
+ * Where a SIT file runs from. Files named `*-te-*` are owned by this engine, not by the
+ * application under test, so a deployed commit's export never contains them: they run
+ * from the copy bundled with the worker (their lib/ imports resolve there too).
+ */
+export function sitBaseFor(sourceRoot: string | undefined, fileRel: string): string {
+  if (!sourceRoot) return root;
+  if (existsSync(path.join(sourceRoot, fileRel))) return sourceRoot;
+  return /-te-[^/]*.sit.ts$/.test(fileRel) && existsSync(path.join(root, fileRel)) ? root : sourceRoot;
+}
+
 export function sitSourceRoot(commit: unknown): string | undefined {
   if (typeof commit !== 'string' || commit.length < 12) return undefined;
   const base = process.env.SIT_SOURCES_DIR || path.join(root, 'sbe-src');
@@ -281,12 +292,12 @@ export async function runSit(input: SitRunInput): Promise<SitRunResult> {
     };
   }
 
-  const base = input.sourceRoot || root;
+  const base = sitBaseFor(input.sourceRoot, parsed.fileRel);
   const abs = path.join(base, parsed.fileRel);
   if (!existsSync(abs)) {
     return {
       status: 'failed',
-      message: `SIT file not found: ${parsed.fileRel}${input.sourceRoot ? ' in the suite of the deployed commit' : ''}`,
+      message: `SIT file not found: ${parsed.fileRel}${base !== root ? ' in the suite of the deployed commit' : ''}`,
       duration_ms: Date.now() - start,
       classification: 'script_problem',
     };
@@ -509,12 +520,12 @@ export async function runSitGroup(input: SitGroupInput): Promise<Map<string, Sit
     return results;
   };
 
-  const base = input.sourceRoot || root;
+  const base = sitBaseFor(input.sourceRoot, input.file);
   const abs = path.join(base, input.file);
   if (!existsSync(abs)) {
     return answerAll({
       status: 'failed',
-      message: `SIT file not found: ${input.file}${input.sourceRoot ? ' in the suite of the deployed commit' : ''}`,
+      message: `SIT file not found: ${input.file}${base !== root ? ' in the suite of the deployed commit' : ''}`,
       duration_ms: 0,
       classification: 'script_problem',
     });
