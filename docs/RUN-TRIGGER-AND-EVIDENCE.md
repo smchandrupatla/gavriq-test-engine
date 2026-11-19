@@ -106,7 +106,7 @@ POST /api/v1/schedules
 | `@hourly` `@daily` `@weekly` | Shorthands (`hourly`, `daily`, `weekly` also accepted) |
 | `every:30` | Every 30 minutes since the schedule last ran |
 
-Cron fields are read in `SCHEDULER_TZ` (default `UTC`); set it on the API and the scheduler alike.
+Cron fields are read in `SCHEDULER_TZ` (default `UTC`); set it on the API.
 A new cron schedule waits for its next matching minute; it does not fire on creation. Each firing is a
 run with `trigger_source: schedule` and the schedule's name as its reason.
 
@@ -118,8 +118,7 @@ run with `trigger_source: schedule` and the schedule's name as its reason.
 | `POST /api/v1/schedules/:id/run` | Fire now (optional `environment` override) |
 | `POST /api/v1/schedules/trigger {event, environment?}` | Fire every schedule bound to an event, e.g. from a deploy hook |
 
-The poller (`npm run start:scheduler`, compose service `scheduler`) checks every minute and fires what is due
-through `POST /api/v1/schedules/:id/run`; a poller that was down catches up on a missed firing once.
+The API itself checks every 30 seconds (`SCHEDULER_TICK_MS`) and fires what is due; an engine that was down catches up on a missed firing once.
 
 ## Evidence each runner produces
 
@@ -166,11 +165,12 @@ they appear. Typed input in browser steps is logged by length only. Bodies are c
 | `EVIDENCE_MAX_BYTES` | API | `5242880` | Largest single evidence file |
 | `TRIGGER_API_KEYS` | API | unset | `name:key,name:key`; a caller sending `X-Api-Key` acts as `app:<name>` with the `automation_agent` role. Keys under 16 characters are ignored |
 | `EVIDENCE_RETENTION_DAYS` | API | `0` | Evidence older than this is deleted daily (files first, then rows); `0` keeps everything. `POST /api/v1/evidence/prune {older_than_days}` runs it on demand |
-| `SCHEDULER_TZ` | API, scheduler | `UTC` | Time zone cron fields are read in |
-| `SCHEDULER_POLL_MS` | scheduler | `60000` | How often the poller checks for due schedules |
+| `SCHEDULER_TZ` | API | `UTC` | Time zone cron fields are read in |
+| `SCHEDULER_TICK_MS` | API | `30000` | How often the API checks for due schedules |
+| `SCHEDULER_IN_PROCESS` | API | on | Set `false` to stop this API from firing schedules |
 
 In `compose.yaml` these come from `.env` (`EVIDENCE_GATE`, `EVIDENCE_RETENTION_DAYS`, `SCHEDULER_TZ`,
-`TRIGGER_API_KEYS`); the `scheduler` service runs the poller beside the API. Set `COMPOSE_PROFILES=workers`
+`TRIGGER_API_KEYS`). Set `COMPOSE_PROFILES=workers`
 in `.env` on a machine that should always have a worker.
 
 ## Deploy hook

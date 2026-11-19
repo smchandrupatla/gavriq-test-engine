@@ -11,7 +11,7 @@ Sand Bench catalogue against Sand Bench staging.
 | Source | working tree, uncommitted edits included | `git archive` of a pinned commit |
 | Engine (API + console + SIT console) | http://127.0.0.1:8797 | http://127.0.0.1:18797 |
 | Worker | yes — it runs the tests | none — it is the target, not a runner |
-| Scheduler | polls every 60 s | polls every 15 s |
+| Scheduler (in the API) | ticks every 30 s | ticks every 15 s |
 | Database | its own, not published | its own, not published |
 | Evidence gate | `enforce` | `enforce` |
 | Engine environment key | `engine-local` | `engine-staging` |

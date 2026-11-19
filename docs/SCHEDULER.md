@@ -47,7 +47,7 @@ The plan lists every upcoming firing in the next 24 hours, 7 days or 30 days, gr
 
 ## How it ticks
 
-The API ticks in-process every 30 s (`SCHEDULER_TICK_MS`). Each due schedule is re-checked under a row lock before it fires, so several API replicas can tick safely. To tick from a dedicated process instead, set `SCHEDULER_IN_PROCESS=false` on the API and run `npm run start:scheduler`. Timezones default to `SCHEDULER_TZ`, or else the server's zone.
+The API ticks in-process every 30 s (`SCHEDULER_TICK_MS`); there is no separate scheduler process. Each due schedule is claimed with an atomic compare-and-set on `last_run_at` before it fires, so several API replicas can tick safely and one occurrence queues one run. `SCHEDULER_IN_PROCESS=false` stops this API from firing schedules (use it on replicas that should not). Timezones default to `SCHEDULER_TZ`, or else the server's zone.
 
 ## API
 

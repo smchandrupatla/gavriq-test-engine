@@ -1,11 +1,10 @@
 /**
  * In-process schedule ticker: every SCHEDULER_TICK_MS (default 30 s) the API
- * checks the enabled schedules and fires each one that is due, with the same
- * rules and the same atomic claim as the standalone poller (scheduler.ts), so
- * the two can run together without queueing a run twice.
+ * checks the enabled schedules and fires each one that is due. Each occurrence
+ * is claimed with an atomic compare-and-set on last_run_at (claimAndFire), so
+ * several API replicas can tick together without queueing a run twice.
  *
- * Set SCHEDULER_IN_PROCESS=false to turn it off, e.g. when only the standalone
- * poller should fire schedules.
+ * Set SCHEDULER_IN_PROCESS=false to stop this API from firing schedules.
  */
 import { query } from './db/client.js';
 import { defaultTimeZone, isDue } from './cron.js';

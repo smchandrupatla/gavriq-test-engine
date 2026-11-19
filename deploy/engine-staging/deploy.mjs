@@ -31,7 +31,7 @@ const root = path.resolve(here, '../..');
 const PROJECT = 'gavriq-test-engine-staging';
 const ENV_KEY = 'engine-staging';
 const APP_KEY = 'gavriq-test-engine';
-const SERVICES = ['sit-console-db', 'test-engine', 'scheduler'];
+const SERVICES = ['sit-console-db', 'test-engine'];
 const KEEP_SOURCES = 2;
 
 const home = path.resolve(process.env.ENGINE_STAGING_HOME || path.join(root, '../gavriq-test-engine-staging'));
