@@ -575,6 +575,7 @@ export async function uiRoutes(app: FastifyInstance) {
                 er.id, er.test_case_id, er.status, er.duration_ms, er.message, er.classification, er.remarks, er.verdict,
                 er.started_at, COALESCE(er.finished_at, er.created_at) AS finished_at,
                 er.execution_id,
+                CASE WHEN jsonb_typeof(er.metrics->'timeseries') = 'array' THEN er.metrics END AS metrics,
                 (SELECT count(*)::int FROM evidence ev WHERE ev.execution_result_id = er.id) AS evidence_count
          FROM execution_results er
          WHERE er.execution_id = ANY($1::uuid[])
