@@ -23,6 +23,7 @@ import { analyticsRoutes } from './routes/analytics.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { scheduleRoutes } from './routes/schedules.js';
 import { schedulerRoutes } from './routes/scheduler.js';
+import { startScheduleTicker } from './schedule-ticker.js';
 import { buildStatusRoutes } from './routes/build-status.js';
 import { metaRoutes } from './routes/meta.js';
 import { evidenceRoutes } from './routes/evidence.js';
@@ -284,6 +285,7 @@ async function main() {
   await app.register(securityScanRoutes);
 
   await app.listen({ port, host });
+  startScheduleTicker();
 
   // Carry artefacts an older engine left as files (LEGACY_EVIDENCE_DIR) into the database.
   importLegacyEvidenceFiles()
