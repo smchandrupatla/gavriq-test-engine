@@ -179,14 +179,22 @@ function present(s: any, names: Map<string, string>) {
   let cron_description: string | null = null;
   try { cron_description = s.cron_expression ? describeCron(s.cron_expression) : null; } catch { /* invalid legacy row */ }
   const target = targetOf(s);
-  return { ...s, target, target_description: describeTarget(target, names), cron_description };
+  // An application schedule has no case-level target: it runs the whole application on its environment.
+  const target_description = !target && s.application_key
+    ? `Application ${s.application_key}${s.environment_key ? ` on ${s.environment_key}` : ''}`
+    : describeTarget(target, names);
+  return { ...s, target, target_description, cron_description };
 }
 
 export async function listSchedules() {
   const [{ rows }, names] = await Promise.all([
     query(
-      `SELECT s.*, e.key AS last_execution_key, e.status::text AS last_execution_status
-         FROM schedules s LEFT JOIN executions e ON e.id = s.last_execution_id
+      `SELECT s.*, e.key AS last_execution_key, e.status::text AS last_execution_status,
+              a.key AS application_key, env.key AS environment_key
+         FROM schedules s
+         LEFT JOIN executions e ON e.id = s.last_execution_id
+         LEFT JOIN applications a ON a.id = s.application_id
+         LEFT JOIN environments env ON env.id = s.environment_id
         ORDER BY s.enabled DESC, s.next_run_at NULLS LAST, s.name`
     ),
     suiteNames(),

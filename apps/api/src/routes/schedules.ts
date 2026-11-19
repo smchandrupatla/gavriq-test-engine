@@ -180,6 +180,73 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
   return { status: 202, body: { data: exec.rows[0], message: 'Execution queued from schedule' } };
 }
 
+export type FiringSummary = {
+  outcome: 'queued' | 'skipped_empty' | 'error';
+  case_count: number;
+  execution_id: string | null;
+  message: string | null;
+};
+
+/** What the Execution Plan shows about one firing, from whatever fire() answered with. */
+export function summarizeFiring(o: { status: number; body?: any; queued?: any }): FiringSummary {
+  const ok = o.status >= 200 && o.status < 300;
+  if (!ok) {
+    return {
+      outcome: o.status === 400 ? 'skipped_empty' : 'error',
+      case_count: 0,
+      execution_id: null,
+      message: String(o.body?.error ?? `HTTP ${o.status}`).slice(0, 500),
+    };
+  }
+  if (o.queued) {
+    const executions: any[] = Array.isArray(o.body?.data?.executions) ? o.body.data.executions : [];
+    return {
+      outcome: 'queued',
+      case_count: Number(o.queued.total_cases) || 0,
+      execution_id: executions[0]?.id ?? null,
+      message: executions.length > 1 ? `${executions.length} executions in run ${o.queued.run_id}` : null,
+    };
+  }
+  const exec = o.body?.data;
+  if (exec?.id && Array.isArray(exec.test_case_ids)) {
+    return { outcome: 'queued', case_count: exec.test_case_ids.length, execution_id: exec.id, message: null };
+  }
+  // A deployment or a cycle run was queued, or the environment is down and the run follows its deploy.
+  return { outcome: 'queued', case_count: 0, execution_id: null, message: String(o.body?.message ?? 'Deployment queued; the run follows when it succeeds').slice(0, 500) };
+}
+
+/** Log one firing for the Execution Plan and keep the schedule's "last run" columns current. Never throws. */
+async function recordFiring(s: any, trigger: 'schedule' | 'manual' | 'event', requestedBy: string, o: { status: number; body?: any; queued?: any }) {
+  try {
+    const f = summarizeFiring(o);
+    if (f.outcome !== 'queued' && trigger === 'schedule') {
+      // A schedule that cannot fire is retried every tick: log the problem once, not every 30 seconds.
+      const last = await query(`SELECT outcome, message FROM schedule_runs WHERE schedule_id = $1 ORDER BY fired_at DESC LIMIT 1`, [s.id]);
+      if (last.rows[0]?.outcome === f.outcome && (last.rows[0]?.message ?? null) === f.message) return;
+    }
+    const { rows } = await query(
+      `SELECT (SELECT key FROM applications WHERE id = $1) AS application_key, (SELECT key FROM environments WHERE id = $2) AS environment_key`,
+      [s.application_id ?? null, s.environment_id ?? null]
+    );
+    const target = s.application_id
+      ? { scope: 'application', application: rows[0]?.application_key ?? s.application_id, environment: rows[0]?.environment_key ?? s.environment_id ?? null }
+      : s.test_suite_id && !(s.test_case_ids || []).length
+        ? { scope: 'suites', suite_ids: [s.test_suite_id] }
+        : { scope: 'cases', case_ids: s.test_case_ids || [] };
+    await query(
+      `INSERT INTO schedule_runs (schedule_id, trigger, target, case_count, execution_id, outcome, requested_by, message)
+       VALUES ($1,$2,$3::jsonb,$4,$5,$6,$7,$8)`,
+      [s.id, trigger, JSON.stringify(target), f.case_count, f.execution_id, f.outcome, requestedBy.slice(0, 120), f.message]
+    );
+    await query(
+      `UPDATE schedules SET last_outcome = $2, last_execution_id = COALESCE($3::uuid, last_execution_id) WHERE id = $1`,
+      [s.id, f.outcome, f.execution_id]
+    );
+  } catch (err) {
+    console.warn(`[scheduler] could not record the firing of "${s.name}":`, (err as Error).message);
+  }
+}
+
 /**
  * Fire one schedule, optionally claiming the occurrence first.
  *
@@ -213,6 +280,7 @@ export async function claimAndFire(
   if (opts.claiming && outcome.status !== 202) {
     await query(`UPDATE schedules SET last_run_at = $2::timestamptz WHERE id = $1`, [s.id, expected]);
   }
+  await recordFiring(s, opts.claiming ? 'schedule' : 'manual', opts.requested_by, outcome);
   return { claimed: true, ...outcome };
 }
 
@@ -383,6 +451,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
           event,
           metadata: req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {},
         });
+        await recordFiring(s, 'event', req.actor?.id || 'event', outcome);
         if (outcome.status === 202) started.push({ schedule: s.name, ...(outcome.body.data || {}) });
         else skipped.push({ schedule: s.name, ...outcome.body });
       }
