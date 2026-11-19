@@ -9,6 +9,8 @@ import { Builder, type WebDriver } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import firefox from "selenium-webdriver/firefox.js";
 import edge from "selenium-webdriver/edge.js";
+import os from "node:os";
+import path from "node:path";
 import type { SeleniumBaselineConfig } from "./config.js";
 
 export interface DriverFactoryOptions {
@@ -68,7 +70,7 @@ export async function createDriver(options?: DriverFactoryOptions): Promise<WebD
     baseUrl: process.env.TARGET_BASE_URL || 'http://localhost:8001',
     timeoutMs: 15000,
     locatorStrategy: 'css',
-    reportingDir: './evidence/selenium-baseline',
+    reportingDir: path.join(os.tmpdir(), 'gte-selenium-baseline'),
     browser,
     headless,
     windowWidth,

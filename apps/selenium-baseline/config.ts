@@ -5,6 +5,9 @@
  * All values are sourced from environment variables with sensible defaults.
  */
 
+import os from 'node:os';
+import path from 'node:path';
+
 export type LocatorStrategy = 'xpath' | 'css' | 'id' | 'name' | 'link-text' | 'partial-link-text';
 
 export interface SeleniumBaselineConfig {
@@ -71,7 +74,7 @@ export function loadConfig(): SeleniumBaselineConfig {
     baseUrl: process.env.TARGET_BASE_URL || process.env.BASE_URL || 'http://localhost:8001',
     timeoutMs: parseIntEnv('SELENIUM_TIMEOUT_MS', 15000),
     locatorStrategy: (process.env.LOCATOR_STRATEGY as LocatorStrategy) || 'css',
-    reportingDir: process.env.REPORTING_DIR || './evidence/selenium-baseline',
+    reportingDir: process.env.REPORTING_DIR || path.join(os.tmpdir(), 'gte-selenium-baseline'),
     browser: (process.env.SELENIUM_BROWSER as 'chrome' | 'firefox' | 'edge') || 'chrome',
     headless: boolEnv('SELENIUM_HEADLESS', true),
     windowWidth: parseIntEnv('SELENIUM_WINDOW_WIDTH', 1440),

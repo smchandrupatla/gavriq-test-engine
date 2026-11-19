@@ -38,7 +38,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { reportRoutes } from './routes/reports.js';
 import { insightRoutes } from './routes/insights.js';
 import { registerEvidenceGate } from './evidence-gate.js';
-import { EVIDENCE_RETENTION_DAYS, pruneEvidence } from './evidence-store.js';
+import { EVIDENCE_RETENTION_DAYS, importLegacyEvidenceFiles, pruneEvidence } from './evidence-store.js';
 import { currentRunRetentionDays, pruneRuns } from './run-retention.js';
 import { defectRoutes } from './routes/defects.js';
 import { recordRoutes } from './routes/record.js';
@@ -284,6 +284,11 @@ async function main() {
   await app.register(securityScanRoutes);
 
   await app.listen({ port, host });
+
+  // Carry artefacts an older engine left as files (LEGACY_EVIDENCE_DIR) into the database.
+  importLegacyEvidenceFiles()
+    .then((n) => n && app.log.info({ imported: n }, 'legacy evidence files imported into the database'))
+    .catch((err) => app.log.warn({ err }, 'legacy evidence import failed'));
 
   // Evidence retention: once shortly after boot, then daily.
   if (EVIDENCE_RETENTION_DAYS > 0) {

@@ -23,7 +23,7 @@ TARGET_BASE_URL=http://myapp:8080 npm run selenium:baseline
 # With custom config via environment variables
 SELENIUM_TIMEOUT_MS=30000 \
 SELENIUM_BROWSER=chrome \
-REPORTING_DIR=./evidence/baseline \
+REPORTING_DIR=/tmp/baseline \
 npm run selenium:baseline
 ```
 
@@ -49,7 +49,7 @@ console.log(result.summary);
 | `SELENIUM_TIMEOUT_MS` | `15000` | Operation timeout in ms |
 | `SELENIUM_BROWSER` | `chrome` | Browser: chrome, firefox, edge |
 | `SELENIUM_HEADLESS` | `true` | Run headless |
-| `REPORTING_DIR` | `./evidence/selenium-baseline` | Screenshot output directory |
+| `REPORTING_DIR` | `<os temp>/gte-selenium-baseline` | Screenshot output directory |
 | `LOCATOR_STRATEGY` | `css` | Default locator strategy |
 | `MENU_CONTAINER_SELECTOR` | `.opsc-nav` | CSS selector for menu container |
 | `MENU_ITEM_SELECTOR` | `.opsc-navitem` | CSS selector for menu items |
