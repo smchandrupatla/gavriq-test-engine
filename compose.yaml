@@ -169,23 +169,6 @@ services:
     profiles:
       - workers
 
-  # Fires due schedules through the API (cron expressions in SCHEDULER_TZ).
-  scheduler:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: gavriq-test-engine:local
-    command: ["npx", "tsx", "apps/api/src/scheduler.ts"]
-    depends_on:
-      test-engine:
-        condition: service_healthy
-    environment:
-      TEST_ENGINE_API: http://test-engine:8787
-      WORKER_API_KEY: ${WORKER_API_KEY:-}
-      SCHEDULER_TZ: ${SCHEDULER_TZ:-UTC}
-      SCHEDULER_POLL_MS: "60000"
-    restart: unless-stopped
-
   sit:
     build:
       context: .

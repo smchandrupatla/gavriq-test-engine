@@ -56,7 +56,6 @@ npm run import:sit        # register sit/cases/*.sit.ts into the repository
 npm run docs:catalog      # regenerate docs/TEST-CASE-CATALOG.md from the live repository
 npm run start:api         # :8787
 npm run start:worker      # optional
-npm run start:scheduler   # optional
 npm run test:e2e          # with API running
 ```
 

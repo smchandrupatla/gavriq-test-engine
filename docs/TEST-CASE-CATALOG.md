@@ -1,4 +1,4 @@
-# Test Case Catalog
+﻿# Test Case Catalog
 
 > Generated from the live test repository at `http://127.0.0.1:8797` on 2026-11-16T01:51:10.923Z.
 > Regenerate with `npm run docs:catalog`. Every case listed here is registered,
@@ -4598,7 +4598,7 @@ Case lifecycle, suite membership, run planning, the worker protocol, schedules a
 
 ---
 
-#### TE-INT-SCHEDULER-DAEMON — Scheduler daemon fires a due schedule
+#### TE-INT-SCHEDULER-DAEMON — Scheduler fires a due schedule
 
 **Objective.** Create a schedule due immediately and wait for the scheduler process to queue a run for it, proving the scheduler is alive.
 

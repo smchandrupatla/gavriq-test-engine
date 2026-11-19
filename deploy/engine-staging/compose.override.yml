@@ -26,14 +26,10 @@ services:
       RBAC_ENABLED: "false"
       TRIGGER_API_KEYS: ""
       SCHEDULER_TZ: UTC
+      # The scheduler self-test waits for one tick; 30 s would double its run time.
+      SCHEDULER_TICK_MS: "15000"
       SIT_API_BASE: http://host.docker.internal:18787
       SIT_WEB_BASE: http://host.docker.internal:18080
       SIT_TESTHUB_BASE: http://host.docker.internal:18091
       SIT_DBVIEWER_BASE: http://host.docker.internal:18090
 
-  scheduler:
-    image: gavriq-test-engine-staging:${GTE_STAGING_TAG}
-    environment:
-      SCHEDULER_TZ: UTC
-      # The scheduler-daemon case waits for one poll; a minute would double its run time.
-      SCHEDULER_POLL_MS: "15000"

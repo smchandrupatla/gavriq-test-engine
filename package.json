@@ -11,7 +11,6 @@
     "start:api": "tsx apps/api/src/server.ts",
     "start:consolidated": "node scripts/consolidated-entrypoint.mjs",
     "start:worker": "tsx apps/worker/src/worker.ts",
-    "start:scheduler": "tsx apps/api/src/scheduler.ts",
     "migrate": "tsx apps/api/src/db/migrate.ts",
     "seed": "tsx apps/api/src/seed-realistic-catalog.ts",
     "seed:catalog": "tsx apps/api/src/seed-realistic-catalog.ts",

@@ -50,7 +50,7 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
   // "Stop after N runs" (schedule form). Count prior fires by distinct run_group
   // on executions tagged with this schedule_id, falling back to execution key
   // for the legacy case-id path that writes one row per fire. When the cap is
-  // reached, pause the schedule so the poller stops picking it up.
+  // reached, pause the schedule so the ticker stops picking it up.
   const maxFires = Number((scope as any).max_fires) || 0;
   if (maxFires > 0) {
     const { rows: countRows } = await query<{ n: string }>(
@@ -185,8 +185,8 @@ async function fire(s: any, opts: { requested_by: string; trigger_source: string
  *
  * `claiming` makes the claim a compare-and-set on last_run_at against
  * `expectedLastRunAt` (what the caller saw when it judged the schedule due), so
- * the in-process ticker, a standalone poller and overlapping polls queue one
- * run between them; the losers get `claimed: false` and nothing is queued. A
+ * the in-process ticker (on every API replica) and a caller of POST
+ * /schedules/:id/run that sends expected_last_run_at queue one run between them; the losers get `claimed: false` and nothing is queued. A
  * person pressing "Run now" does not claim and always fires.
  */
 export async function claimAndFire(
@@ -333,11 +333,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Fire a schedule now (the poller, a person, or a deploy hook).
+   * Fire a schedule now (a person, a deploy hook, or an external scheduler).
    *
-   * The poller sends `expected_last_run_at` — the last_run_at it saw when it
-   * judged the schedule due. The run is then claimed with a compare-and-set, so
-   * two overlapping polls (or two pollers) that both saw "due" queue one run,
+   * A caller driving its own schedule sends `expected_last_run_at` — the last_run_at it saw
+   * when it judged the schedule due. The run is then claimed with a compare-and-set, so
+   * two overlapping callers that both saw "due" queue one run,
    * not two; the loser gets 409. A person pressing "Run now" sends no such field
    * and always fires.
    */

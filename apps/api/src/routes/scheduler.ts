@@ -15,7 +15,7 @@ function fail(reply: FastifyReply, err: unknown) {
 /**
  * Scheduler page API: Run now, target preview, cron preview and the Execution Plan.
  * Cron schedules themselves stay in routes/schedules.ts and are fired by the
- * scheduler poller (apps/api/src/scheduler.ts), so no in-process ticker runs here.
+ * in-process ticker (schedule-ticker.ts).
  */
 export async function schedulerRoutes(app: FastifyInstance) {
   app.get('/api/v1/scheduler/options', async (_req, reply) => reply.send({ data: await schedulerOptions() }));
