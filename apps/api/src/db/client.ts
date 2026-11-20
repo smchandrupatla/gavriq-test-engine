@@ -24,17 +24,16 @@ export const pool = new Pool({
   connectionString: databaseUrl,
   max: Number(process.env.DB_POOL_MAX || 10),
   connectionTimeoutMillis: Number(process.env.DB_CONNECT_TIMEOUT_MS || 5000),
+  // Set search_path atomically in the connection startup packet (libpq's PGOPTIONS
+  // equivalent). A pool.on('connect') follow-up query races the caller's first query
+  // on the same freshly handed-out connection — pg currently serializes that silently
+  // with a "client already executing a query" deprecation warning, but it is not
+  // guaranteed to keep doing so.
+  options: `-c search_path=${PG_SCHEMA},public`,
 });
 
 pool.on('error', (err) => {
   console.error('[test-engine-db] idle client error', err.message);
-});
-
-/** Ensure every pooled client looks in the Test Engine schema first. */
-pool.on('connect', (client) => {
-  client
-    .query(`SET search_path TO ${quoteIdent(PG_SCHEMA)}, public`)
-    .catch((err) => console.warn('[test-engine-db] search_path set failed:', (err as Error).message));
 });
 
 function quoteIdent(name: string): string {
